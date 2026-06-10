@@ -7,14 +7,14 @@ import "time"
 // Event is one normalized action. JSON keys are short: the artifact holds
 // millions of these.
 type Event struct {
-	Seq       int       `json:"i"`            // order within source file — authoritative ordering
-	Time      time.Time `json:"t,omitempty"`  // advisory; some event types carry no timestamp
+	Seq       int       `json:"i"`           // order within source file — authoritative ordering
+	Time      time.Time `json:"t,omitempty"` // advisory; some event types carry no timestamp
 	Project   string    `json:"p"`
 	Session   string    `json:"s"`
-	Agent     string    `json:"a,omitempty"`  // subagent id; "" = main thread
+	Agent     string    `json:"a,omitempty"` // subagent id; "" = main thread
 	Sidechain bool      `json:"sc,omitempty"`
-	Kind      string    `json:"k"`            // tool | shell | prompt
-	Action    string    `json:"act"`          // tool name; for shell: normalized command
+	Kind      string    `json:"k"`   // tool | shell | prompt
+	Action    string    `json:"act"` // tool name; for shell: normalized command
 	Target    string    `json:"tgt,omitempty"`
 	Detail    string    `json:"d,omitempty"`  // raw command segment, truncated
 	Status    string    `json:"st,omitempty"` // ok | fail | none (no paired result)

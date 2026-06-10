@@ -25,17 +25,17 @@ var coarseTool = map[string]string{
 	"Grep": "search", "Glob": "search", "WebSearch": "search", "ToolSearch": "search",
 	"Edit": "edit", "Write": "edit", "NotebookEdit": "edit",
 	"Task": "agent", "Agent": "agent",
-	"WebFetch": "fetch",
+	"WebFetch":  "fetch",
 	"TodoWrite": "plan", "ExitPlanMode": "plan", "EnterPlanMode": "plan",
 	"AskUserQuestion": "ask",
-	"Skill": "skill", "SlashCommand": "skill",
+	"Skill":           "skill", "SlashCommand": "skill",
 }
 
 var coarseShell = map[string]string{
 	"go_test": "test", "go_build": "build", "go_vet": "lint", "make": "build",
 	"npm_test": "test", "npm_run": "build", "vitest": "test", "pytest": "test",
 	"golangci-lint": "lint",
-	"rg": "search", "grep": "search", "fd": "search", "find": "search",
+	"rg":            "search", "grep": "search", "fd": "search", "find": "search",
 	"cat": "read", "bat": "read", "head": "read", "tail": "read",
 	"ls": "read", "eza": "read", "tree": "read", "dtree": "read", "wc": "read", "jq": "read",
 }
