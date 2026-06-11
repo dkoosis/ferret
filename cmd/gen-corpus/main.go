@@ -128,19 +128,23 @@ func (g *gen) noise() {
 }
 
 func (g *gen) flush() error {
-	body := strings.Join(g.lines, "\n") + "\n"
-	if err := os.WriteFile(filepath.Join(g.projDir, g.session+".jsonl"), []byte(body), 0o600); err != nil {
-		return err
-	}
+	// Write the subagent file (the dependency) FIRST, then the session file
+	// that references it LAST. This keeps the two-artifact write rollback-safe:
+	// a subagent MkdirAll/WriteFile failure aborts before the session .jsonl
+	// exists, so no orphaned session referencing a missing subagent is left on
+	// disk to poison a consumer (ferret ingest -source cc) of the corpus.
 	if len(g.subLines) > 0 {
 		dir := filepath.Join(g.projDir, g.session, "subagents")
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
 		sub := strings.Join(g.subLines, "\n") + "\n"
-		return os.WriteFile(filepath.Join(dir, "agent-"+g.subAgent+".jsonl"), []byte(sub), 0o600)
+		if err := os.WriteFile(filepath.Join(dir, "agent-"+g.subAgent+".jsonl"), []byte(sub), 0o600); err != nil {
+			return err
+		}
 	}
-	return nil
+	body := strings.Join(g.lines, "\n") + "\n"
+	return os.WriteFile(filepath.Join(g.projDir, g.session+".jsonl"), []byte(body), 0o600)
 }
 
 // ---- archetypes ----
