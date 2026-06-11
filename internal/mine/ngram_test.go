@@ -6,7 +6,7 @@ func corpusFrom(streams [][]string) *Corpus {
 	c := &Corpus{}
 	intern := map[string]uint32{}
 	for _, toks := range streams {
-		var st []Tok
+		st := make([]Tok, 0, len(toks))
 		for i, t := range toks {
 			id, ok := intern[t]
 			if !ok {
@@ -25,8 +25,8 @@ func corpusFrom(streams [][]string) *Corpus {
 func TestNgramSupergramSuppression(t *testing.T) {
 	// edit→test→diff occurs 4x across 4 streams; its sub-bigrams should be
 	// suppressed because the trigram retains 100% of their count.
-	var streams [][]string
-	for i := 0; i < 4; i++ {
+	streams := make([][]string, 0, 4)
+	for range 4 {
 		streams = append(streams, []string{"x", "edit", "test", "diff", "y"})
 	}
 	c := corpusFrom(streams)

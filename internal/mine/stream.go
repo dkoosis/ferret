@@ -31,7 +31,7 @@ func (c *Corpus) Tokens(ids []uint32) []string {
 // Options control the cross-cutting stream transforms.
 type Options struct {
 	MarkFail    bool // append "!" to failed-action tokens
-	Collapse    bool // run-length collapse: read read read → read+
+	Collapse    bool // run-length collapse: read,read,read → read+
 	NoSidechain bool
 }
 
@@ -63,13 +63,7 @@ func Build(eventsPath string, l lens.Lens, opts Options) (*Corpus, error) {
 			c.Streams = append(c.Streams, nil)
 			c.StreamKeys = append(c.StreamKeys, key)
 		}
-		id, ok := intern[tok]
-		if !ok {
-			id = uint32(len(c.Vocab))
-			intern[tok] = id
-			c.Vocab = append(c.Vocab, tok)
-		}
-		c.Streams[si] = append(c.Streams[si], Tok{ID: id, Seq: ev.Seq})
+		c.Streams[si] = append(c.Streams[si], Tok{ID: c.intern(intern, tok), Seq: ev.Seq})
 		return nil
 	})
 	if err != nil {
@@ -82,8 +76,22 @@ func Build(eventsPath string, l lens.Lens, opts Options) (*Corpus, error) {
 	return c, nil
 }
 
+// intern returns the stable id for tok, growing the vocab on first sight.
+func (c *Corpus) intern(intern map[string]uint32, tok string) uint32 {
+	if id, ok := intern[tok]; ok {
+		return id
+	}
+	id := uint32(len(c.Vocab)) //nolint:gosec // vocab is distinct tokens; nowhere near 2^32
+	intern[tok] = id
+	c.Vocab = append(c.Vocab, tok)
+	return id
+}
+
 // collapse rewrites runs of an identical token (length ≥ 2) into a single
 // "tok+" token — the cheapest and most effective trivia suppressor.
+//
+// This is run-length encoding applied to token streams: Golomb, "Run-Length
+// Encodings", IEEE Trans. Information Theory 12(3), 1966.
 func (c *Corpus) collapse(intern map[string]uint32) {
 	plus := map[uint32]uint32{} // id → id of "tok+"
 	for si, st := range c.Streams {
@@ -94,19 +102,7 @@ func (c *Corpus) collapse(intern map[string]uint32) {
 				j++
 			}
 			if j-i >= 2 {
-				pid, ok := plus[st[i].ID]
-				if !ok {
-					name := c.Vocab[st[i].ID] + "+"
-					if existing, has := intern[name]; has {
-						pid = existing
-					} else {
-						pid = uint32(len(c.Vocab))
-						intern[name] = pid
-						c.Vocab = append(c.Vocab, name)
-					}
-					plus[st[i].ID] = pid
-				}
-				out = append(out, Tok{ID: pid, Seq: st[i].Seq})
+				out = append(out, Tok{ID: c.plusID(plus, intern, st[i].ID), Seq: st[i].Seq})
 			} else {
 				out = append(out, st[i])
 			}
@@ -114,4 +110,14 @@ func (c *Corpus) collapse(intern map[string]uint32) {
 		}
 		c.Streams[si] = out
 	}
+}
+
+// plusID returns (caching) the id of the "tok+" variant of id.
+func (c *Corpus) plusID(plus map[uint32]uint32, intern map[string]uint32, id uint32) uint32 {
+	if pid, ok := plus[id]; ok {
+		return pid
+	}
+	pid := c.intern(intern, c.Vocab[id]+"+")
+	plus[id] = pid
+	return pid
 }

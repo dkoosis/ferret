@@ -26,111 +26,147 @@ func NewBuilder() *Builder {
 	return &Builder{seen: map[uint64]struct{}{}, Stats: NewStats()}
 }
 
+// fileState is the per-transcript accumulator: events buffer plus the
+// tool_use → tool_result pairing maps.
+type fileState struct {
+	events   []*Event
+	pending  map[string][]*Event // tool_use id → events awaiting status
+	callTime map[string]time.Time
+	seq      int
+}
+
 // File processes one transcript and emits its events in file order.
 // Events are buffered until EOF because statuses (tool_result) arrive
 // after their tool_use; files are small enough (~5MB max) to hold.
 func (b *Builder) File(src transcript.Source, emit func(*Event)) error {
 	b.Stats.Files++
-	var events []*Event
-	pending := map[string][]*Event{} // tool_use id → events awaiting status
-	callTime := map[string]time.Time{}
-	seq := 0
+	st := &fileState{pending: map[string][]*Event{}, callTime: map[string]time.Time{}}
 
 	err := transcript.ReadLines(src.Path, func(line []byte) error {
-		seq++
+		st.seq++
 		b.Stats.Lines++
-		var probe transcript.Probe
-		if err := json.Unmarshal(line, &probe); err != nil {
-			b.Stats.DecodeErrs++ // truncated final line of a killed session, etc.
-			return nil
-		}
-		b.Stats.ByType[probe.Type]++
-		if probe.Type != "assistant" && probe.Type != "user" {
-			return nil
-		}
-		var raw transcript.Raw
-		if err := json.Unmarshal(line, &raw); err != nil {
-			b.Stats.DecodeErrs++
-			return nil
-		}
-		if raw.UUID != "" {
-			h := fnv.New64a()
-			h.Write([]byte(raw.UUID))
-			key := h.Sum64()
-			if _, dup := b.seen[key]; dup {
-				b.Stats.Deduped++
-				return nil
-			}
-			b.seen[key] = struct{}{}
-		}
-		ts, _ := time.Parse(time.RFC3339, raw.Timestamp)
-		if raw.Message == nil {
-			return nil
-		}
-
-		switch probe.Type {
-		case "assistant":
-			for _, blk := range raw.Message.Content {
-				if blk.Type != "tool_use" {
-					continue
-				}
-				evs := b.fromToolUse(src, &raw, blk, seq, ts)
-				events = append(events, evs...)
-				if blk.ID != "" {
-					pending[blk.ID] = evs
-					if !ts.IsZero() {
-						callTime[blk.ID] = ts
-					}
-				}
-			}
-		case "user":
-			sawResult := false
-			sawText := false
-			for _, blk := range raw.Message.Content {
-				switch blk.Type {
-				case "tool_result":
-					sawResult = true
-					status := StatusOK
-					if blk.IsError != nil && *blk.IsError {
-						status = StatusFail
-					}
-					for _, ev := range pending[blk.ToolUseID] {
-						ev.Status = status
-						if ct, ok := callTime[blk.ToolUseID]; ok && !ts.IsZero() {
-							ev.DurMS = ts.Sub(ct).Milliseconds()
-						}
-					}
-					delete(pending, blk.ToolUseID)
-					delete(callTime, blk.ToolUseID)
-				case "text":
-					if len(blk.Text) > 0 {
-						sawText = true
-					}
-				}
-			}
-			if sawText && !sawResult && !raw.IsMeta {
-				events = append(events, &Event{
-					Seq: seq, Time: ts,
-					Project: src.Project, Session: session(src, &raw), Agent: src.Agent,
-					Sidechain: raw.IsSidechain,
-					Kind:      KindPrompt, Action: "prompt",
-					Version: raw.Version,
-				})
-				b.Stats.Prompts++
-			}
-		}
+		b.consumeLine(src, st, line)
 		return nil
 	})
 	if err != nil {
 		return err
 	}
 
-	finish(events, b.Stats)
-	for _, ev := range events {
+	finish(st.events, b.Stats)
+	for _, ev := range st.events {
 		emit(ev)
 	}
-	b.Stats.Events += len(events)
+	b.Stats.Events += len(st.events)
 	return nil
+}
+
+// consumeLine decodes one transcript line and folds it into the file state.
+// Undecodable or irrelevant lines are counted and dropped.
+func (b *Builder) consumeLine(src transcript.Source, st *fileState, line []byte) {
+	var probe transcript.Probe
+	if err := json.Unmarshal(line, &probe); err != nil {
+		b.Stats.DecodeErrs++ // truncated final line of a killed session, etc.
+		return
+	}
+	b.Stats.ByType[probe.Type]++
+	if probe.Type != "assistant" && probe.Type != "user" {
+		return
+	}
+	var raw transcript.Raw
+	if err := json.Unmarshal(line, &raw); err != nil {
+		b.Stats.DecodeErrs++
+		return
+	}
+	if b.isDuplicate(raw.UUID) {
+		return
+	}
+	if raw.Message == nil {
+		return
+	}
+	ts, _ := time.Parse(time.RFC3339, raw.Timestamp)
+	switch probe.Type {
+	case "assistant":
+		b.assistantLine(src, st, &raw, ts)
+	case "user":
+		b.userLine(src, st, &raw, ts)
+	}
+}
+
+// isDuplicate dedups by message UUID across the whole ingest: resumed and
+// forked sessions copy history into new files.
+func (b *Builder) isDuplicate(uuid string) bool {
+	if uuid == "" {
+		return false
+	}
+	h := fnv.New64a()
+	h.Write([]byte(uuid))
+	key := h.Sum64()
+	if _, dup := b.seen[key]; dup {
+		b.Stats.Deduped++
+		return true
+	}
+	b.seen[key] = struct{}{}
+	return false
+}
+
+// assistantLine extracts tool_use blocks and parks them pending a status.
+func (b *Builder) assistantLine(src transcript.Source, st *fileState, raw *transcript.Raw, ts time.Time) {
+	for _, blk := range raw.Message.Content {
+		if blk.Type != "tool_use" {
+			continue
+		}
+		evs := b.fromToolUse(src, raw, blk, st.seq, ts)
+		st.events = append(st.events, evs...)
+		if blk.ID != "" {
+			st.pending[blk.ID] = evs
+			if !ts.IsZero() {
+				st.callTime[blk.ID] = ts
+			}
+		}
+	}
+}
+
+// userLine resolves tool_result statuses and detects genuine user prompts.
+func (b *Builder) userLine(src transcript.Source, st *fileState, raw *transcript.Raw, ts time.Time) {
+	sawResult := false
+	sawText := false
+	for _, blk := range raw.Message.Content {
+		switch blk.Type {
+		case "tool_result":
+			sawResult = true
+			st.resolve(blk, ts)
+		case "text":
+			if len(blk.Text) > 0 {
+				sawText = true
+			}
+		}
+	}
+	if sawText && !sawResult && !raw.IsMeta {
+		st.events = append(st.events, &Event{
+			Seq: st.seq, Time: ts,
+			Project: src.Project, Session: session(src, raw), Agent: src.Agent,
+			Sidechain: raw.IsSidechain,
+			Kind:      KindPrompt, Action: "prompt",
+			Version: raw.Version,
+		})
+		b.Stats.Prompts++
+	}
+}
+
+// resolve applies a tool_result's status and latency to its pending events.
+func (st *fileState) resolve(blk transcript.Block, ts time.Time) {
+	status := StatusOK
+	if blk.IsError != nil && *blk.IsError {
+		status = StatusFail
+	}
+	for _, ev := range st.pending[blk.ToolUseID] {
+		ev.Status = status
+		if ct, ok := st.callTime[blk.ToolUseID]; ok && !ts.IsZero() {
+			ev.DurMS = ts.Sub(ct).Milliseconds()
+		}
+	}
+	delete(st.pending, blk.ToolUseID)
+	delete(st.callTime, blk.ToolUseID)
 }
 
 // finish resolves unpaired statuses and marks retries, in file order.

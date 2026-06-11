@@ -7,22 +7,20 @@ import (
 	"github.com/dkoosis/ferret/internal/event"
 )
 
-func init() {
-	register(coarse{})
-	register(tool{})
-	register(target{})
-	register(exact{})
-}
-
 // ---- coarse: behavior classes (read, search, edit, test, vcs, agent…) ----
 
 type coarse struct{}
 
 func (coarse) Name() string { return "coarse" }
 
+const (
+	clsRead   = "read"
+	clsSearch = "search"
+)
+
 var coarseTool = map[string]string{
-	"Read": "read", "NotebookRead": "read",
-	"Grep": "search", "Glob": "search", "WebSearch": "search", "ToolSearch": "search",
+	"Read": clsRead, "NotebookRead": clsRead,
+	"Grep": clsSearch, "Glob": clsSearch, "WebSearch": clsSearch, "ToolSearch": clsSearch,
 	"Edit": "edit", "Write": "edit", "NotebookEdit": "edit",
 	"Task": "agent", "Agent": "agent",
 	"WebFetch":  "fetch",
@@ -35,9 +33,9 @@ var coarseShell = map[string]string{
 	"go_test": "test", "go_build": "build", "go_vet": "lint", "make": "build",
 	"npm_test": "test", "npm_run": "build", "vitest": "test", "pytest": "test",
 	"golangci-lint": "lint",
-	"rg":            "search", "grep": "search", "fd": "search", "find": "search",
-	"cat": "read", "bat": "read", "head": "read", "tail": "read",
-	"ls": "read", "eza": "read", "tree": "read", "dtree": "read", "wc": "read", "jq": "read",
+	"rg":            clsSearch, "grep": clsSearch, "fd": clsSearch, "find": clsSearch,
+	"cat": clsRead, "bat": clsRead, "head": clsRead, "tail": clsRead,
+	"ls": clsRead, "eza": clsRead, "tree": clsRead, "dtree": clsRead, "wc": clsRead, "jq": clsRead,
 }
 
 func (coarse) Token(e *event.Event) (string, bool) {

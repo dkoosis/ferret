@@ -17,37 +17,46 @@ type Gram struct {
 }
 
 // CountGrams counts every n-gram for n in [minN, maxN] across all streams.
+//
+// Sliding-window n-gram counting over event sequences is the serial-episode
+// special case of frequent episode discovery: Mannila, Toivonen & Verkamo,
+// "Discovery of Frequent Episodes in Event Sequences", Data Mining and
+// Knowledge Discovery 1(3), 1997. N-gram statistics over symbol streams trace
+// to Shannon, "A Mathematical Theory of Communication", Bell Syst. Tech. J.
+// 27, 1948.
 func CountGrams(c *Corpus, minN, maxN int) map[string]*Gram {
 	grams := map[string]*Gram{}
-	var key []byte
 	for si, st := range c.Streams {
 		for n := minN; n <= maxN; n++ {
-			if len(st) < n {
-				continue
-			}
-			for i := 0; i+n <= len(st); i++ {
-				key = key[:0]
-				for j := i; j < i+n; j++ {
-					key = binary.LittleEndian.AppendUint32(key, st[j].ID)
-				}
-				g, ok := grams[string(key)]
-				if !ok {
-					ids := make([]uint32, n)
-					for j := range ids {
-						ids[j] = st[i+j].ID
-					}
-					g = &Gram{IDs: ids, lastStream: -1, ExStream: si, ExSeq: st[i].Seq}
-					grams[string(key)] = g
-				}
-				g.Count++
-				if g.lastStream != si {
-					g.Sessions++
-					g.lastStream = si
-				}
-			}
+			countStream(grams, st, si, n)
 		}
 	}
 	return grams
+}
+
+// countStream counts every length-n window of one stream into grams.
+func countStream(grams map[string]*Gram, st []Tok, si, n int) {
+	var key []byte
+	for i := 0; i+n <= len(st); i++ {
+		key = key[:0]
+		for j := i; j < i+n; j++ {
+			key = binary.LittleEndian.AppendUint32(key, st[j].ID)
+		}
+		g, ok := grams[string(key)]
+		if !ok {
+			ids := make([]uint32, n)
+			for j := range ids {
+				ids[j] = st[i+j].ID
+			}
+			g = &Gram{IDs: ids, lastStream: -1, ExStream: si, ExSeq: st[i].Seq}
+			grams[string(key)] = g
+		}
+		g.Count++
+		if g.lastStream != si {
+			g.Sessions++
+			g.lastStream = si
+		}
+	}
 }
 
 // Filter applies the noise floor:
@@ -55,23 +64,15 @@ func CountGrams(c *Corpus, minN, maxN int) map[string]*Gram {
 //   - drop grams whose tokens are all identical (read+ → read+ trivia)
 //   - closed-gram suppression: drop a gram when an extension by one token
 //     retains ≥80% of its count — the longer pattern subsumes it.
+//
+// Suppression is a relaxed form of closed-pattern mining: closed itemsets per
+// Pasquier, Bastide, Taouil & Lakhal, "Discovering Frequent Closed Itemsets
+// for Association Rules", ICDT 1999; closed sequential patterns per Yan, Han
+// & Afshar, "CloSpan: Mining Closed Sequential Patterns in Large Databases",
+// SDM 2003. The ≥80%-retention slack mirrors δ-tolerance closedness: Cheng,
+// Ke & Ng, "δ-Tolerance Closed Frequent Itemsets", ICDM 2006.
 func Filter(grams map[string]*Gram, minCount, minSessions int) []*Gram {
-	for _, g := range grams {
-		if len(g.IDs) < 2 {
-			continue
-		}
-		sub := func(ids []uint32) {
-			key := make([]byte, 0, len(ids)*4)
-			for _, id := range ids {
-				key = binary.LittleEndian.AppendUint32(key, id)
-			}
-			if s, ok := grams[string(key)]; ok && g.Count*10 >= s.Count*8 {
-				s.suppressed = true
-			}
-		}
-		sub(g.IDs[:len(g.IDs)-1]) // prefix
-		sub(g.IDs[1:])            // suffix
-	}
+	suppressClosed(grams)
 
 	var out []*Gram
 	for _, g := range grams {
@@ -95,6 +96,27 @@ func Filter(grams map[string]*Gram, minCount, minSessions int) []*Gram {
 		return len(out[i].IDs) > len(out[j].IDs)
 	})
 	return out
+}
+
+// suppressClosed marks the prefix and suffix of each gram suppressed when the
+// extension retains ≥80% of the shorter gram's count.
+func suppressClosed(grams map[string]*Gram) {
+	for _, g := range grams {
+		if len(g.IDs) < 2 {
+			continue
+		}
+		sub := func(ids []uint32) {
+			key := make([]byte, 0, len(ids)*4)
+			for _, id := range ids {
+				key = binary.LittleEndian.AppendUint32(key, id)
+			}
+			if s, ok := grams[string(key)]; ok && g.Count*10 >= s.Count*8 {
+				s.suppressed = true
+			}
+		}
+		sub(g.IDs[:len(g.IDs)-1]) // prefix
+		sub(g.IDs[1:])            // suffix
+	}
 }
 
 func uniform(ids []uint32) bool {

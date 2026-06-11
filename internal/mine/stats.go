@@ -33,68 +33,86 @@ type Summary struct {
 	TopActions []TopAction `json:"topActions,omitempty"` // corpus grain only
 }
 
+// summarizer accumulates buckets and the action tally during one read pass.
+type summarizer struct {
+	by      string
+	buckets map[string]*Bucket
+	actions map[string]*TopAction
+}
+
 // Summarize streams the artifact once. by ∈ corpus|project|session.
 func Summarize(eventsPath, by string) (*Summary, error) {
-	buckets := map[string]*Bucket{}
-	actions := map[string]*TopAction{}
-
+	sm := &summarizer{by: by, buckets: map[string]*Bucket{}, actions: map[string]*TopAction{}}
 	err := event.Read(eventsPath, func(ev *event.Event) error {
-		var key string
-		switch by {
-		case "project":
-			key = ev.Project
-		case "session":
-			key = ev.Project + "/" + ev.Session
-		default:
-			key = "corpus"
-		}
-		b, ok := buckets[key]
-		if !ok {
-			b = &Bucket{Key: key, ByKind: map[string]int{}, sessions: map[string]struct{}{}}
-			buckets[key] = b
-		}
-		b.Events++
-		b.ByKind[ev.Kind]++
-		b.sessions[ev.Session] = struct{}{}
-		if ev.Status == event.StatusFail {
-			b.Fails++
-		}
-		if ev.Status == event.StatusNone && ev.Kind != event.KindPrompt {
-			b.Unpaired++
-		}
-		if ev.Retry {
-			b.Retries++
-		}
-		if ev.Kind != event.KindPrompt {
-			name := ev.Action
-			if ev.Kind == event.KindShell {
-				name = "sh:" + name
-			}
-			a, ok := actions[name]
-			if !ok {
-				a = &TopAction{Action: name}
-				actions[name] = a
-			}
-			a.Count++
-			if ev.Status == event.StatusFail {
-				a.Fails++
-			}
-		}
+		sm.addBucket(ev)
+		sm.addAction(ev)
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+	return sm.result(), nil
+}
 
-	s := &Summary{By: by}
-	for _, b := range buckets {
+func (sm *summarizer) addBucket(ev *event.Event) {
+	var key string
+	switch sm.by {
+	case "project":
+		key = ev.Project
+	case "session":
+		key = ev.Project + "/" + ev.Session
+	default:
+		key = "corpus"
+	}
+	b, ok := sm.buckets[key]
+	if !ok {
+		b = &Bucket{Key: key, ByKind: map[string]int{}, sessions: map[string]struct{}{}}
+		sm.buckets[key] = b
+	}
+	b.Events++
+	b.ByKind[ev.Kind]++
+	b.sessions[ev.Session] = struct{}{}
+	if ev.Status == event.StatusFail {
+		b.Fails++
+	}
+	if ev.Status == event.StatusNone && ev.Kind != event.KindPrompt {
+		b.Unpaired++
+	}
+	if ev.Retry {
+		b.Retries++
+	}
+}
+
+func (sm *summarizer) addAction(ev *event.Event) {
+	if ev.Kind == event.KindPrompt {
+		return
+	}
+	name := ev.Action
+	if ev.Kind == event.KindShell {
+		name = "sh:" + name
+	}
+	a, ok := sm.actions[name]
+	if !ok {
+		a = &TopAction{Action: name}
+		sm.actions[name] = a
+	}
+	a.Count++
+	if ev.Status == event.StatusFail {
+		a.Fails++
+	}
+}
+
+func (sm *summarizer) result() *Summary {
+	s := &Summary{By: sm.by, Buckets: make([]*Bucket, 0, len(sm.buckets))}
+	for _, b := range sm.buckets {
 		b.Sessions = len(b.sessions)
 		s.Buckets = append(s.Buckets, b)
 	}
 	sort.Slice(s.Buckets, func(i, j int) bool { return s.Buckets[i].Events > s.Buckets[j].Events })
-	for _, a := range actions {
+	s.TopActions = make([]TopAction, 0, len(sm.actions))
+	for _, a := range sm.actions {
 		s.TopActions = append(s.TopActions, *a)
 	}
 	sort.Slice(s.TopActions, func(i, j int) bool { return s.TopActions[i].Count > s.TopActions[j].Count })
-	return s, nil
+	return s
 }

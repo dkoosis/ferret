@@ -88,7 +88,7 @@ func fromStmt(st *syntax.Stmt, pr *syntax.Printer) []Segment {
 }
 
 func fromStmts(sts []*syntax.Stmt, pr *syntax.Printer) []Segment {
-	var out []Segment
+	out := make([]Segment, 0, len(sts))
 	for _, st := range sts {
 		out = append(out, fromStmt(st, pr)...)
 	}

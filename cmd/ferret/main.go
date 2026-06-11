@@ -5,6 +5,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -31,6 +32,12 @@ const usage = `ferret — mine Claude Code transcripts for repeated behavior
 
 common: -data DIR (default ~/.ferret) · -format text|json · -limit N · -max-bytes N
 lenses: ` + "coarse | tool | target | exact"
+
+var (
+	errSessionRequired = errors.New("tokens: -session PREFIX required")
+	errNoStreamMatch   = errors.New("tokens: no stream matches")
+	errBadRange        = errors.New("bad -n range")
+)
 
 func main() {
 	if len(os.Args) < 2 {
@@ -129,7 +136,9 @@ func cmdIngest(args []string) error {
 	root := fs.String("root", filepath.Join(home, ".claude", "projects"), "transcript root")
 	project := fs.String("project", "", "only projects whose slug contains this substring")
 	dryRun := fs.Bool("dry-run", false, "scan and report; write nothing")
-	fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 	return ingest(c.data, *root, *project, *dryRun)
 }
 
@@ -205,7 +214,9 @@ func cmdSummary(args []string) error {
 	fs := flag.NewFlagSet("summary", flag.ExitOnError)
 	c := commonFlags(fs, 20)
 	by := fs.String("by", "corpus", "aggregation grain: corpus|project|session")
-	fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 	if err := c.ensureData(); err != nil {
 		return err
 	}
@@ -249,7 +260,9 @@ func cmdNgrams(args []string) error {
 	nRange := fs.String("n", "2-5", "gram lengths, e.g. 3 or 2-5")
 	minCount := fs.Int("min-count", 5, "min total occurrences")
 	minSessions := fs.Int("min-sessions", 3, "min distinct streams")
-	fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 	minN, maxN, err := parseRange(*nRange)
 	if err != nil {
 		return err
@@ -300,7 +313,9 @@ func cmdGraph(args []string) error {
 	lo := lensFlags(fs)
 	minCount := fs.Int("min-count", 20, "min edge count")
 	loops := fs.Bool("loops", false, "show A→B→A bounce cycles (friction signatures)")
-	fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 	if err := c.ensureData(); err != nil {
 		return err
 	}
@@ -404,9 +419,11 @@ func cmdTokens(args []string) error {
 	c := commonFlags(fs, 200)
 	lo := lensFlags(fs)
 	session := fs.String("session", "", "session id prefix (required)")
-	fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 	if *session == "" {
-		return fmt.Errorf("tokens: -session PREFIX required")
+		return errSessionRequired
 	}
 	if err := c.ensureData(); err != nil {
 		return err
@@ -432,7 +449,7 @@ func cmdTokens(args []string) error {
 		}
 	}
 	if !found {
-		return fmt.Errorf("tokens: no stream matches %q", *session)
+		return fmt.Errorf("%w: %q", errNoStreamMatch, *session)
 	}
 	return nil
 }
@@ -455,13 +472,13 @@ func parseRange(s string) (int, int, error) {
 		lo, err1 := strconv.Atoi(a)
 		hi, err2 := strconv.Atoi(b)
 		if err1 != nil || err2 != nil || lo < 1 || hi < lo {
-			return 0, 0, fmt.Errorf("bad -n range %q", s)
+			return 0, 0, fmt.Errorf("%w: %q", errBadRange, s)
 		}
 		return lo, hi, nil
 	}
 	n, err := strconv.Atoi(s)
 	if err != nil || n < 1 {
-		return 0, 0, fmt.Errorf("bad -n %q", s)
+		return 0, 0, fmt.Errorf("%w: %q", errBadRange, s)
 	}
 	return n, n, nil
 }

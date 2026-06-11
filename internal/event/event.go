@@ -7,8 +7,8 @@ import "time"
 // Event is one normalized action. JSON keys are short: the artifact holds
 // millions of these.
 type Event struct {
-	Seq       int       `json:"i"`           // order within source file — authoritative ordering
-	Time      time.Time `json:"t,omitempty"` // advisory; some event types carry no timestamp
+	Seq       int       `json:"i"`          // order within source file — authoritative ordering
+	Time      time.Time `json:"t,omitzero"` // advisory; some event types carry no timestamp
 	Project   string    `json:"p"`
 	Session   string    `json:"s"`
 	Agent     string    `json:"a,omitempty"` // subagent id; "" = main thread

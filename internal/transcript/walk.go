@@ -21,14 +21,14 @@ func Walk(root string) ([]Source, error) {
 	var out []Source
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil // unreadable entries are skipped, not fatal
+			return nil //nolint:nilerr // unreadable entries are skipped, not fatal
 		}
 		if d.IsDir() || !strings.HasSuffix(p, ".jsonl") {
 			return nil
 		}
 		rel, rerr := filepath.Rel(root, p)
 		if rerr != nil {
-			return nil
+			return nil //nolint:nilerr // path outside root — skip, not fatal
 		}
 		parts := strings.Split(rel, string(filepath.Separator))
 		if len(parts) < 2 {

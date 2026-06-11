@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# scripts/lint-locked — serialize golangci-lint through a machine-global mutex.
+#
+# golangci-lint locks its shared cache (~/Library/Caches/golangci-lint on macOS,
+# $XDG_CACHE_HOME/golangci-lint on Linux) and FAILS with exit 3 ("parallel
+# golangci-lint is running") when a second run contends — instead of waiting.
+# That exit-3 cascades two ways:
+#   (a) intra-turn: one agent firing several lint/make calls in one turn,
+#   (b) cross-worktree: peer sessions running `make check` concurrently.
+# Both hit the same machine-global cache lock. This wrapper converts fail-fast
+# into wait: acquire an exclusive mkdir mutex (atomic on every POSIX FS), run
+# golangci-lint with all passed args, release. A second invocation blocks until
+# the first finishes instead of dying exit-3 and cancelling sibling tool calls.
+#
+# flock is unavailable on macOS and loto is file+identity-scoped (won't serialize
+# same-session or non-file resources), so mkdir is the portable primitive.
+#
+# The mkdir mutex serializes callers that share this lock_dir, but it cannot
+# coordinate a peer that bypasses the wrapper (an editor/CI/hook firing a bare
+# `golangci-lint`, or a worktree whose cache resolves elsewhere). Such a peer
+# still holds golangci-lint's own internal cache lock, and the wrapped run would
+# then die exit-3. So we also pass --allow-parallel-runners to `run`: that
+# disables golangci-lint's fail-fast internal lock, leaving this wrapper's mkdir
+# mutex as the sole, authoritative serializer (trixi-wudg / rorp Problem B).
+#
+# Bead: trixi-tr1t, trixi-wudg
+# Wired into: make lint / scan / check-pkg / CHECK_CMD / REPORT_CMD (via $(GOLANGCILINT))
+
+set -euo pipefail
+
+# Key the mutex to the cache golangci-lint actually contends on. The dir only
+# needs to be a stable machine-global path; resolve it cheaply without spawning
+# golangci-lint (which could itself contend).
+cache_dir="${GOLANGCI_LINT_CACHE:-}"
+if [ -z "$cache_dir" ]; then
+  case "$(uname -s)" in
+    Darwin) cache_dir="$HOME/Library/Caches/golangci-lint" ;;
+    *)      cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/golangci-lint" ;;
+  esac
+fi
+lock_dir="${cache_dir}.lintlock"
+
+# Ensure the lock_dir's PARENT exists before the mutex loop. The mutex is a bare
+# `mkdir "$lock_dir"` (atomic), but mkdir (no -p) also fails with ENOENT when the
+# parent is missing — and that failure is indistinguishable from "lock held" to
+# the `until mkdir` loop, so it would spin to the timeout while reporting
+# "waiting for $lock_dir" even though nobody holds it. The parent normally exists
+# because golangci-lint (or `go build` under a default GOCACHE) created it, but CI
+# that relocates GOCACHE off ~/.cache AND disables setup-go caching leaves
+# ~/.cache (or ~/Library/Caches) uncreated, so our pre-golangci-lint mkdir is the
+# first writer and hits ENOENT. mkdir -p the parent so the loop only ever blocks
+# on genuine contention (trixi-2cfa).
+mkdir -p "$(dirname "$lock_dir")" 2>/dev/null || true
+
+timeout_s="${LINT_LOCK_TIMEOUT:-300}"   # max wait for the lock before giving up
+stale_s="${LINT_LOCK_STALE:-900}"       # reclaim a lock older than this (crash recovery)
+
+mtime_of() {
+  # Portable mtime (epoch). Branch on OS rather than try BSD-first with a `||`
+  # fallback: on GNU/Linux `stat -f` is a *valid* flag (--file-system), so
+  # `stat -f %m "$1"` SUCCEEDS with garbage (its output starts with `File: …`)
+  # and the fallback never fires — that `File:` then lands in the line-66
+  # arithmetic and bursts as `File: unbound variable` under set -u (trixi-g2z6).
+  case "$(uname -s)" in
+    Darwin) stat -f %m "$1" 2>/dev/null || echo 0 ;;
+    *)      stat -c %Y "$1" 2>/dev/null || echo 0 ;;
+  esac
+}
+
+notify() {
+  # Operational diagnostics go where a human can see them even when the caller
+  # redirects our stderr: make check/report pipe golangci-lint's stderr to
+  # /dev/null for clean SARIF, which would otherwise swallow our lock messages
+  # too. Try the controlling tty; fall back to stderr when detached (CI, or no
+  # tty — where opening /dev/tty fails even though it tests as writable). The
+  # `|| echo …>&2` also keeps notify from ever failing the script under set -e.
+  { echo "$*" >/dev/tty; } 2>/dev/null || echo "$*" >&2
+}
+
+waited=0
+until mkdir "$lock_dir" 2>/dev/null; do
+  # Stale-lock recovery: a crashed holder leaves the dir forever. Reclaim it
+  # once it's older than stale_s so a dead session can't wedge the toolchain.
+  if [ -d "$lock_dir" ]; then
+    age=$(( $(date +%s) - $(mtime_of "$lock_dir") ))
+    if [ "$age" -ge "$stale_s" ]; then
+      # Atomic reclaim: rename(2) is atomic, so only one racing process can move
+      # the stale dir aside, and it alone removes it. Losers' mv fails (source
+      # already gone) and they loop back to mkdir. A plain `rm -rf` here would
+      # let two processes both delete — one could clobber the other's freshly
+      # acquired lock.
+      reclaim="${lock_dir}.stale.$$"
+      if mv "$lock_dir" "$reclaim" 2>/dev/null; then
+        notify "lint-locked: reclaimed stale lock (age ${age}s) at $lock_dir"
+        rm -rf "$reclaim"
+      fi
+      continue
+    fi
+  fi
+  if [ "$waited" -ge "$timeout_s" ]; then
+    notify "lint-locked: timed out after ${timeout_s}s waiting for $lock_dir"
+    exit 1
+  fi
+  sleep 1
+  waited=$((waited + 1))
+done
+
+# Release on any exit (success, lint findings, signal) so the lock never leaks.
+trap 'rm -rf "$lock_dir"' EXIT
+
+# Pass through every arg and preserve golangci-lint's exit code (1 = findings).
+# For `run`, inject --allow-parallel-runners so golangci-lint never fail-fasts on
+# its internal cache lock (this wrapper's mutex is the real serializer). The flag
+# is only valid on `run`, so leave other subcommands (e.g. version) untouched.
+if [ "${1:-}" = "run" ]; then
+  shift
+  golangci-lint run --allow-parallel-runners "$@"
+else
+  golangci-lint "$@"
+fi

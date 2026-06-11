@@ -21,6 +21,15 @@ type Follows struct {
 }
 
 // BuildFollows computes transitions and 2-cycles in one pass per stream.
+//
+// The directly-follows graph is the core abstraction of process mining: van
+// der Aalst, Weijters & Maruster, "Workflow Mining: Discovering Process
+// Models from Event Logs", IEEE TKDE 16(9), 2004 (the α-algorithm); survey
+// treatment in van der Aalst, "Process Mining: Data Science in Action",
+// Springer 2016. Detecting length-two loops (A→B→A) as a distinct construct
+// follows Alves de Medeiros, van Dongen, van der Aalst & Weijters, "Process
+// Mining: Extending the α-algorithm to Mine Short Loops", BETA Working Paper
+// 113, TU Eindhoven, 2004.
 func BuildFollows(c *Corpus) *Follows {
 	edges := map[[2]uint32]int{}
 	cycles := map[[2]uint32]int{}

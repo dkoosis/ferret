@@ -4,12 +4,15 @@
 package lens
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/dkoosis/ferret/internal/event"
 )
+
+var ErrUnknownLens = errors.New("unknown lens")
 
 // Lens turns an event into a token. ok=false means the event is
 // invisible to this lens.
@@ -18,14 +21,21 @@ type Lens interface {
 	Token(e *event.Event) (tok string, ok bool)
 }
 
-var registry = map[string]Lens{}
+// registry is populated in lenses.go; no init() — explicit construction.
+var registry = newRegistry(coarse{}, tool{}, target{}, exact{})
 
-func register(l Lens) { registry[l.Name()] = l }
+func newRegistry(ls ...Lens) map[string]Lens {
+	m := make(map[string]Lens, len(ls))
+	for _, l := range ls {
+		m[l.Name()] = l
+	}
+	return m
+}
 
 func Get(name string) (Lens, error) {
 	l, ok := registry[name]
 	if !ok {
-		return nil, fmt.Errorf("unknown lens %q (have: %s)", name, strings.Join(Names(), ", "))
+		return nil, fmt.Errorf("%w %q (have: %s)", ErrUnknownLens, name, strings.Join(Names(), ", "))
 	}
 	return l, nil
 }
