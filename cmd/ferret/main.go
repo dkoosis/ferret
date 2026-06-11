@@ -29,6 +29,7 @@ const usage = `ferret — mine Claude Code transcripts for repeated behavior
   ferret summary  [-by corpus|project|session]                 corpus health + tool mix
   ferret ngrams   [-lens tool] [-n 2-5] [-min-count 5] [-min-sessions 3]
   ferret seqs     [-lens tool] [-min-support 20] [-max-gap 3] [-max-len 5]   gapped subsequences (PrefixSpan)
+  ferret rank     [-lens tool] [-min-support 20] [-order 3] [-top 10]        ranked review queue (cohesion-scored, bucketed)
   ferret surprise [-lens tool] [-order 3] [-min-toks 20]       per-session predictability (low=scriptable, high=thrash)
   ferret graph    [-lens tool] [-min-count 20] [-format text|json|mermaid|dot] [-loops]
   ferret tokens   -session PREFIX [-lens tool]                 one session's token stream (lens debugger)
@@ -69,6 +70,8 @@ func main() {
 		err = cmdNgrams(os.Args[2:])
 	case "seqs":
 		err = cmdSeqs(os.Args[2:])
+	case "rank":
+		err = cmdRank(os.Args[2:])
 	case "surprise":
 		err = cmdSurprise(os.Args[2:])
 	case "graph":
@@ -420,6 +423,108 @@ func cmdSeqs(args []string) error {
 			p.Support, strings.Join(corpus.Tokens(p.IDs), " ⇝ "), exemplar(corpus, p.ExStream, p.ExSeq)) {
 			break
 		}
+	}
+	return nil
+}
+
+// ---- rank (cohesion-scored review queue) ----
+
+func cmdRank(args []string) error {
+	fs := flag.NewFlagSet("rank", flag.ExitOnError)
+	c := commonFlags(fs, 0)
+	lo := lensFlags(fs)
+	minSupport := fs.Int("min-support", 20, "min distinct streams containing the pattern")
+	maxGap := fs.Int("max-gap", 3, "max positions between consecutive items (1 = adjacent)")
+	maxLen := fs.Int("max-len", 5, "max pattern length")
+	order := fs.Int("order", 3, "gram-model order for cohesion scoring")
+	top := fs.Int("top", 10, "max cards per bucket")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := c.validate("text", fmtJSON); err != nil {
+		return err
+	}
+	if err := c.ensureData(); err != nil {
+		return err
+	}
+	corpus, l, err := lo.corpus(c.eventsPath())
+	if err != nil {
+		return err
+	}
+	pats, capped := mine.MineSeqs(corpus, mine.SeqOpts{
+		MinSupport: *minSupport, MaxGap: *maxGap, MaxLen: *maxLen, MaxPatterns: 10000,
+	})
+	opts := mine.DefaultRankOpts()
+	opts.Order = *order
+	cards, noise := mine.RankPatterns(corpus, pats, opts)
+
+	byBucket := map[string][]*mine.Card{}
+	overflow := 0
+	for _, card := range cards {
+		if *top > 0 && len(byBucket[card.Bucket]) >= *top {
+			overflow++
+			continue
+		}
+		byBucket[card.Bucket] = append(byBucket[card.Bucket], card)
+	}
+
+	if c.format == fmtJSON {
+		type jc struct {
+			Tokens   []string `json:"tokens"`
+			Support  int      `json:"support"`
+			Bits     float64  `json:"bits"`
+			Score    float64  `json:"score"`
+			Folded   int      `json:"folded"`
+			Exemplar string   `json:"exemplar"`
+		}
+		buckets := map[string][]jc{}
+		for _, b := range mine.Buckets {
+			rows := make([]jc, 0, len(byBucket[b]))
+			for _, card := range byBucket[b] {
+				rows = append(rows, jc{corpus.Tokens(card.IDs), card.Support, card.Bits,
+					card.Score, card.Folded, exemplar(corpus, card.ExStream, card.ExSeq)})
+			}
+			buckets[b] = rows
+		}
+		return out.JSON(os.Stdout, map[string]any{
+			keyLens: l.Name(), "order": *order, "buckets": buckets,
+			"noise": noise, keyTotal: len(cards),
+			keyTruncated: overflow > 0 || capped,
+		})
+	}
+	sink := out.NewSink(os.Stdout, 0, c.maxBytes)
+	defer sink.Close()
+	sink.Head("rank lens=%s patterns=%d → cards=%d noise=%d (min-support=%d order=%d top=%d)",
+		l.Name(), len(pats), len(cards), noise, *minSupport, *order, *top)
+	if capped {
+		sink.Head("‡ seqs hit the 10000-pattern cap — raise -min-support")
+	}
+	desc := map[string]string{
+		mine.BucketFriction: "fail-marked",
+		mine.BucketLoop:     "revisits a step",
+		mine.BucketScript:   "low-entropy chains — automation candidates",
+		mine.BucketWatch:    "frequent, not yet classifiable",
+	}
+	for _, b := range mine.Buckets {
+		if len(byBucket[b]) == 0 {
+			continue
+		}
+		sink.Head("%s (%s):", strings.ToUpper(b), desc[b])
+		for _, card := range byBucket[b] {
+			fold := ""
+			if card.Folded > 0 {
+				fold = fmt.Sprintf(" (+%d folded)", card.Folded)
+			}
+			if !sink.Row("%5ds %4.1fb %6.1f  %s%s  ex: %s",
+				card.Support, card.Bits, card.Score,
+				strings.Join(corpus.Tokens(card.IDs), " ⇝ "), fold,
+				exemplar(corpus, card.ExStream, card.ExSeq)) {
+				break
+			}
+		}
+	}
+	if overflow > 0 {
+		sink.Head("… %d more cards past -top %d", overflow, *top)
 	}
 	return nil
 }

@@ -39,13 +39,18 @@ func ScoreSurprise(c *Corpus, opts SurpriseOpts) []StreamScore {
 	grams, total := trainGrams(c, opts.Order)
 
 	var out []StreamScore
+	var ids []uint32
 	for si, st := range c.Streams {
 		if len(st) < opts.MinToks {
 			continue
 		}
+		ids = ids[:0]
+		for _, t := range st {
+			ids = append(ids, t.ID)
+		}
 		bits := 0.0
-		for i := range st {
-			bits += -math.Log2(score(st, i, grams, total, opts.Order))
+		for i := range ids {
+			bits += -math.Log2(scoreIDs(ids, i, grams, total, opts.Order))
 		}
 		out = append(out, StreamScore{
 			Stream: c.StreamKeys[si], Toks: len(st), Bits: bits / float64(len(st)),
@@ -80,12 +85,12 @@ func trainGrams(c *Corpus, order int) (map[string]int, int) {
 	return grams, total
 }
 
-// score is the stupid-backoff score of the token at position i.
-func score(st []Tok, i int, grams map[string]int, total, order int) float64 {
+// scoreIDs is the stupid-backoff score of the token at position i.
+func scoreIDs(ids []uint32, i int, grams map[string]int, total, order int) float64 {
 	pack := func(lo, hi int) string {
 		key := make([]byte, 0, (hi-lo+1)*4)
 		for j := lo; j <= hi; j++ {
-			key = binary.LittleEndian.AppendUint32(key, st[j].ID)
+			key = binary.LittleEndian.AppendUint32(key, ids[j])
 		}
 		return string(key)
 	}

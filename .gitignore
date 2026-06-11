@@ -7,3 +7,4 @@
 .sandbox/bin/**/*.tmp
 .sandbox/bin/**/*.upx
 .sandbox/bin/**/*.000
+.claude/tmp/
