@@ -91,7 +91,7 @@ func itemProjections(c *Corpus) map[uint32]*projection {
 			}
 			if n := len(pr.streams); n == 0 || pr.streams[n-1] != si {
 				pr.streams = append(pr.streams, si)
-				pr.spans = append(pr.spans, nil)
+				pr.spans = append(pr.spans, []span{})
 			}
 			last := len(pr.spans) - 1
 			pr.spans[last] = append(pr.spans[last], span{p, p})
@@ -105,6 +105,9 @@ func itemProjections(c *Corpus) map[uint32]*projection {
 // support (δ-tolerant closedness, matching suppressClosed in ngram.go —
 // and as there, only an extension that itself clears the floor may suppress).
 func (m *seqMiner) grow(pat []uint32, proj *projection) {
+	if proj == nil {
+		return
+	}
 	bestChild := 0
 	if len(pat) < m.opts.MaxLen {
 		sup := m.extSupports(proj)
@@ -182,8 +185,15 @@ func (m *seqMiner) emit(pat []uint32, proj *projection) {
 	ids := make([]uint32, len(pat))
 	copy(ids, pat)
 	si := proj.streams[0]
+	var exSeq int
+	if len(proj.spans) > 0 && len(proj.spans[0]) > 0 {
+		st := m.c.Streams[si]
+		if p := proj.spans[0][0].start; st != nil && p < len(st) {
+			exSeq = st[p].Seq
+		}
+	}
 	m.out = append(m.out, &SeqPattern{
 		IDs: ids, Support: len(proj.streams),
-		ExStream: si, ExSeq: m.c.Streams[si][proj.spans[0][0].start].Seq,
+		ExStream: si, ExSeq: exSeq,
 	})
 }

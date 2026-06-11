@@ -267,7 +267,7 @@ func ingestSWE(dataDir, root string, dryRun bool) error {
 			break
 		}
 	}
-	if w != nil {
+	if w != nil && ow != nil {
 		// Close flushes; surface a flush error the same as a per-record error.
 		cerr := w.Close()
 		oerr := ow.Close()

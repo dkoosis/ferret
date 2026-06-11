@@ -121,6 +121,9 @@ func stratify(cor *mine.Corpus, member map[int]bool, outcomes map[string]event.O
 		}
 	}
 	sort.Ints(lens)
+	if len(lens) == 0 {
+		return // no metadata matched; nothing to stratify
+	}
 	t1, t2 := lens[len(lens)/3], lens[2*len(lens)/3]
 	tier := func(n int) string {
 		switch {
