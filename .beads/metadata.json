@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "ferret",
+  "project_id": "9c27bb06-b496-4b24-93ef-a34442a888f2"
+}
