@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"time"
 )
@@ -71,6 +73,13 @@ func (w *Writer) finish() error {
 }
 
 // Read streams events back from the artifact.
+//
+// A single truncated trailing record — the signature of an ingest interrupted
+// mid-write (SIGINT, disk-full, power loss) — is tolerated: every fully decoded
+// event ahead of it is delivered, and the dangling fragment is logged to stderr
+// and dropped rather than failing the whole read. Only the FINAL record may be
+// salvaged this way; a decode error with more input still pending is a genuinely
+// corrupt mid-stream record and is returned as a hard error.
 func Read(path string, fn func(*Event) error) error {
 	f, err := os.Open(path)
 	if err != nil {
@@ -81,6 +90,14 @@ func Read(path string, fn func(*Event) error) error {
 	for dec.More() {
 		var ev Event
 		if err := dec.Decode(&ev); err != nil {
+			// A truncated trailing object surfaces as an unexpected EOF (or a
+			// bare EOF mid-token). dec.More() returned true, so bytes were
+			// present, but the object never completed and no input follows.
+			// Salvage the events already streamed instead of poisoning the run.
+			if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+				fmt.Fprintf(os.Stderr, "ferret: %s: truncated trailing record dropped (1 fragment); re-ingest to repair\n", path)
+				return nil
+			}
 			return err
 		}
 		if err := fn(&ev); err != nil {
