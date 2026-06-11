@@ -20,7 +20,6 @@ import (
 	"github.com/dkoosis/ferret/internal/lens"
 	"github.com/dkoosis/ferret/internal/mine"
 	"github.com/dkoosis/ferret/internal/out"
-	"github.com/dkoosis/ferret/internal/sweagent"
 	"github.com/dkoosis/ferret/internal/transcript"
 )
 
@@ -31,8 +30,6 @@ var (
 	errBadFormat       = errors.New("bad --format")
 	errBadBy           = errors.New("bad --by (want corpus|project|session)")
 	errMaxBytesJSON    = errors.New("--max-bytes is not supported with --format json (use --limit)")
-	errBadIngestSrc    = errors.New("bad --source (want cc|swe-agent)")
-	errNoOutcomes      = errors.New("validate: no outcomes.jsonl — ingest a labeled corpus (e.g. --source swe-agent) first")
 )
 
 // shared JSON response keys — every truncating JSON response carries
@@ -80,20 +77,8 @@ var CLI struct {
 		Data    string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
 		Root    string `help:"Transcript root (dir or .jsonl file)." name:"root"`
 		Project string `help:"Only projects whose slug contains this substring." name:"project"`
-		Source  string `help:"Input source: cc (Claude Code transcripts) | swe-agent (trajectory JSONL)." default:"cc" name:"source"`
 		DryRun  bool   `help:"Scan and report; write nothing." name:"dry-run"`
 	} `cmd:"" help:"Build ~/.ferret/events.jsonl from transcripts." name:"ingest"`
-
-	Validate struct {
-		CommonFlags
-		LensFlags
-		MinSupport int    `help:"Min distinct streams containing the pattern." default:"20" name:"min-support"`
-		MaxGap     int    `help:"Max positions between consecutive items (1 = adjacent)." default:"3" name:"max-gap"`
-		MaxLen     int    `help:"Max pattern length." default:"5" name:"max-len"`
-		Order      int    `help:"Gram-model order for cohesion scoring." default:"3" name:"order"`
-		MinStreams int    `help:"Drop buckets supported by fewer streams (avoid tiny-n lift)." default:"3" name:"min-streams"`
-		Corpus     string `help:"Corpus label for the report header." default:"swe-agent" name:"corpus"`
-	} `cmd:"" help:"Rank buckets × ground-truth outcomes (needs outcomes.jsonl)."`
 
 	Summary struct {
 		CommonFlags
@@ -125,6 +110,17 @@ var CLI struct {
 		Order      int `help:"Gram-model order for cohesion scoring." default:"3" name:"order"`
 		Top        int `help:"Max cards per bucket." default:"10" name:"top"`
 	} `cmd:"" help:"Ranked review queue (cohesion-scored, bucketed)."`
+
+	Report struct {
+		CommonFlags
+		LensFlags
+		MinSupport int    `help:"Min distinct streams containing the pattern." default:"20" name:"min-support"`
+		MaxGap     int    `help:"Max positions between consecutive items (1 = adjacent)." default:"3" name:"max-gap"`
+		MaxLen     int    `help:"Max pattern length." default:"5" name:"max-len"`
+		Order      int    `help:"Gram-model order for cohesion scoring." default:"3" name:"order"`
+		Top        int    `help:"Max cards per bucket fed to the projection." default:"10" name:"top"`
+		Kind       string `help:"Only this kind: routine|friction|loop|noise (default: all but noise)." name:"kind"`
+	} `cmd:"" help:"Findings: motifs classified into actions, ranked by measured burn."`
 
 	Surprise struct {
 		CommonFlags
@@ -163,12 +159,12 @@ func main() {
 		kong.Description(
 			"Mine Claude Code transcripts for repeated behavior:\n"+
 				"scriptable routines, friction loops, and noisy context.\n\n"+
-				"  ferret ingest   [--root DIR] [--source cc|swe-agent] [--project SUBSTR] [--dry-run]\n"+
-				"  ferret validate [--lens tool] [--min-support 20] [--min-streams 3]\n"+
+				"  ferret ingest   [--root DIR] [--project SUBSTR] [--dry-run]\n"+
 				"  ferret summary  [--by corpus|project|session]\n"+
 				"  ferret ngrams   [--lens tool] [--n 2-5] [--min-count 5] [--min-sessions 3]\n"+
 				"  ferret seqs     [--lens tool] [--min-support 20] [--max-gap 3] [--max-len 5]\n"+
 				"  ferret rank     [--lens tool] [--min-support 20] [--order 3] [--top 10]\n"+
+				"  ferret report   [--lens tool] [--kind routine|friction|loop|noise] [--format json]\n"+
 				"  ferret surprise [--lens tool] [--order 3] [--min-toks 20]\n"+
 				"  ferret graph    [--lens tool] [--min-count 20] [--format text|json|mermaid|dot] [--loops]\n"+
 				"  ferret tokens   --session PREFIX [--lens tool]\n\n"+
@@ -183,8 +179,6 @@ func main() {
 	switch k.Command() {
 	case "ingest":
 		err = cmdIngest()
-	case "validate":
-		err = cmdValidate()
 	case "summary":
 		err = cmdSummary()
 	case "ngrams":
@@ -193,6 +187,8 @@ func main() {
 		err = cmdSeqs()
 	case "rank":
 		err = cmdRank()
+	case "report":
+		err = cmdReport()
 	case "surprise":
 		err = cmdSurprise()
 	case "graph":
@@ -304,14 +300,7 @@ func cmdIngest() error {
 	if root == "" {
 		root = defaultRoot()
 	}
-	switch cmd.Source {
-	case "cc":
-		return ingest(data, root, cmd.Project, cmd.DryRun)
-	case "swe-agent":
-		return ingestSWE(data, root, cmd.DryRun)
-	default:
-		return fmt.Errorf("%w: %q", errBadIngestSrc, cmd.Source)
-	}
+	return ingest(data, root, cmd.Project, cmd.DryRun)
 }
 
 // eventSink is the persistence seam for ingest: the real implementation is
@@ -324,186 +313,13 @@ type eventSink interface {
 	Abort()
 }
 
-// outcomeSink mirrors eventSink for the SWE-agent outcomes sidecar.
-// Abort discards the in-progress temp file without sealing the artifact; callers
-// must invoke it instead of Close on a partial run so the outcomes file is
-// never atomically renamed into place when events are incomplete.
-type outcomeSink interface {
-	Write(o *event.Outcome) error
-	Close() error
-	Abort()
-}
-
-// newEventWriter / newOutcomeWriter are indirected through vars so a test can
-// substitute a failing writer without touching the event package.
-var (
-	newEventWriter   = func(path string) (eventSink, error) { return event.NewWriter(path) }
-	newOutcomeWriter = func(path string) (outcomeSink, error) { return event.NewOutcomeWriter(path) }
-)
+// newEventWriter is indirected through a var so a test can substitute a failing
+// writer without touching the event package.
+var newEventWriter = func(path string) (eventSink, error) { return event.NewWriter(path) }
 
 // errWriteAbort wraps the first per-record write error so ingest can abort the
 // loop and refuse to seal a manifest over a partially-written artifact.
 var errWriteAbort = errors.New("ingest aborted: record write failed")
-
-// ingestSWE adapts SWE-agent trajectory rows (JSONL — one row per stream)
-// into the standard events artifact plus an outcomes sidecar. --root may be a
-// single .jsonl file or a directory of them.
-//
-// Persistence contract: emit is fallible. The first write error aborts the
-// ingest loop, no manifest is written, and the error propagates so the process
-// exits nonzero. Stats reflect persisted records only — counters advance after
-// a successful write, never before — so a sealed manifest can never claim more
-// events than reached disk.
-func ingestSWE(dataDir, root string, dryRun bool) error {
-	files, err := jsonlFiles(root)
-	if err != nil {
-		return err
-	}
-	var w eventSink
-	var ow outcomeSink
-	var emitErr error
-	emit := func(*event.Event) error { return nil }
-	emitOut := func(*event.Outcome) error { return nil }
-	if !dryRun {
-		if err := os.MkdirAll(dataDir, 0o755); err != nil {
-			return err
-		}
-		if w, err = newEventWriter(filepath.Join(dataDir, "events.jsonl")); err != nil {
-			return err
-		}
-		// ferret-i6a: if NewOutcomeWriter fails, abort the already-open event
-		// writer so the fd is released and the .tmp orphan is cleaned up without
-		// sealing any partial artifact.
-		if ow, err = newOutcomeWriter(filepath.Join(dataDir, "outcomes.jsonl")); err != nil {
-			w.Abort()
-			return err
-		}
-		emit = w.Write
-		emitOut = ow.Write
-	}
-
-	start := time.Now()
-	st := event.NewStats()
-	rollouts := map[string]int{} // instance_id → rows seen, across all files
-	for _, f := range files {
-		if emitErr = ingestSWEFile(f, st, rollouts, emit, emitOut); emitErr != nil {
-			break
-		}
-	}
-	if w != nil && ow != nil {
-		// Close flushes; surface a flush error the same as a per-record error.
-		cerr := w.Close()
-		// ferret-2yv: if the event writer had a per-record error, or its Close
-		// failed, abort the outcome writer so its temp is discarded without
-		// renaming — preventing a mismatched events/outcomes pair on disk.
-		// If the event path is clean, close ow normally to seal its artifact.
-		var oerr error
-		if emitErr != nil || cerr != nil {
-			ow.Abort()
-		} else {
-			oerr = ow.Close()
-		}
-		if err := errors.Join(emitErr, cerr, oerr); err != nil {
-			// Partial run: do NOT write a manifest. The events.jsonl temp file
-			// is dropped by Writer.Close on its own error; on a per-record
-			// error the atomic artifact simply never gets sealed.
-			return err
-		}
-		m := &event.Manifest{CreatedAt: time.Now(), Root: root, Stats: st}
-		if err := event.WriteManifest(filepath.Join(dataDir, "manifest.json"), m); err != nil {
-			return err
-		}
-	}
-	fmt.Printf("ingest format=swe-agent files=%d rows=%d events=%d in %s\n",
-		st.Files, st.Lines, st.Events, time.Since(start).Round(time.Millisecond))
-	fmt.Printf("health streams=%d decode-errs=%d\n", st.Prompts, st.DecodeErrs)
-	return nil
-}
-
-// ingestSWEFile streams one trajectory JSONL file. A malformed row is counted
-// and skipped (loudly to stderr), never fatal. Stats reuse: Lines=rows,
-// Prompts=streams emitted (health line surfaces both).
-//
-// A write error is fatal: it returns up so the caller aborts the whole ingest.
-// Per-stream stats (Events/Prompts/ByType) advance only after every record of
-// that stream is persisted, so the counters never overcount past a failure.
-func ingestSWEFile(path string, st *event.Stats, rollouts map[string]int, emit func(*event.Event) error, emitOut func(*event.Outcome) error) error {
-	st.Files++
-	var writeErr error
-	err := transcript.ReadLines(path, func(line []byte) error {
-		if len(strings.TrimSpace(string(line))) == 0 {
-			return nil
-		}
-		st.Lines++
-		row, err := sweagent.DecodeRow(line)
-		if err != nil {
-			st.DecodeErrs++
-			fmt.Fprintf(os.Stderr, "ferret: %s: row decode: %v (skipped)\n", path, err)
-			return nil
-		}
-		if row.InstanceID == "" {
-			st.DecodeErrs++
-			fmt.Fprintf(os.Stderr, "ferret: %s: row missing instance_id (skipped)\n", path)
-			return nil
-		}
-		// The dataset carries many rollouts per instance (different models and
-		// attempts); each row is its own stream. First occurrence keeps the
-		// bare id, repeats get #2, #3, … so events and outcomes never collide.
-		rollouts[row.InstanceID]++
-		if n := rollouts[row.InstanceID]; n > 1 {
-			row.InstanceID = fmt.Sprintf("%s#%d", row.InstanceID, n)
-		}
-		evs := sweagent.Events(row)
-		for _, ev := range evs {
-			if err := emit(ev); err != nil {
-				writeErr = fmt.Errorf("%w: %s: %w", errWriteAbort, path, err)
-				return writeErr // stop ReadLines
-			}
-			st.ByType[ev.Kind]++
-		}
-		if err := emitOut(&event.Outcome{
-			Stream:     sweagent.Project + "/" + row.InstanceID + "@",
-			Target:     row.Target,
-			ExitStatus: row.ExitStatus,
-		}); err != nil {
-			writeErr = fmt.Errorf("%w: %s: %w", errWriteAbort, path, err)
-			return writeErr
-		}
-		st.Events += len(evs)
-		st.Prompts++ // reused counter: streams emitted
-		return nil
-	})
-	if writeErr != nil {
-		return writeErr
-	}
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ferret: %s: %v (skipped)\n", path, err)
-	}
-	return nil
-}
-
-// jsonlFiles returns the .jsonl files at root (a file returns itself).
-func jsonlFiles(root string) ([]string, error) {
-	info, err := os.Stat(root)
-	if err != nil {
-		return nil, err
-	}
-	if !info.IsDir() {
-		return []string{root}, nil
-	}
-	var out []string
-	err = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil //nolint:nilerr // unreadable entries skipped, not fatal
-		}
-		if !d.IsDir() && strings.HasSuffix(p, ".jsonl") {
-			out = append(out, p)
-		}
-		return nil
-	})
-	sort.Strings(out)
-	return out, err
-}
 
 func ingest(dataDir, root, project string, dryRun bool) error {
 	if root == "" {
@@ -879,54 +695,113 @@ func cmdRank() error {
 	return nil
 }
 
-// ---- validate (rank buckets × ground-truth outcomes) ----
+// ---- report (Finding projection) ----
 
-func cmdValidate() error {
-	cmd := &CLI.Validate
+var errBadKind = errors.New("bad --kind (want routine|friction|loop|noise)")
+
+func cmdReport() error {
+	cmd := &CLI.Report
 	c := fromCommonFlags(cmd.CommonFlags)
+	if c.limit == 0 {
+		c.limit = 30
+	}
 	lo := fromLensFlags(cmd.LensFlags)
 	if err := c.validate("text", fmtJSON); err != nil {
 		return err
 	}
+	switch cmd.Kind {
+	case "", string(mine.KindRoutine), string(mine.KindFriction), string(mine.KindLoop), string(mine.KindNoise):
+	default:
+		return fmt.Errorf("%w: %q", errBadKind, cmd.Kind)
+	}
 	if err := c.ensureData(); err != nil {
 		return err
 	}
-	outcomes, err := event.ReadOutcomes(filepath.Join(c.data, "outcomes.jsonl"))
+	corpus, l, err := lo.corpus(c.eventsPath())
 	if err != nil {
 		return err
 	}
-	if len(outcomes) == 0 {
-		return errNoOutcomes
-	}
-	cor, l, err := lo.corpus(c.eventsPath())
-	if err != nil {
-		return err
-	}
-	pats, _ := mine.MineSeqs(cor, mine.SeqOpts{
+	pats, capped := mine.MineSeqs(corpus, mine.SeqOpts{
 		MinSupport: cmd.MinSupport, MaxGap: cmd.MaxGap, MaxLen: cmd.MaxLen, MaxPatterns: 10000,
 	})
 	opts := mine.DefaultRankOpts()
 	opts.Order = cmd.Order
-	cards, _ := mine.RankPatterns(cor, pats, opts)
-	v := mine.Validate(cor, cards, outcomes, cmd.Corpus, cmd.MinStreams, cmd.MaxGap)
+	cards, _ := mine.RankPatterns(corpus, pats, opts)
+
+	// Cap cards per bucket (parity with rank --top) before projecting.
+	perBucket := map[string]int{}
+	kept := cards[:0:0]
+	for _, card := range cards {
+		if cmd.Top > 0 && perBucket[card.Bucket] >= cmd.Top {
+			continue
+		}
+		perBucket[card.Bucket]++
+		kept = append(kept, card)
+	}
+
+	findings := mine.Findings(corpus, kept, cmd.MaxGap)
+	if cmd.Kind != "" {
+		filtered := findings[:0:0]
+		for _, f := range findings {
+			if string(f.Kind) == cmd.Kind {
+				filtered = append(filtered, f)
+			}
+		}
+		findings = filtered
+	} else {
+		// Default view drops noise — it's frequent but not actionable.
+		drop := findings[:0:0]
+		for _, f := range findings {
+			if f.Kind != mine.KindNoise {
+				drop = append(drop, f)
+			}
+		}
+		findings = drop
+	}
 
 	if c.format == fmtJSON {
+		type jf struct {
+			Motif    []string `json:"motif"`
+			Kind     string   `json:"kind"`
+			Action   string   `json:"action"`
+			Count    int      `json:"count"`
+			Sessions int      `json:"sessions"`
+			FailRate float64  `json:"failRate"`
+			Burn     int      `json:"burn"`
+			Evidence string   `json:"evidence"`
+		}
+		rows := make([]jf, 0, len(findings))
+		for i, f := range findings {
+			if c.limit > 0 && i >= c.limit {
+				break
+			}
+			rows = append(rows, jf{
+				Motif: corpus.Tokens(f.IDs), Kind: string(f.Kind), Action: string(f.Action),
+				Count: f.Count, Sessions: f.Sessions, FailRate: f.FailRate,
+				Burn: f.Burn, Evidence: exemplar(corpus, f.ExStream, f.ExSeq),
+			})
+		}
 		return out.JSON(os.Stdout, map[string]any{
-			keyLens: l.Name(), "corpus": v.Corpus, "streams": v.Streams,
-			"baseFail": v.BaseFail, "buckets": v.Buckets,
-			keyTotal: len(v.Buckets), keyTruncated: false,
+			keyLens: l.Name(), "findings": rows,
+			keyTotal: len(findings), keyTruncated: len(rows) < len(findings) || capped,
 		})
 	}
-	sink := out.NewSink(os.Stdout, 0, c.maxBytes)
+
+	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
 	defer sink.Close()
 	about(sink,
-		"≡ validate: do rank buckets predict task failure? fail-share = % of a bucket's sessions",
-		"≡ that failed; lift = fail-share ÷ base-fail (1.0 = no signal). Needs a labeled corpus.")
-	sink.Head("validate corpus=%s lens=%s streams=%d base-fail=%.1f%%",
-		v.Corpus, l.Name(), v.Streams, v.BaseFail)
-	for _, b := range v.Buckets {
-		if !sink.Row("%-9s fail-share=%5.1f%%  lift=%4.2f   (n=%d patterns, %d streams)",
-			strings.ToUpper(b.Bucket), b.FailShare, b.Lift, b.Patterns, b.Streams) {
+		"≡ report: motifs classified into an action verb, ranked by burn — measured tokens of",
+		"≡ context the motif's occurrences cost across the corpus. burn×nothing else; it's the leak size.",
+		legendMarks)
+	sink.Head("report lens=%s findings=%d (min-support=%d order=%d)",
+		l.Name(), len(findings), cmd.MinSupport, cmd.Order)
+	if capped {
+		sink.Head("‡ seqs hit the 10000-pattern cap — raise --min-support")
+	}
+	for _, f := range findings {
+		if !sink.Row("%-8s %-8s burn=%-8d n=%-5d sess=%-4d fail=%2.0f%%  %s  ex: %s",
+			f.Kind, f.Action, f.Burn, f.Count, f.Sessions, f.FailRate*100,
+			strings.Join(corpus.Tokens(f.IDs), " ⇝ "), exemplar(corpus, f.ExStream, f.ExSeq)) {
 			break
 		}
 	}

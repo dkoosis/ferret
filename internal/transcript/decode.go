@@ -61,6 +61,7 @@ type Block struct {
 	Input     json.RawMessage `json:"input"`
 	ToolUseID string          `json:"tool_use_id"`
 	IsError   *bool           `json:"is_error"`
+	Content   json.RawMessage `json:"content"` // tool_result payload — measured for burn (string or block array)
 }
 
 // ReadLines streams a transcript line by line. No Scanner token limit —
