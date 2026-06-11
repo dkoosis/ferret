@@ -51,6 +51,7 @@ func TestStatusHeuristic(t *testing.T) {
 		{"Traceback (most recent call last):\n  ImportError", event.StatusFail},
 		{"bash: foo: command not found", event.StatusFail},
 		{"ls: cannot access '/x': No such file or directory", event.StatusFail},
+		{"Error: No module named foo", event.StatusFail},
 	}
 	for _, c := range cases {
 		if got := statusFor(c.obs); got != c.want {

@@ -118,8 +118,9 @@ func statusFor(obs string) string {
 		}
 		return event.StatusFail
 	}
-	// SWE-agent error banners.
-	if strings.Contains(obs, "Error:") && strings.Contains(obs, "ERROR") {
+	// SWE-agent error banners. Either marker alone signals failure; many tools
+	// emit only "Error: <msg>" without a separate all-caps ERROR token.
+	if strings.Contains(obs, "Error:") || strings.Contains(obs, "ERROR") {
 		return event.StatusFail
 	}
 	return event.StatusOK
