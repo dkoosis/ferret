@@ -2,6 +2,7 @@ package event
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -97,7 +98,7 @@ func TestWriterFailLeavesPriorIntact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prior artifact gone after failed run: %v", err)
 	}
-	if string(gotBytes) != string(priorBytes) {
+	if !bytes.Equal(gotBytes, priorBytes) {
 		t.Errorf("prior artifact mutated: got %q want %q", gotBytes, priorBytes)
 	}
 
