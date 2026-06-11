@@ -17,21 +17,26 @@ type Outcome struct {
 	ExitStatus string `json:"exitStatus,omitempty"`
 }
 
-// OutcomeWriter streams outcomes to an ndjson artifact.
+// OutcomeWriter streams outcomes to an ndjson artifact. Like Writer, it writes
+// to path+".tmp" and atomically renames onto path only on a fully successful
+// flush+sync+close, so an interrupted run leaves any prior artifact intact.
 type OutcomeWriter struct {
 	f      *os.File
 	buf    *bufio.Writer
 	enc    *json.Encoder
 	closed bool
+	tmp    string // temp file actually written; "" when constructed directly
+	path   string // final destination for the atomic rename
 }
 
 func NewOutcomeWriter(path string) (*OutcomeWriter, error) {
-	f, err := os.Create(path)
+	tmp := path + ".tmp"
+	f, err := os.Create(tmp)
 	if err != nil {
 		return nil, err
 	}
 	buf := bufio.NewWriterSize(f, 1<<16)
-	return &OutcomeWriter{f: f, buf: buf, enc: json.NewEncoder(buf)}, nil
+	return &OutcomeWriter{f: f, buf: buf, enc: json.NewEncoder(buf), tmp: tmp, path: path}, nil
 }
 
 func (w *OutcomeWriter) Write(o *Outcome) error { return w.enc.Encode(o) }
@@ -41,7 +46,26 @@ func (w *OutcomeWriter) Close() error {
 		return nil
 	}
 	w.closed = true
+	if err := w.finish(); err != nil {
+		if w.tmp != "" {
+			_ = os.Remove(w.tmp)
+		}
+		return err
+	}
+	if w.tmp != "" {
+		return os.Rename(w.tmp, w.path)
+	}
+	return nil
+}
+
+// finish flushes buffered bytes, fsyncs durable, and closes the fd. The fd is
+// always closed (even on error), with errors joined so callers see every
+// failure on the path.
+func (w *OutcomeWriter) finish() error {
 	if err := w.buf.Flush(); err != nil {
+		return errors.Join(err, w.f.Close())
+	}
+	if err := w.f.Sync(); err != nil {
 		return errors.Join(err, w.f.Close())
 	}
 	return w.f.Close()
