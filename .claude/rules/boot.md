@@ -1,15 +1,13 @@
 # Boot
 updated: 2026-06-11
 
-→ Pull the full 80k, re-validate: 1k signal confirmed, survives model/length strata.
-
-1. duckdb one-liner in `testdata/README.md`, drop LIMIT → `/tmp/swe-full.jsonl`
-2. `ferret ingest -source swe-agent -root /tmp/swe-full.jsonl -data /tmp/swe80 && ferret validate -data /tmp/swe80 -lens exact`
-3. `go run ./cmd/confound -data /tmp/swe80 -sample /tmp/swe-full.jsonl`
+→ Decide ferret direction: 1k LOOP signal dead at 80k (all lifts ≈1.0, base-fail 83.3%, length confound dominates). Falsified for this corpus, or try other lenses/corpora? Then `bd ready` (kong+CLI-UX bead filed).
 
 ✓ done
-- nebius decoder fixed (text shape, last fence, rollout #n streams); pushed
-- 1k validate: exact-lens LOOP lift 0.48 (45.7 vs 12.9 within 70b)
+- 80k pull+re-validate: clean ingest (80,036 rows), no signal; 405b residual thin (n≈200–700)
+- README new-user refresh
 
 ‡ traps
-- no train/test split yet — correlation claim only
+- confound prints RESOLVE rates, validate FAIL rates — complementary, not a bug
+- no train/test split — correlation only
+- artifacts: /tmp/swe-full.jsonl (5GB), /tmp/swe80
