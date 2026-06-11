@@ -648,7 +648,7 @@ func cmdSummary() error {
 // Every text report opens with 1-2 lines saying what the stat measures and
 // how to read the notation. JSON output stays clean (schema is the contract).
 
-const legendTokens = "≡ tok! failed · tok? in failed chain · tok+ collapsed repeat run · ex: session@pos"
+const legendMarks = "≡ tok! failed · tok? in failed chain · tok+ collapsed repeat run · ex: session@pos"
 
 func about(sink *out.Sink, lines ...string) {
 	for _, ln := range lines {
@@ -705,7 +705,7 @@ func cmdNgrams() error {
 	about(sink,
 		"≡ ngrams: exact action sequences repeated verbatim (no gaps). High count across many",
 		"≡ sessions = a habitual routine — script/skill candidate. Nx/Ms = N occurrences in M sessions.",
-		legendTokens)
+		legendMarks)
 	sink.Head("ngrams lens=%s n=%s streams=%d grams=%d (min-count=%d min-sessions=%d)",
 		l.Name(), cmd.N, len(corpus.Streams), len(grams), cmd.MinCount, cmd.MinSessions)
 	for _, g := range grams {
@@ -763,7 +763,7 @@ func cmdSeqs() error {
 	about(sink,
 		"≡ seqs: ordered subsequences that recur with up to max-gap other actions between steps",
 		"≡ (PrefixSpan) — habits that survive interruptions. Ns = pattern appears in N sessions. ⇝ = gap allowed.",
-		legendTokens)
+		legendMarks)
 	sink.Head("seqs lens=%s streams=%d patterns=%d (min-support=%d max-gap=%d max-len=%d)",
 		l.Name(), len(corpus.Streams), len(pats), cmd.MinSupport, cmd.MaxGap, cmd.MaxLen)
 	if capped {
@@ -841,7 +841,7 @@ func cmdRank() error {
 	about(sink,
 		"≡ rank: mined seqs deduped + scored into review buckets. Columns: sessions · bits",
 		"≡ (predictability of the chain — lower = tighter habit) · score (review priority).",
-		legendTokens)
+		legendMarks)
 	sink.Head("rank lens=%s patterns=%d → cards=%d noise=%d (min-support=%d order=%d top=%d)",
 		l.Name(), len(pats), len(cards), noise, cmd.MinSupport, cmd.Order, cmd.Top)
 	if capped {
