@@ -3,6 +3,7 @@ package event
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"os"
 	"time"
 )
@@ -16,9 +17,10 @@ type Manifest struct {
 
 // Writer streams events to an ndjson artifact.
 type Writer struct {
-	f   *os.File
-	buf *bufio.Writer
-	enc *json.Encoder
+	f      *os.File
+	buf    *bufio.Writer
+	enc    *json.Encoder
+	closed bool
 }
 
 func NewWriter(path string) (*Writer, error) {
@@ -33,9 +35,12 @@ func NewWriter(path string) (*Writer, error) {
 func (w *Writer) Write(ev *Event) error { return w.enc.Encode(ev) }
 
 func (w *Writer) Close() error {
+	if w.closed {
+		return nil
+	}
+	w.closed = true
 	if err := w.buf.Flush(); err != nil {
-		w.f.Close()
-		return err
+		return errors.Join(err, w.f.Close())
 	}
 	return w.f.Close()
 }
