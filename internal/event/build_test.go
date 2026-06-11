@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/dkoosis/ferret/internal/transcript"
 )
@@ -164,5 +165,24 @@ func TestSidechainFlag(t *testing.T) {
 	evs := ingest(t, src)
 	if len(evs) != 1 || !evs[0].Sidechain {
 		t.Fatalf("want 1 sidechain event, got %+v", evs)
+	}
+}
+
+// TestTruncRuneBoundary verifies trunc never splits a multibyte UTF-8 rune.
+// A CJK string is all 3-byte runes, so a byte cut at a non-multiple-of-3
+// offset lands mid-rune; trunc must walk back to a boundary.
+func TestTruncRuneBoundary(t *testing.T) {
+	s := strings.Repeat("世", 10) // 10 runes x 3 bytes = 30 bytes
+	for n := 0; n <= len(s); n++ {
+		got := trunc(s, n)
+		if !utf8.ValidString(got) {
+			t.Fatalf("trunc(%q, %d) = %q: not valid UTF-8", s, n, got)
+		}
+		if strings.ContainsRune(got, '�') {
+			t.Fatalf("trunc(%q, %d) = %q: contains U+FFFD", s, n, got)
+		}
+		if len(got) > n {
+			t.Fatalf("trunc(%q, %d) = %q: length %d exceeds cut %d", s, n, got, len(got), n)
+		}
 	}
 }

@@ -12,6 +12,7 @@ package sweagent
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/dkoosis/ferret/internal/event"
 	"github.com/dkoosis/ferret/internal/shellnorm"
@@ -118,8 +119,9 @@ func statusFor(obs string) string {
 		}
 		return event.StatusFail
 	}
-	// SWE-agent error banners.
-	if strings.Contains(obs, "Error:") && strings.Contains(obs, "ERROR") {
+	// SWE-agent error banners. Either marker alone signals failure; many tools
+	// emit only "Error: <msg>" without a separate all-caps ERROR token.
+	if strings.Contains(obs, "Error:") || strings.Contains(obs, "ERROR") {
 		return event.StatusFail
 	}
 	return event.StatusOK
@@ -159,5 +161,10 @@ func trunc(s string) string {
 	if len(s) <= detailMax {
 		return s
 	}
-	return s[:detailMax]
+	// Walk back to a rune boundary so we never split a multibyte rune.
+	n := detailMax
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
