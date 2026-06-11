@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,6 +28,8 @@ const usage = `ferret — mine Claude Code transcripts for repeated behavior
   ferret ingest   [-root DIR] [-project SUBSTR] [-dry-run]     build ~/.ferret/events.jsonl
   ferret summary  [-by corpus|project|session]                 corpus health + tool mix
   ferret ngrams   [-lens tool] [-n 2-5] [-min-count 5] [-min-sessions 3]
+  ferret seqs     [-lens tool] [-min-support 20] [-max-gap 3] [-max-len 5]   gapped subsequences (PrefixSpan)
+  ferret surprise [-lens tool] [-order 3] [-min-toks 20]       per-session predictability (low=scriptable, high=thrash)
   ferret graph    [-lens tool] [-min-count 20] [-format text|json|mermaid|dot] [-loops]
   ferret tokens   -session PREFIX [-lens tool]                 one session's token stream (lens debugger)
 
@@ -42,7 +45,14 @@ var (
 	errMaxBytesJSON    = errors.New("-max-bytes is not supported with -format json (use -limit)")
 )
 
-const fmtJSON = "json"
+// shared JSON response keys — every truncating JSON response carries
+// keyTotal + keyTruncated (the AX truncation contract)
+const (
+	fmtJSON      = "json"
+	keyLens      = "lens"
+	keyTotal     = "total"
+	keyTruncated = "truncated"
+)
 
 func main() {
 	if len(os.Args) < 2 {
@@ -57,6 +67,10 @@ func main() {
 		err = cmdSummary(os.Args[2:])
 	case "ngrams":
 		err = cmdNgrams(os.Args[2:])
+	case "seqs":
+		err = cmdSeqs(os.Args[2:])
+	case "surprise":
+		err = cmdSurprise(os.Args[2:])
 	case "graph":
 		err = cmdGraph(os.Args[2:])
 	case "tokens":
@@ -267,7 +281,7 @@ func cmdSummary(args []string) error {
 		}
 		return out.JSON(os.Stdout, map[string]any{
 			"by": s.By, "buckets": capBuckets,
-			"total": total, "truncated": len(capBuckets) < total,
+			keyTotal: total, keyTruncated: len(capBuckets) < total,
 			"topActions": s.TopActions,
 		})
 	}
@@ -333,8 +347,8 @@ func cmdNgrams(args []string) error {
 			rows = append(rows, jg{corpus.Tokens(g.IDs), g.Count, g.Sessions, exemplar(corpus, g.ExStream, g.ExSeq)})
 		}
 		return out.JSON(os.Stdout, map[string]any{
-			"lens": l.Name(), "n": *nRange, "grams": rows,
-			"total": len(grams), "truncated": len(rows) < len(grams),
+			keyLens: l.Name(), "n": *nRange, "grams": rows,
+			keyTotal: len(grams), keyTruncated: len(rows) < len(grams),
 		})
 	}
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
@@ -344,6 +358,136 @@ func cmdNgrams(args []string) error {
 	for _, g := range grams {
 		if !sink.Row("%5dx/%-4ds %s  ex: %s",
 			g.Count, g.Sessions, strings.Join(corpus.Tokens(g.IDs), " → "), exemplar(corpus, g.ExStream, g.ExSeq)) {
+			break
+		}
+	}
+	return nil
+}
+
+// ---- seqs (PrefixSpan) ----
+
+func cmdSeqs(args []string) error {
+	fs := flag.NewFlagSet("seqs", flag.ExitOnError)
+	c := commonFlags(fs, 30)
+	lo := lensFlags(fs)
+	minSupport := fs.Int("min-support", 20, "min distinct streams containing the pattern")
+	maxGap := fs.Int("max-gap", 3, "max positions between consecutive items (1 = adjacent)")
+	maxLen := fs.Int("max-len", 5, "max pattern length")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := c.validate("text", fmtJSON); err != nil {
+		return err
+	}
+	if err := c.ensureData(); err != nil {
+		return err
+	}
+	corpus, l, err := lo.corpus(c.eventsPath())
+	if err != nil {
+		return err
+	}
+	pats, capped := mine.MineSeqs(corpus, mine.SeqOpts{
+		MinSupport: *minSupport, MaxGap: *maxGap, MaxLen: *maxLen, MaxPatterns: 10000,
+	})
+
+	if c.format == fmtJSON {
+		type jp struct {
+			Tokens   []string `json:"tokens"`
+			Support  int      `json:"support"`
+			Exemplar string   `json:"exemplar"`
+		}
+		rows := make([]jp, 0, len(pats))
+		for i, p := range pats {
+			if c.limit > 0 && i >= c.limit {
+				break
+			}
+			rows = append(rows, jp{corpus.Tokens(p.IDs), p.Support, exemplar(corpus, p.ExStream, p.ExSeq)})
+		}
+		return out.JSON(os.Stdout, map[string]any{
+			keyLens: l.Name(), "maxGap": *maxGap, "patterns": rows,
+			keyTotal: len(pats), keyTruncated: len(rows) < len(pats) || capped,
+		})
+	}
+	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
+	defer sink.Close()
+	sink.Head("seqs lens=%s streams=%d patterns=%d (min-support=%d max-gap=%d max-len=%d)",
+		l.Name(), len(corpus.Streams), len(pats), *minSupport, *maxGap, *maxLen)
+	if capped {
+		sink.Head("‡ search hit the 10000-pattern cap — raise -min-support")
+	}
+	for _, p := range pats {
+		if !sink.Row("%5ds %s  ex: %s",
+			p.Support, strings.Join(corpus.Tokens(p.IDs), " ⇝ "), exemplar(corpus, p.ExStream, p.ExSeq)) {
+			break
+		}
+	}
+	return nil
+}
+
+// ---- surprise (PPM-lite) ----
+
+func cmdSurprise(args []string) error {
+	fs := flag.NewFlagSet("surprise", flag.ExitOnError)
+	c := commonFlags(fs, 20)
+	lo := lensFlags(fs)
+	order := fs.Int("order", 3, "model order: predict each token from up to N prior tokens")
+	minToks := fs.Int("min-toks", 20, "skip streams shorter than this")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := c.validate("text", fmtJSON); err != nil {
+		return err
+	}
+	if err := c.ensureData(); err != nil {
+		return err
+	}
+	corpus, l, err := lo.corpus(c.eventsPath())
+	if err != nil {
+		return err
+	}
+	scores := mine.ScoreSurprise(corpus, mine.SurpriseOpts{Order: *order, MinToks: *minToks})
+
+	mean := 0.0
+	for _, s := range scores {
+		mean += s.Bits
+	}
+	if len(scores) > 0 {
+		mean /= float64(len(scores))
+	}
+	half := c.limit / 2
+	if half < 1 {
+		half = 10
+	}
+	lo2hi := scores
+	routine := lo2hi
+	if len(routine) > half {
+		routine = routine[:half]
+	}
+	thrash := lo2hi
+	if len(thrash) > half {
+		thrash = thrash[len(thrash)-half:]
+	}
+
+	if c.format == fmtJSON {
+		return out.JSON(os.Stdout, map[string]any{
+			keyLens: l.Name(), "order": *order, "meanBits": mean,
+			"routine": routine, "thrash": thrash,
+			keyTotal: len(scores), keyTruncated: len(routine)+len(thrash) < len(scores),
+		})
+	}
+	sink := out.NewSink(os.Stdout, c.limit+2, c.maxBytes)
+	defer sink.Close()
+	sink.Head("surprise lens=%s order=%d streams=%d mean=%.2f bits/tok (low=routine/scriptable, high=thrash)",
+		l.Name(), *order, len(scores), mean)
+	sink.Head("most routine:")
+	for _, s := range routine {
+		if !sink.Row("%6.2f bits %5d toks  %s", s.Bits, s.Toks, s.Stream) {
+			break
+		}
+	}
+	sink.Head("most surprising:")
+	for _, s := range slices.Backward(thrash) {
+		if !sink.Row("%6.2f bits %5d toks  %s", s.Bits, s.Toks, s.Stream) {
 			break
 		}
 	}
@@ -407,8 +551,8 @@ func cmdGraph(args []string) error {
 			cyc = append(cyc, jc{corpus.Vocab[cy.A], corpus.Vocab[cy.B], cy.Count})
 		}
 		return out.JSON(os.Stdout, map[string]any{
-			"lens":  l.Name(),
-			"edges": rows, "edgesTotal": totalEdges, "truncated": len(rows) < totalEdges,
+			keyLens: l.Name(),
+			"edges": rows, "edgesTotal": totalEdges, keyTruncated: len(rows) < totalEdges,
 			"cycles": cyc, "cyclesTotal": len(f.Cycles),
 		})
 	case "mermaid", "dot":
@@ -530,7 +674,7 @@ func cmdTokens(args []string) error {
 			}
 			streams = append(streams, s)
 		}
-		return out.JSON(os.Stdout, map[string]any{"lens": l.Name(), "streams": streams})
+		return out.JSON(os.Stdout, map[string]any{keyLens: l.Name(), "streams": streams})
 	}
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
 	defer sink.Close()
