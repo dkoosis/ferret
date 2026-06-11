@@ -1,7 +1,9 @@
 package sweagent
 
 import (
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/dkoosis/ferret/internal/event"
 )
@@ -115,5 +117,22 @@ func TestTrajectoryAsJSONString(t *testing.T) {
 func TestMalformedRowErrors(t *testing.T) {
 	if _, err := DecodeRow([]byte(`{"instance_id": not json`)); err == nil {
 		t.Error("expected decode error on malformed row")
+	}
+}
+
+// TestTruncRuneBoundary verifies trunc cuts at detailMax (160) without
+// splitting a multibyte rune. CJK runes are 3 bytes; 160 is not a multiple
+// of 3, so a naive byte slice would land mid-rune.
+func TestTruncRuneBoundary(t *testing.T) {
+	s := strings.Repeat("世", 100) // 300 bytes, exceeds detailMax=160
+	got := trunc(s)
+	if !utf8.ValidString(got) {
+		t.Fatalf("trunc(%q) = %q: not valid UTF-8", s, got)
+	}
+	if strings.ContainsRune(got, '�') {
+		t.Fatalf("trunc(%q) = %q: contains U+FFFD", s, got)
+	}
+	if len(got) > detailMax {
+		t.Fatalf("trunc length %d exceeds detailMax %d", len(got), detailMax)
 	}
 }
