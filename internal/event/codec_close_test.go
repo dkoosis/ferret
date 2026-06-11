@@ -9,10 +9,14 @@ import (
 	"testing"
 )
 
+// errBoomFlush is the static sentinel errWriter returns so the flush-error
+// path is identifiable via errors.Is (and satisfies err113: no dynamic errors).
+var errBoomFlush = errors.New("boom-flush")
+
 // errWriter always fails on Write, forcing bufio.Writer.Flush to error.
 type errWriter struct{}
 
-func (errWriter) Write(p []byte) (int, error) { return 0, errors.New("boom-flush") }
+func (errWriter) Write(p []byte) (int, error) { return 0, errBoomFlush }
 
 func TestWriterCloseIdempotent(t *testing.T) {
 	w, err := NewWriter(filepath.Join(t.TempDir(), "events.jsonl"))
