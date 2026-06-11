@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"hash/fnv"
 	"time"
+	"unicode/utf8"
 
 	"github.com/dkoosis/ferret/internal/shellnorm"
 	"github.com/dkoosis/ferret/internal/transcript"
@@ -269,6 +270,10 @@ func session(src transcript.Source, raw *transcript.Raw) string {
 func trunc(s string, n int) string {
 	if len(s) <= n {
 		return s
+	}
+	// Walk back to a rune boundary so we never split a multibyte rune.
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
 	}
 	return s[:n]
 }

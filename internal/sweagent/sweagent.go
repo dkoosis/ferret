@@ -12,6 +12,7 @@ package sweagent
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/dkoosis/ferret/internal/event"
 	"github.com/dkoosis/ferret/internal/shellnorm"
@@ -160,5 +161,10 @@ func trunc(s string) string {
 	if len(s) <= detailMax {
 		return s
 	}
-	return s[:detailMax]
+	// Walk back to a rune boundary so we never split a multibyte rune.
+	n := detailMax
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
