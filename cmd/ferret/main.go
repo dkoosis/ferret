@@ -205,13 +205,13 @@ func cmdIngest(args []string) error {
 // *event.Writer, but tests inject a writer that fails after K records to prove
 // a mid-ingest write error aborts the run and suppresses the manifest.
 type eventSink interface {
-	Write(*event.Event) error
+	Write(ev *event.Event) error
 	Close() error
 }
 
 // outcomeSink mirrors eventSink for the SWE-agent outcomes sidecar.
 type outcomeSink interface {
-	Write(*event.Outcome) error
+	Write(o *event.Outcome) error
 	Close() error
 }
 
@@ -316,7 +316,7 @@ func ingestSWEFile(path string, st *event.Stats, emit func(*event.Event) error, 
 		evs := sweagent.Events(row)
 		for _, ev := range evs {
 			if err := emit(ev); err != nil {
-				writeErr = fmt.Errorf("%w: %s: %v", errWriteAbort, path, err)
+				writeErr = fmt.Errorf("%w: %s: %w", errWriteAbort, path, err)
 				return writeErr // stop ReadLines
 			}
 			st.ByType[ev.Kind]++
@@ -326,7 +326,7 @@ func ingestSWEFile(path string, st *event.Stats, emit func(*event.Event) error, 
 			Target:     row.Target,
 			ExitStatus: row.ExitStatus,
 		}); err != nil {
-			writeErr = fmt.Errorf("%w: %s: %v", errWriteAbort, path, err)
+			writeErr = fmt.Errorf("%w: %s: %w", errWriteAbort, path, err)
 			return writeErr
 		}
 		st.Events += len(evs)
@@ -404,7 +404,7 @@ func ingest(dataDir, root, project string, dryRun bool) error {
 				return // already failed; drain remaining emits cheaply
 			}
 			if werr := w.Write(ev); werr != nil {
-				emitErr = fmt.Errorf("%w: %v", errWriteAbort, werr)
+				emitErr = fmt.Errorf("%w: %w", errWriteAbort, werr)
 			}
 		}
 	}
