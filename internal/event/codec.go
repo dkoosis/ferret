@@ -59,6 +59,20 @@ func (w *Writer) Close() error {
 	return nil
 }
 
+// Abort closes the underlying file and removes the temp file without renaming
+// it onto the final path. Use when the ingest run must be rolled back and the
+// artifact must not be published — prevents orphan files.
+func (w *Writer) Abort() {
+	if w.closed {
+		return
+	}
+	w.closed = true
+	_ = w.f.Close()
+	if w.tmp != "" {
+		_ = os.Remove(w.tmp)
+	}
+}
+
 // finish flushes buffered bytes, fsyncs durable, and closes the fd. The fd is
 // always closed (even on flush/sync error), and errors are joined so callers
 // see every failure on the path.

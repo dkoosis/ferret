@@ -136,9 +136,15 @@ func (c *common) validate(formats ...string) error {
 	return nil
 }
 
-// ensureData runs a default ingest when the artifact is missing.
+// ensureData runs a default ingest when the artifact is missing or incomplete.
+// A bare os.Stat is not sufficient: a 0-byte file (from an interrupted ingest)
+// or a file with no companion manifest passes Stat but represents a broken
+// corpus. The manifest is written last by every ingest path, so its presence
+// is the correct completeness signal.
 func (c *common) ensureData() error {
-	if _, err := os.Stat(c.eventsPath()); err == nil {
+	manifestPath := filepath.Join(c.data, "manifest.json")
+	if _, err := os.Stat(manifestPath); err == nil {
+		// manifest exists → ingest completed successfully
 		return nil
 	}
 	fmt.Fprintln(os.Stderr, "ferret: no events artifact — running ingest first")
@@ -204,15 +210,21 @@ func cmdIngest(args []string) error {
 // eventSink is the persistence seam for ingest: the real implementation is
 // *event.Writer, but tests inject a writer that fails after K records to prove
 // a mid-ingest write error aborts the run and suppresses the manifest.
+// Abort discards the in-progress temp file without sealing the artifact.
 type eventSink interface {
 	Write(ev *event.Event) error
 	Close() error
+	Abort()
 }
 
 // outcomeSink mirrors eventSink for the SWE-agent outcomes sidecar.
+// Abort discards the in-progress temp file without sealing the artifact; callers
+// must invoke it instead of Close on a partial run so the outcomes file is
+// never atomically renamed into place when events are incomplete.
 type outcomeSink interface {
 	Write(o *event.Outcome) error
 	Close() error
+	Abort()
 }
 
 // newEventWriter / newOutcomeWriter are indirected through vars so a test can
@@ -252,7 +264,11 @@ func ingestSWE(dataDir, root string, dryRun bool) error {
 		if w, err = newEventWriter(filepath.Join(dataDir, "events.jsonl")); err != nil {
 			return err
 		}
+		// ferret-i6a: if NewOutcomeWriter fails, abort the already-open event
+		// writer so the fd is released and the .tmp orphan is cleaned up without
+		// sealing any partial artifact.
 		if ow, err = newOutcomeWriter(filepath.Join(dataDir, "outcomes.jsonl")); err != nil {
+			w.Abort()
 			return err
 		}
 		emit = w.Write
@@ -270,7 +286,16 @@ func ingestSWE(dataDir, root string, dryRun bool) error {
 	if w != nil && ow != nil {
 		// Close flushes; surface a flush error the same as a per-record error.
 		cerr := w.Close()
-		oerr := ow.Close()
+		// ferret-2yv: if the event writer had a per-record error, or its Close
+		// failed, abort the outcome writer so its temp is discarded without
+		// renaming — preventing a mismatched events/outcomes pair on disk.
+		// If the event path is clean, close ow normally to seal its artifact.
+		var oerr error
+		if emitErr != nil || cerr != nil {
+			ow.Abort()
+		} else {
+			oerr = ow.Close()
+		}
 		if err := errors.Join(emitErr, cerr, oerr); err != nil {
 			// Partial run: do NOT write a manifest. The events.jsonl temp file
 			// is dropped by Writer.Close on its own error; on a per-record

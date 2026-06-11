@@ -58,6 +58,20 @@ func (w *OutcomeWriter) Close() error {
 	return nil
 }
 
+// Abort closes the underlying file and removes the temp file without renaming
+// it onto the final path. Use when the ingest run is partial and the outcome
+// sidecar must not be sealed — prevents a mismatched events/outcomes pair.
+func (w *OutcomeWriter) Abort() {
+	if w.closed {
+		return
+	}
+	w.closed = true
+	_ = w.f.Close()
+	if w.tmp != "" {
+		_ = os.Remove(w.tmp)
+	}
+}
+
 // finish flushes buffered bytes, fsyncs durable, and closes the fd. The fd is
 // always closed (even on error), with errors joined so callers see every
 // failure on the path.
