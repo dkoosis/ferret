@@ -3,6 +3,7 @@ package event
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"os"
 )
 
@@ -18,9 +19,10 @@ type Outcome struct {
 
 // OutcomeWriter streams outcomes to an ndjson artifact.
 type OutcomeWriter struct {
-	f   *os.File
-	buf *bufio.Writer
-	enc *json.Encoder
+	f      *os.File
+	buf    *bufio.Writer
+	enc    *json.Encoder
+	closed bool
 }
 
 func NewOutcomeWriter(path string) (*OutcomeWriter, error) {
@@ -35,9 +37,12 @@ func NewOutcomeWriter(path string) (*OutcomeWriter, error) {
 func (w *OutcomeWriter) Write(o *Outcome) error { return w.enc.Encode(o) }
 
 func (w *OutcomeWriter) Close() error {
+	if w.closed {
+		return nil
+	}
+	w.closed = true
 	if err := w.buf.Flush(); err != nil {
-		w.f.Close()
-		return err
+		return errors.Join(err, w.f.Close())
 	}
 	return w.f.Close()
 }
