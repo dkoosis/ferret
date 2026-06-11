@@ -261,8 +261,9 @@ func ingestSWE(dataDir, root string, dryRun bool) error {
 
 	start := time.Now()
 	st := event.NewStats()
+	rollouts := map[string]int{} // instance_id → rows seen, across all files
 	for _, f := range files {
-		if emitErr = ingestSWEFile(f, st, emit, emitOut); emitErr != nil {
+		if emitErr = ingestSWEFile(f, st, rollouts, emit, emitOut); emitErr != nil {
 			break
 		}
 	}
@@ -294,7 +295,7 @@ func ingestSWE(dataDir, root string, dryRun bool) error {
 // A write error is fatal: it returns up so the caller aborts the whole ingest.
 // Per-stream stats (Events/Prompts/ByType) advance only after every record of
 // that stream is persisted, so the counters never overcount past a failure.
-func ingestSWEFile(path string, st *event.Stats, emit func(*event.Event) error, emitOut func(*event.Outcome) error) error {
+func ingestSWEFile(path string, st *event.Stats, rollouts map[string]int, emit func(*event.Event) error, emitOut func(*event.Outcome) error) error {
 	st.Files++
 	var writeErr error
 	err := transcript.ReadLines(path, func(line []byte) error {
@@ -312,6 +313,13 @@ func ingestSWEFile(path string, st *event.Stats, emit func(*event.Event) error, 
 			st.DecodeErrs++
 			fmt.Fprintf(os.Stderr, "ferret: %s: row missing instance_id (skipped)\n", path)
 			return nil
+		}
+		// The dataset carries many rollouts per instance (different models and
+		// attempts); each row is its own stream. First occurrence keeps the
+		// bare id, repeats get #2, #3, … so events and outcomes never collide.
+		rollouts[row.InstanceID]++
+		if n := rollouts[row.InstanceID]; n > 1 {
+			row.InstanceID = fmt.Sprintf("%s#%d", row.InstanceID, n)
 		}
 		evs := sweagent.Events(row)
 		for _, ev := range evs {

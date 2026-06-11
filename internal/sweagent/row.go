@@ -42,6 +42,7 @@ type Message struct {
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content"` // string, or a content-block array
 	Action  string          `json:"action"`  // SWE-agent logs the raw action here
+	Text    string          `json:"text"`    // nebius export: thought prose + fenced action
 }
 
 func (m Message) isAI() bool {
@@ -55,20 +56,52 @@ func (m Message) isUser() bool {
 }
 
 // action returns the action string for an ai message: the explicit action
-// field when present, else the message content (some exports inline the
-// action as the assistant's content).
+// field when present, else the fenced block in text (nebius export), else
+// the message content (some exports inline the action as the assistant's
+// content).
 func (m Message) action() string {
 	if strings.TrimSpace(m.Action) != "" {
 		return m.Action
 	}
+	if m.Text != "" {
+		// Text is thought prose plus the action in ``` fences; prose without
+		// a fence carries no executable action.
+		return fencedAction(m.Text)
+	}
 	return m.content()
+}
+
+// fencedAction extracts the action from a nebius-style ai message: thought
+// prose with the command in a ``` fence. When several blocks appear (the
+// model quotes code, or proposes alternatives), the environment executes the
+// LAST one — verified against the following observations in the real corpus —
+// so that is the block returned.
+func fencedAction(text string) string {
+	parts := strings.Split(text, "```")
+	if len(parts) < 2 {
+		return ""
+	}
+	// Odd indices are inside fences. An even final index means the last
+	// fence closed; step back to the last inside segment. An odd final
+	// index is an unterminated trailing block — take it as-is.
+	i := len(parts) - 1
+	if i%2 == 0 {
+		i--
+	}
+	body := parts[i]
+	// Drop a language tag on the opening fence line (```python). Command
+	// blocks open bare, so their first line is empty.
+	if nl := strings.IndexByte(body, '\n'); nl >= 0 && strings.TrimSpace(body[:nl]) != "" && !strings.ContainsAny(body[:nl], " \t") {
+		body = body[nl+1:]
+	}
+	return strings.TrimSpace(body)
 }
 
 // content flattens Content, which may be a bare string or a list of
 // {type,text} blocks.
 func (m Message) content() string {
 	if len(m.Content) == 0 {
-		return ""
+		return m.Text // nebius export puts observations in text
 	}
 	var s string
 	if json.Unmarshal(m.Content, &s) == nil {

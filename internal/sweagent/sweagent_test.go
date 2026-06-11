@@ -104,6 +104,36 @@ func TestTolerantFieldNames(t *testing.T) {
 	}
 }
 
+// TestNebiusTextShape covers the real nebius/SWE-agent-trajectories export:
+// every message carries a text field; ai text is thought prose with the
+// action in a ``` fence; observations live on the following user message's
+// text. With several fences, the environment executes the last block.
+func TestNebiusTextShape(t *testing.T) {
+	row := decode(t, `{"instance_id":"neb-1","target":false,"exit_status":"submitted",
+		"trajectory":[
+			{"role":"system","text":null,"system_prompt":"SETTING: ..."},
+			{"role":"user","text":"ISSUE: something broke"},
+			{"role":"ai","text":"DISCUSSION\nLet us reproduce.\n`+"```"+`\npython manage.py test\n`+"```"+`"},
+			{"role":"user","text":"Traceback (most recent call last):\n  ValueError"},
+			{"role":"ai","text":"Quoting code:\n`+"```"+`python\nif x:\n    pass\n`+"```"+`\nNow create it.\n`+"```"+`\ncreate test_x.py\n`+"```"+`"},
+			{"role":"user","text":"[File: /repo/test_x.py (1 lines total)]"},
+			{"role":"ai","text":"All thought, no command."},
+			{"role":"ai","text":"Done.\n`+"```"+`\nsubmit\n`+"```"+`"}]}`)
+	evs := Events(row)
+	if len(evs) != 3 {
+		t.Fatalf("events = %d, want 3 (prose-only ai msg dropped): %+v", len(evs), evs)
+	}
+	if evs[0].Action != "python" || evs[0].Status != event.StatusFail {
+		t.Errorf("ev0 = %q/%q, want python/fail (obs has Traceback)", evs[0].Action, evs[0].Status)
+	}
+	if evs[1].Action != "create" || evs[1].Target != "test_x.py" {
+		t.Errorf("ev1 = %q/%q, want create/test_x.py (last fence wins, python block ignored)", evs[1].Action, evs[1].Target)
+	}
+	if evs[2].Action != "submit" {
+		t.Errorf("ev2 = %q, want submit", evs[2].Action)
+	}
+}
+
 // TestTrajectoryAsJSONString covers the struct-column export that double-
 // encodes the trajectory array as a quoted string.
 func TestTrajectoryAsJSONString(t *testing.T) {
