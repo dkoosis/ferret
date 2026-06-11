@@ -17,7 +17,7 @@ type Event struct {
 	Action    string    `json:"act"` // tool name; for shell: normalized command
 	Target    string    `json:"tgt,omitempty"`
 	Detail    string    `json:"d,omitempty"`  // raw command segment, truncated
-	Status    string    `json:"st,omitempty"` // ok | fail | none (no paired result)
+	Status    string    `json:"st,omitempty"` // ok | fail | cfail | none (no paired result)
 	DurMS     int64     `json:"ms,omitempty"` // tool_use → tool_result latency
 	Retry     bool      `json:"rt,omitempty"` // same action+target shortly after a failure
 	Compound  bool      `json:"cp,omitempty"` // segment of a split compound bash chain
@@ -32,9 +32,10 @@ const (
 	KindShell  = "shell"
 	KindPrompt = "prompt"
 
-	StatusOK   = "ok"
-	StatusFail = "fail"
-	StatusNone = "none"
+	StatusOK    = "ok"
+	StatusFail  = "fail"
+	StatusCFail = "cfail" // compound shell chain failed; failing segment unknown
+	StatusNone  = "none"
 )
 
 // Stats accumulates ingest health counters.

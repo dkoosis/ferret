@@ -52,6 +52,35 @@ func TestNgramSupergramSuppression(t *testing.T) {
 	}
 }
 
+func TestSuppressorMustClearNoiseFloor(t *testing.T) {
+	// edit→test occurs in 3 streams; edit→test→diff retains >80% of its count
+	// but lives in only 1 stream. A sub-threshold extension must not suppress
+	// its prefix — that would delete the only valid pattern.
+	streams := [][]string{
+		{"x", "edit", "test", "diff", "y"},
+		{"x", "edit", "test", "diff", "y"},
+		{"x", "edit", "test", "diff", "y"},
+		{"z", "edit", "test", "other"},
+	}
+	// trigram: count=3 sessions=3... need trigram below threshold. Use min-sessions=4:
+	// bigram edit→test count=4 sessions=4 (passes), trigram count=3 sessions=3 (fails).
+	c := corpusFrom(streams)
+	grams := Filter(CountGrams(c, 2, 3), 2, 4)
+	found := false
+	for _, g := range grams {
+		toks := c.Tokens(g.IDs)
+		if len(toks) == 2 && toks[0] == "edit" && toks[1] == "test" {
+			found = true
+		}
+		if len(toks) == 3 {
+			t.Errorf("trigram %v is below min-sessions=4, must not appear", toks)
+		}
+	}
+	if !found {
+		t.Error("edit→test passes the floor and its extension doesn't — it must survive")
+	}
+}
+
 func TestCollapse(t *testing.T) {
 	c := corpusFrom([][]string{{"read", "read", "read", "edit", "read"}})
 	intern := map[string]uint32{}

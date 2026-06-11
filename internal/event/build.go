@@ -156,12 +156,18 @@ func (b *Builder) userLine(src transcript.Source, st *fileState, raw *transcript
 }
 
 // resolve applies a tool_result's status and latency to its pending events.
+// A failed compound chain gets cfail, not fail: the result says the invocation
+// failed, not which segment — fail on every segment would invent friction.
 func (st *fileState) resolve(blk transcript.Block, ts time.Time) {
+	evs := st.pending[blk.ToolUseID]
 	status := StatusOK
 	if blk.IsError != nil && *blk.IsError {
 		status = StatusFail
+		if len(evs) > 1 {
+			status = StatusCFail
+		}
 	}
-	for _, ev := range st.pending[blk.ToolUseID] {
+	for _, ev := range evs {
 		ev.Status = status
 		if ct, ok := st.callTime[blk.ToolUseID]; ok && !ts.IsZero() {
 			ev.DurMS = ts.Sub(ct).Milliseconds()
@@ -192,6 +198,8 @@ func finish(events []*Event, stats *Stats) {
 			// Success closes the retry window: a later organic call to the
 			// same action+target is not a retry of the original failure.
 			delete(lastFail, key)
+			// StatusCFail neither opens nor closes the window: the failing
+			// segment is unknown, so no per-action attribution is safe.
 		}
 	}
 }

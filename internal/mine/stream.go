@@ -52,8 +52,13 @@ func Build(eventsPath string, l lens.Lens, opts Options) (*Corpus, error) {
 		if !ok {
 			return nil
 		}
-		if opts.MarkFail && ev.Status == event.StatusFail {
-			tok += "!"
+		if opts.MarkFail {
+			switch ev.Status {
+			case event.StatusFail:
+				tok += "!"
+			case event.StatusCFail:
+				tok += "?" // part of a failed compound chain; failing segment unknown
+			}
 		}
 		key := ev.Project + "/" + ev.Session + "@" + ev.Agent
 		si, ok := streamIdx[key]

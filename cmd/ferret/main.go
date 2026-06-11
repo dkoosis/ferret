@@ -37,7 +37,12 @@ var (
 	errSessionRequired = errors.New("tokens: -session PREFIX required")
 	errNoStreamMatch   = errors.New("tokens: no stream matches")
 	errBadRange        = errors.New("bad -n range (gram length must be ≥ 2; 1-gram frequency = summary top actions)")
+	errBadFormat       = errors.New("bad -format")
+	errBadBy           = errors.New("bad -by (want corpus|project|session)")
+	errMaxBytesJSON    = errors.New("-max-bytes is not supported with -format json (use -limit)")
 )
+
+const fmtJSON = "json"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -89,6 +94,25 @@ func commonFlags(fs *flag.FlagSet, defLimit int) *common {
 
 func (c *common) eventsPath() string { return filepath.Join(c.data, "events.jsonl") }
 
+// validate rejects unknown -format values (a typo must not silently produce
+// text output) and -max-bytes with json (no streaming cap — refuse rather
+// than truncate silently or emit invalid JSON).
+func (c *common) validate(formats ...string) error {
+	ok := false
+	for _, f := range formats {
+		if c.format == f {
+			ok = true
+		}
+	}
+	if !ok {
+		return fmt.Errorf("%w: %q (want %s)", errBadFormat, c.format, strings.Join(formats, "|"))
+	}
+	if c.format == fmtJSON && c.maxBytes > 0 {
+		return errMaxBytesJSON
+	}
+	return nil
+}
+
 // ensureData runs a default ingest when the artifact is missing.
 func (c *common) ensureData() error {
 	if _, err := os.Stat(c.eventsPath()); err == nil {
@@ -137,6 +161,9 @@ func cmdIngest(args []string) error {
 	project := fs.String("project", "", "only projects whose slug contains this substring")
 	dryRun := fs.Bool("dry-run", false, "scan and report; write nothing")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := c.validate("text"); err != nil {
 		return err
 	}
 	return ingest(c.data, *root, *project, *dryRun)
@@ -217,6 +244,14 @@ func cmdSummary(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if err := c.validate("text", "json"); err != nil {
+		return err
+	}
+	switch *by {
+	case "corpus", "project", "session":
+	default:
+		return fmt.Errorf("%w: %q", errBadBy, *by)
+	}
 	if err := c.ensureData(); err != nil {
 		return err
 	}
@@ -224,20 +259,24 @@ func cmdSummary(args []string) error {
 	if err != nil {
 		return err
 	}
-	if c.format == "json" {
+	if c.format == fmtJSON {
+		total := len(s.Buckets)
 		capBuckets := s.Buckets
 		if c.limit > 0 && len(capBuckets) > c.limit {
 			capBuckets = capBuckets[:c.limit]
 		}
-		s.Buckets = capBuckets
-		return out.JSON(os.Stdout, s)
+		return out.JSON(os.Stdout, map[string]any{
+			"by": s.By, "buckets": capBuckets,
+			"total": total, "truncated": len(capBuckets) < total,
+			"topActions": s.TopActions,
+		})
 	}
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
 	defer sink.Close()
 	sink.Head("summary by=%s buckets=%d", s.By, len(s.Buckets))
 	for _, b := range s.Buckets {
-		sink.Row("%8d ev %5d sess fail=%.1f%% retry=%.1f%% unpaired=%.1f%%  %s",
-			b.Events, b.Sessions, pct(b.Fails, b.Events), pct(b.Retries, b.Events), pct(b.Unpaired, b.Events), b.Key)
+		sink.Row("%8d ev %5d sess fail=%.1f%% cfail=%.1f%% retry=%.1f%% unpaired=%.1f%%  %s",
+			b.Events, b.Sessions, pct(b.Fails, b.Events), pct(b.CFails, b.Events), pct(b.Retries, b.Events), pct(b.Unpaired, b.Events), b.Key)
 	}
 	if *by == "corpus" && len(s.TopActions) > 0 {
 		sink.Head("top actions:")
@@ -267,6 +306,9 @@ func cmdNgrams(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := c.validate("text", "json"); err != nil {
+		return err
+	}
 	if err := c.ensureData(); err != nil {
 		return err
 	}
@@ -276,7 +318,7 @@ func cmdNgrams(args []string) error {
 	}
 	grams := mine.Filter(mine.CountGrams(corpus, minN, maxN), *minCount, *minSessions)
 
-	if c.format == "json" {
+	if c.format == fmtJSON {
 		type jg struct {
 			Tokens   []string `json:"tokens"`
 			Count    int      `json:"count"`
@@ -290,7 +332,10 @@ func cmdNgrams(args []string) error {
 			}
 			rows = append(rows, jg{corpus.Tokens(g.IDs), g.Count, g.Sessions, exemplar(corpus, g.ExStream, g.ExSeq)})
 		}
-		return out.JSON(os.Stdout, map[string]any{"lens": l.Name(), "n": *nRange, "grams": rows, "total": len(grams)})
+		return out.JSON(os.Stdout, map[string]any{
+			"lens": l.Name(), "n": *nRange, "grams": rows,
+			"total": len(grams), "truncated": len(rows) < len(grams),
+		})
 	}
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
 	defer sink.Close()
@@ -316,6 +361,9 @@ func cmdGraph(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if err := c.validate("text", "json", "mermaid", "dot"); err != nil {
+		return err
+	}
 	if err := c.ensureData(); err != nil {
 		return err
 	}
@@ -331,12 +379,13 @@ func cmdGraph(args []string) error {
 			edges = append(edges, e)
 		}
 	}
+	totalEdges := len(edges)
 	if c.limit > 0 && len(edges) > c.limit {
 		edges = edges[:c.limit]
 	}
 
 	switch c.format {
-	case "json":
+	case fmtJSON:
 		type je struct {
 			From  string `json:"from"`
 			To    string `json:"to"`
@@ -357,7 +406,11 @@ func cmdGraph(args []string) error {
 			}
 			cyc = append(cyc, jc{corpus.Vocab[cy.A], corpus.Vocab[cy.B], cy.Count})
 		}
-		return out.JSON(os.Stdout, map[string]any{"lens": l.Name(), "edges": rows, "cycles": cyc})
+		return out.JSON(os.Stdout, map[string]any{
+			"lens":  l.Name(),
+			"edges": rows, "edgesTotal": totalEdges, "truncated": len(rows) < totalEdges,
+			"cycles": cyc, "cyclesTotal": len(f.Cycles),
+		})
 	case "mermaid", "dot":
 		return writeGraph(os.Stdout, c.format, corpus, edges)
 	}
@@ -399,7 +452,8 @@ func writeGraph(w *os.File, format string, c *mine.Corpus, edges []mine.Edge) er
 	if format == "mermaid" {
 		fmt.Fprintln(w, "flowchart LR")
 		for _, e := range edges {
-			fmt.Fprintf(w, "  %s[\"%s\"] -->|%d| %s[\"%s\"]\n", id(e.From), c.Vocab[e.From], e.Count, id(e.To), c.Vocab[e.To])
+			fmt.Fprintf(w, "  %s[\"%s\"] -->|%d| %s[\"%s\"]\n",
+				id(e.From), mermaidLabel(c.Vocab[e.From]), e.Count, id(e.To), mermaidLabel(c.Vocab[e.To]))
 		}
 		return nil
 	}
@@ -410,6 +464,13 @@ func writeGraph(w *os.File, format string, c *mine.Corpus, edges []mine.Edge) er
 	}
 	fmt.Fprintln(w, "}")
 	return nil
+}
+
+// mermaidLabel escapes characters that break a quoted mermaid node label.
+// Exact-lens tokens carry raw targets (paths, patterns) that can contain any of them.
+func mermaidLabel(s string) string {
+	r := strings.NewReplacer(`"`, "#quot;", "[", "#91;", "]", "#93;", "{", "#123;", "}", "#125;")
+	return r.Replace(s)
 }
 
 // ---- tokens ----
@@ -425,6 +486,9 @@ func cmdTokens(args []string) error {
 	if *session == "" {
 		return errSessionRequired
 	}
+	if err := c.validate("text", "json"); err != nil {
+		return err
+	}
 	if err := c.ensureData(); err != nil {
 		return err
 	}
@@ -432,24 +496,51 @@ func cmdTokens(args []string) error {
 	if err != nil {
 		return err
 	}
-	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
-	defer sink.Close()
-	found := false
+	var matches []int
 	for si, key := range corpus.StreamKeys {
 		short := key[strings.IndexByte(key, '/')+1:]
-		if !strings.HasPrefix(short, *session) && !strings.Contains(key, *session) {
-			continue
+		if strings.HasPrefix(short, *session) || strings.Contains(key, *session) {
+			matches = append(matches, si)
 		}
-		found = true
-		sink.Head("stream %s lens=%s toks=%d", key, l.Name(), len(corpus.Streams[si]))
+	}
+	if len(matches) == 0 {
+		return fmt.Errorf("%w: %q", errNoStreamMatch, *session)
+	}
+	if c.format == fmtJSON {
+		type jt struct {
+			Seq   int    `json:"seq"`
+			Token string `json:"token"`
+		}
+		type js struct {
+			Stream    string `json:"stream"`
+			Total     int    `json:"total"`
+			Truncated bool   `json:"truncated"`
+			Tokens    []jt   `json:"tokens"`
+		}
+		streams := make([]js, 0, len(matches))
+		for _, si := range matches {
+			toks := corpus.Streams[si]
+			total := len(toks)
+			if c.limit > 0 && len(toks) > c.limit {
+				toks = toks[:c.limit]
+			}
+			s := js{Stream: corpus.StreamKeys[si], Total: total, Truncated: len(toks) < total, Tokens: make([]jt, len(toks))}
+			for i, t := range toks {
+				s.Tokens[i] = jt{t.Seq, corpus.Vocab[t.ID]}
+			}
+			streams = append(streams, s)
+		}
+		return out.JSON(os.Stdout, map[string]any{"lens": l.Name(), "streams": streams})
+	}
+	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
+	defer sink.Close()
+	for _, si := range matches {
+		sink.Head("stream %s lens=%s toks=%d", corpus.StreamKeys[si], l.Name(), len(corpus.Streams[si]))
 		for _, t := range corpus.Streams[si] {
 			if !sink.Row("%6d  %s", t.Seq, corpus.Vocab[t.ID]) {
 				break
 			}
 		}
-	}
-	if !found {
-		return fmt.Errorf("%w: %q", errNoStreamMatch, *session)
 	}
 	return nil
 }

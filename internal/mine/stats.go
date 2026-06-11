@@ -12,6 +12,7 @@ type Bucket struct {
 	Events   int            `json:"events"`
 	Sessions int            `json:"sessions,omitempty"`
 	Fails    int            `json:"fails"`
+	CFails   int            `json:"cfails"` // compound-chain failures; segment unknown
 	Retries  int            `json:"retries"`
 	Unpaired int            `json:"unpaired"`
 	ByKind   map[string]int `json:"byKind,omitempty"`
@@ -72,11 +73,15 @@ func (sm *summarizer) addBucket(ev *event.Event) {
 	b.Events++
 	b.ByKind[ev.Kind]++
 	b.sessions[ev.Session] = struct{}{}
-	if ev.Status == event.StatusFail {
+	switch ev.Status {
+	case event.StatusFail:
 		b.Fails++
-	}
-	if ev.Status == event.StatusNone && ev.Kind != event.KindPrompt {
-		b.Unpaired++
+	case event.StatusCFail:
+		b.CFails++
+	case event.StatusNone:
+		if ev.Kind != event.KindPrompt {
+			b.Unpaired++
+		}
 	}
 	if ev.Retry {
 		b.Retries++

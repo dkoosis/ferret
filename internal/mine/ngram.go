@@ -72,14 +72,14 @@ func countStream(grams map[string]*Gram, st []Tok, si, n int) {
 // SDM 2003. The ≥80%-retention slack mirrors δ-tolerance closedness: Cheng,
 // Ke & Ng, "δ-Tolerance Closed Frequent Itemsets", ICDM 2006.
 func Filter(grams map[string]*Gram, minCount, minSessions int) []*Gram {
-	suppressClosed(grams)
+	passes := func(g *Gram) bool {
+		return g.Count >= minCount && g.Sessions >= minSessions && !uniform(g.IDs)
+	}
+	suppressClosed(grams, passes)
 
 	var out []*Gram
 	for _, g := range grams {
-		if g.suppressed || g.Count < minCount || g.Sessions < minSessions {
-			continue
-		}
-		if uniform(g.IDs) {
+		if g.suppressed || !passes(g) {
 			continue
 		}
 		out = append(out, g)
@@ -112,10 +112,12 @@ func lessIDs(a, b []uint32) bool {
 }
 
 // suppressClosed marks the prefix and suffix of each gram suppressed when the
-// extension retains ≥80% of the shorter gram's count.
-func suppressClosed(grams map[string]*Gram) {
+// extension retains ≥80% of the shorter gram's count. Only a gram that itself
+// clears the noise floor may suppress: otherwise a sub-threshold extension
+// kills its prefix and then gets filtered, leaving neither in the output.
+func suppressClosed(grams map[string]*Gram, passes func(*Gram) bool) {
 	for _, g := range grams {
-		if len(g.IDs) < 2 {
+		if len(g.IDs) < 2 || !passes(g) {
 			continue
 		}
 		sub := func(ids []uint32) {
