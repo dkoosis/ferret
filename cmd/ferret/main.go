@@ -20,12 +20,14 @@ import (
 	"github.com/dkoosis/ferret/internal/lens"
 	"github.com/dkoosis/ferret/internal/mine"
 	"github.com/dkoosis/ferret/internal/out"
+	"github.com/dkoosis/ferret/internal/sweagent"
 	"github.com/dkoosis/ferret/internal/transcript"
 )
 
 const usage = `ferret — mine Claude Code transcripts for repeated behavior
 
-  ferret ingest   [-root DIR] [-project SUBSTR] [-dry-run]     build ~/.ferret/events.jsonl
+  ferret ingest   [-root DIR] [-source cc|swe-agent] [-project SUBSTR] [-dry-run]  build ~/.ferret/events.jsonl
+  ferret validate [-lens tool] [-min-support 20] [-min-streams 3]   rank buckets × ground-truth outcomes (needs outcomes.jsonl)
   ferret summary  [-by corpus|project|session]                 corpus health + tool mix
   ferret ngrams   [-lens tool] [-n 2-5] [-min-count 5] [-min-sessions 3]
   ferret seqs     [-lens tool] [-min-support 20] [-max-gap 3] [-max-len 5]   gapped subsequences (PrefixSpan)
@@ -44,6 +46,8 @@ var (
 	errBadFormat       = errors.New("bad -format")
 	errBadBy           = errors.New("bad -by (want corpus|project|session)")
 	errMaxBytesJSON    = errors.New("-max-bytes is not supported with -format json (use -limit)")
+	errBadIngestSrc    = errors.New("bad -source (want cc|swe-agent)")
+	errNoOutcomes      = errors.New("validate: no outcomes.jsonl — ingest a labeled corpus (e.g. -source swe-agent) first")
 )
 
 // shared JSON response keys — every truncating JSON response carries
@@ -64,6 +68,8 @@ func main() {
 	switch os.Args[1] {
 	case "ingest":
 		err = cmdIngest(os.Args[2:])
+	case "validate":
+		err = cmdValidate(os.Args[2:])
 	case "summary":
 		err = cmdSummary(os.Args[2:])
 	case "ngrams":
@@ -172,18 +178,139 @@ func (lo *lensOpts) corpus(eventsPath string) (*mine.Corpus, lens.Lens, error) {
 
 func cmdIngest(args []string) error {
 	fs := flag.NewFlagSet("ingest", flag.ExitOnError)
-	c := commonFlags(fs, 0)
 	home, _ := os.UserHomeDir()
+	// ingest selects its input with -source (not -format): -format is the
+	// output selector on every other command, and ingest always writes text.
+	// Keeping -format as a source selector here would overload one flag with
+	// two meanings across the CLI, so source gets its own name.
+	data := fs.String("data", filepath.Join(home, ".ferret"), "artifact directory")
 	root := fs.String("root", filepath.Join(home, ".claude", "projects"), "transcript root")
 	project := fs.String("project", "", "only projects whose slug contains this substring")
+	source := fs.String("source", "cc", "input source: cc (Claude Code transcripts) | swe-agent (trajectory JSONL)")
 	dryRun := fs.Bool("dry-run", false, "scan and report; write nothing")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if err := c.validate("text"); err != nil {
+	switch *source {
+	case "cc":
+		return ingest(*data, *root, *project, *dryRun)
+	case "swe-agent":
+		return ingestSWE(*data, *root, *dryRun)
+	default:
+		return fmt.Errorf("%w: %q", errBadIngestSrc, *source)
+	}
+}
+
+// ingestSWE adapts SWE-agent trajectory rows (JSONL — one row per stream)
+// into the standard events artifact plus an outcomes sidecar. -root may be a
+// single .jsonl file or a directory of them.
+func ingestSWE(dataDir, root string, dryRun bool) error {
+	files, err := jsonlFiles(root)
+	if err != nil {
 		return err
 	}
-	return ingest(c.data, *root, *project, *dryRun)
+	var w *event.Writer
+	var ow *event.OutcomeWriter
+	emit := func(*event.Event) {}
+	emitOut := func(*event.Outcome) {}
+	if !dryRun {
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			return err
+		}
+		if w, err = event.NewWriter(filepath.Join(dataDir, "events.jsonl")); err != nil {
+			return err
+		}
+		if ow, err = event.NewOutcomeWriter(filepath.Join(dataDir, "outcomes.jsonl")); err != nil {
+			return err
+		}
+		emit = func(ev *event.Event) { _ = w.Write(ev) }
+		emitOut = func(o *event.Outcome) { _ = ow.Write(o) }
+	}
+
+	start := time.Now()
+	st := event.NewStats()
+	for _, f := range files {
+		ingestSWEFile(f, st, emit, emitOut)
+	}
+	if w != nil {
+		if err := w.Close(); err != nil {
+			return err
+		}
+		if err := ow.Close(); err != nil {
+			return err
+		}
+		m := &event.Manifest{CreatedAt: time.Now(), Root: root, Stats: st}
+		if err := event.WriteManifest(filepath.Join(dataDir, "manifest.json"), m); err != nil {
+			return err
+		}
+	}
+	fmt.Printf("ingest format=swe-agent files=%d rows=%d events=%d in %s\n",
+		st.Files, st.Lines, st.Events, time.Since(start).Round(time.Millisecond))
+	fmt.Printf("health streams=%d decode-errs=%d\n", st.Prompts, st.DecodeErrs)
+	return nil
+}
+
+// ingestSWEFile streams one trajectory JSONL file. A malformed row is counted
+// and skipped (loudly to stderr), never fatal. Stats reuse: Lines=rows,
+// Prompts=streams emitted (health line surfaces both).
+func ingestSWEFile(path string, st *event.Stats, emit func(*event.Event), emitOut func(*event.Outcome)) {
+	st.Files++
+	err := transcript.ReadLines(path, func(line []byte) error {
+		if len(strings.TrimSpace(string(line))) == 0 {
+			return nil
+		}
+		st.Lines++
+		row, err := sweagent.DecodeRow(line)
+		if err != nil {
+			st.DecodeErrs++
+			fmt.Fprintf(os.Stderr, "ferret: %s: row decode: %v (skipped)\n", path, err)
+			return nil
+		}
+		if row.InstanceID == "" {
+			st.DecodeErrs++
+			fmt.Fprintf(os.Stderr, "ferret: %s: row missing instance_id (skipped)\n", path)
+			return nil
+		}
+		evs := sweagent.Events(row)
+		for _, ev := range evs {
+			st.ByType[ev.Kind]++
+			emit(ev)
+		}
+		st.Events += len(evs)
+		st.Prompts++ // reused counter: streams emitted
+		emitOut(&event.Outcome{
+			Stream:     sweagent.Project + "/" + row.InstanceID + "@",
+			Target:     row.Target,
+			ExitStatus: row.ExitStatus,
+		})
+		return nil
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ferret: %s: %v (skipped)\n", path, err)
+	}
+}
+
+// jsonlFiles returns the .jsonl files at root (a file returns itself).
+func jsonlFiles(root string) ([]string, error) {
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return []string{root}, nil
+	}
+	var out []string
+	err = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil //nolint:nilerr // unreadable entries skipped, not fatal
+		}
+		if !d.IsDir() && strings.HasSuffix(p, ".jsonl") {
+			out = append(out, p)
+		}
+		return nil
+	})
+	sort.Strings(out)
+	return out, err
 }
 
 func ingest(dataDir, root, project string, dryRun bool) error {
@@ -528,6 +655,66 @@ func cmdRank(args []string) error {
 	}
 	if overflow > 0 {
 		sink.Head("… %d more cards past -top %d", overflow, *top)
+	}
+	return nil
+}
+
+// ---- validate (rank buckets × ground-truth outcomes) ----
+
+func cmdValidate(args []string) error {
+	fs := flag.NewFlagSet("validate", flag.ExitOnError)
+	c := commonFlags(fs, 0)
+	lo := lensFlags(fs)
+	minSupport := fs.Int("min-support", 20, "min distinct streams containing the pattern")
+	maxGap := fs.Int("max-gap", 3, "max positions between consecutive items (1 = adjacent)")
+	maxLen := fs.Int("max-len", 5, "max pattern length")
+	order := fs.Int("order", 3, "gram-model order for cohesion scoring")
+	minStreams := fs.Int("min-streams", 3, "drop buckets supported by fewer streams (avoid tiny-n lift)")
+	corpus := fs.String("corpus", sweagent.Project, "corpus label for the report header")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := c.validate("text", fmtJSON); err != nil {
+		return err
+	}
+	if err := c.ensureData(); err != nil {
+		return err
+	}
+	outcomes, err := event.ReadOutcomes(filepath.Join(c.data, "outcomes.jsonl"))
+	if err != nil {
+		return err
+	}
+	if len(outcomes) == 0 {
+		return errNoOutcomes
+	}
+	cor, l, err := lo.corpus(c.eventsPath())
+	if err != nil {
+		return err
+	}
+	pats, _ := mine.MineSeqs(cor, mine.SeqOpts{
+		MinSupport: *minSupport, MaxGap: *maxGap, MaxLen: *maxLen, MaxPatterns: 10000,
+	})
+	opts := mine.DefaultRankOpts()
+	opts.Order = *order
+	cards, _ := mine.RankPatterns(cor, pats, opts)
+	v := mine.Validate(cor, cards, outcomes, *corpus, *minStreams, *maxGap)
+
+	if c.format == fmtJSON {
+		return out.JSON(os.Stdout, map[string]any{
+			keyLens: l.Name(), "corpus": v.Corpus, "streams": v.Streams,
+			"baseFail": v.BaseFail, "buckets": v.Buckets,
+			keyTotal: len(v.Buckets), keyTruncated: false,
+		})
+	}
+	sink := out.NewSink(os.Stdout, 0, c.maxBytes)
+	defer sink.Close()
+	sink.Head("validate corpus=%s lens=%s streams=%d base-fail=%.1f%%",
+		v.Corpus, l.Name(), v.Streams, v.BaseFail)
+	for _, b := range v.Buckets {
+		if !sink.Row("%-9s fail-share=%5.1f%%  lift=%4.2f   (n=%d patterns, %d streams)",
+			strings.ToUpper(b.Bucket), b.FailShare, b.Lift, b.Patterns, b.Streams) {
+			break
+		}
 	}
 	return nil
 }
