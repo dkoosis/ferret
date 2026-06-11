@@ -1,165 +1,192 @@
 package transcript_test
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/google/go-cmp/cmp"
-	"github.com/stretchr/testify/require"
 
 	"github.com/dkoosis/ferret/internal/transcript"
 )
 
-type readLinesInput struct {
-	contents       string
-	missing        bool
-	failAfterLines int
+var errCallback = errors.New("read lines callback failed")
+
+// collectLines drives ReadLines and records every delivered line verbatim.
+// failAfter > 0 makes the callback fail once it has seen that many lines, so
+// callers can assert the stream stops at exactly that point.
+func collectLines(path string, failAfter int) ([]string, error) {
+	var got []string
+	err := transcript.ReadLines(path, func(line []byte) error {
+		got = append(got, string(line))
+		if failAfter > 0 && len(got) >= failAfter {
+			return errCallback
+		}
+		return nil
+	})
+	return got, err
 }
 
-type lineRecord struct {
-	Text       string
-	Len        int
-	HasNewline bool
+// assertLines compares without ever dumping line contents — a failing
+// large-line case must not splat a megabyte into the test log.
+func assertLines(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("delivered %d lines, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("line %d: got %d bytes, want %d bytes", i, len(got[i]), len(want[i]))
+		}
+	}
 }
 
-var errReadLinesCallback = errors.New("read lines callback failed")
-
-func TestReadLines_DeliversTranscriptLines_When_FileIsReadable(t *testing.T) {
+func TestReadLines_DeliversBytesVerbatim_When_FileIsReadable(t *testing.T) {
 	t.Parallel()
 
+	// One past the 1<<20 reader buffer: a single ReadBytes call must span fills.
 	longLine := strings.Repeat("x", 1<<20+17) + "\n"
 
 	tests := []struct {
-		name    string
-		input   readLinesInput
-		want    []lineRecord
-		wantErr error
-		inspect func(*testing.T, []lineRecord)
+		name      string
+		contents  string
+		missing   bool
+		failAfter int
+		want      []string // delivered lines on the success path
+		wantErr   error
+		wantSeen  int // lines delivered before the error fires
 	}{
 		{
-			name: "errors when transcript file does not exist",
-			input: readLinesInput{
-				missing: true,
-			},
+			name:    "missing file surfaces the open error",
+			missing: true,
 			wantErr: os.ErrNotExist,
 		},
 		{
-			name: "returns callback error and stops reading subsequent lines",
-			input: readLinesInput{
-				contents:       "first\nsecond\n",
-				failAfterLines: 1,
-			},
-			wantErr: errReadLinesCallback,
+			name:      "callback error stops the stream",
+			contents:  "first\nsecond\nthird\n",
+			failAfter: 1,
+			wantErr:   errCallback,
+			wantSeen:  1, // invariant: nothing delivered after the failing callback
 		},
 		{
-			name: "empty transcript produces no callbacks",
-			input: readLinesInput{
-				contents: "",
-			},
-			inspect: func(t *testing.T, got []lineRecord) {
-				t.Helper()
-				require.Empty(t, got, "empty input must not synthesize transcript lines")
-			},
+			name:     "empty file yields no callbacks",
+			contents: "",
+			want:     nil,
 		},
 		{
-			name: "final line without newline is still delivered",
-			input: readLinesInput{
-				contents: "unterminated final event",
-			},
-			want: []lineRecord{
-				{Text: "unterminated final event", Len: len("unterminated final event"), HasNewline: false},
-			},
-			inspect: func(t *testing.T, got []lineRecord) {
-				t.Helper()
-				require.Len(t, got, 1)
-				require.False(t, got[0].HasNewline, "ReadLines must not append bytes that were not present")
-			},
+			name:     "unterminated final line is delivered verbatim, no added newline",
+			contents: "no trailing newline",
+			want:     []string{"no trailing newline"},
 		},
 		{
-			name: "line larger than scanner token limit is delivered whole",
-			input: readLinesInput{
-				contents: longLine,
-			},
-			want: []lineRecord{
-				{Len: len(longLine), HasNewline: true},
-			},
-			inspect: func(t *testing.T, got []lineRecord) {
-				t.Helper()
-				require.Len(t, got, 1)
-				require.Greater(t, got[0].Len, 1<<20, "large tool-result lines must survive ingestion")
-				require.True(t, got[0].HasNewline, "line terminator is part of the delivered bytes")
-			},
+			name:     "line larger than the read buffer survives whole",
+			contents: longLine,
+			want:     []string{longLine},
 		},
 		{
-			name: "multiple newline terminated transcript lines keep order and delimiters",
-			input: readLinesInput{
-				contents: "alpha\nbeta\ngamma\n",
-			},
-			want: []lineRecord{
-				{Text: "alpha\n", Len: len("alpha\n"), HasNewline: true},
-				{Text: "beta\n", Len: len("beta\n"), HasNewline: true},
-				{Text: "gamma\n", Len: len("gamma\n"), HasNewline: true},
-			},
-			inspect: func(t *testing.T, got []lineRecord) {
-				t.Helper()
-				require.Len(t, got, 3)
-				for _, line := range got {
-					require.True(t, line.HasNewline, "newline-terminated input lines must keep their delimiter")
-					require.Equal(t, len(line.Text), line.Len, "reported length must match delivered bytes")
-				}
-			},
+			name:     "multiple lines keep order and delimiters",
+			contents: "alpha\nbeta\ngamma\n",
+			want:     []string{"alpha\n", "beta\n", "gamma\n"},
 		},
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
 			path := filepath.Join(t.TempDir(), "transcript.jsonl")
-			if !tc.input.missing {
-				require.NoError(t, os.WriteFile(path, []byte(tc.input.contents), 0o600))
+			if !tc.missing {
+				if err := os.WriteFile(path, []byte(tc.contents), 0o600); err != nil {
+					t.Fatalf("write fixture: %v", err)
+				}
 			}
 
-			var got []lineRecord
-			seen := 0
-			err := transcript.ReadLines(path, func(line []byte) error {
-				seen++
-				got = append(got, recordLine(line, tc.input.contents))
-				if tc.input.failAfterLines > 0 && seen >= tc.input.failAfterLines {
-					return errReadLinesCallback
-				}
-				return nil
-			})
+			got, err := collectLines(path, tc.failAfter)
 
 			if tc.wantErr != nil {
-				require.ErrorIs(t, err, tc.wantErr)
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("err = %v, want %v", err, tc.wantErr)
+				}
+				if len(got) != tc.wantSeen {
+					t.Errorf("delivered %d lines before error, want %d", len(got), tc.wantSeen)
+				}
 				return
 			}
-			require.NoError(t, err)
-
-			if diff := cmp.Diff(tc.want, got); diff != "" {
-				t.Errorf("diff (-want +got):\n%s", diff)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
 			}
+			assertLines(t, got, tc.want)
 
-			if tc.inspect != nil {
-				tc.inspect(t, got)
+			// Invariant: delivery is lossless — concatenated lines equal the file.
+			if joined := strings.Join(got, ""); joined != tc.contents {
+				t.Errorf("reassembled %d bytes, want %d (delivery must be lossless)", len(joined), len(tc.contents))
 			}
 		})
 	}
 }
 
-func recordLine(line []byte, source string) lineRecord {
-	text := string(line)
-	rec := lineRecord{
-		Len:        len(line),
-		HasNewline: strings.HasSuffix(text, "\n"),
+// Blocks.UnmarshalJSON is the schema-drift tolerance point: CC emits message
+// content as either a bare string or an array of typed blocks. Both must decode.
+func TestBlocks_UnmarshalJSON_ToleratesStringAndArrayContent(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		json    string
+		want    transcript.Blocks
+		wantErr bool
+	}{
+		{
+			name: "string content collapses to a single text block",
+			json: `{"role":"user","content":"hello world"}`,
+			want: transcript.Blocks{{Type: "text", Text: "hello world"}},
+		},
+		{
+			name: "array content preserves typed blocks in order",
+			json: `{"role":"assistant","content":[{"type":"text","text":"hi"},{"type":"tool_use","id":"t1","name":"Bash"}]}`,
+			want: transcript.Blocks{
+				{Type: "text", Text: "hi"},
+				{Type: "tool_use", ID: "t1", Name: "Bash"},
+			},
+		},
+		{
+			name: "empty array yields zero blocks",
+			json: `{"role":"user","content":[]}`,
+			want: transcript.Blocks{},
+		},
+		{
+			name:    "non-string non-array content is an error",
+			json:    `{"role":"user","content":123}`,
+			wantErr: true,
+		},
+		{
+			name:    "malformed string content is an error",
+			json:    `{"role":"user","content":"\uZZZZ"}`,
+			wantErr: true,
+		},
 	}
-	if len(source) <= 4096 {
-		rec.Text = text
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var msg transcript.Msg
+			err := json.Unmarshal([]byte(tc.json), &msg)
+
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("decoded %q without error, want failure", tc.json)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(msg.Content, tc.want) {
+				t.Errorf("content = %+v, want %+v", msg.Content, tc.want)
+			}
+		})
 	}
-	return rec
 }
