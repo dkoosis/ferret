@@ -624,6 +624,9 @@ func cmdSummary() error {
 	}
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
 	defer sink.Close()
+	about(sink,
+		"≡ summary: corpus health — event volume, failure and retry rates per "+cmd.By+".",
+		"≡ fail = action errored · cfail = inside a failed compound · unpaired = call without result.")
 	sink.Head("summary by=%s buckets=%d", s.By, len(s.Buckets))
 	for _, b := range s.Buckets {
 		sink.Row("%8d ev %5d sess fail=%.1f%% cfail=%.1f%% retry=%.1f%% unpaired=%.1f%%  %s",
@@ -639,6 +642,18 @@ func cmdSummary() error {
 		}
 	}
 	return nil
+}
+
+// ---- about lines ----
+// Every text report opens with 1-2 lines saying what the stat measures and
+// how to read the notation. JSON output stays clean (schema is the contract).
+
+const legendTokens = "≡ tok! failed · tok? in failed chain · tok+ collapsed repeat run · ex: session@pos"
+
+func about(sink *out.Sink, lines ...string) {
+	for _, ln := range lines {
+		sink.Head("%s", ln)
+	}
 }
 
 // ---- ngrams ----
@@ -687,6 +702,10 @@ func cmdNgrams() error {
 	}
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
 	defer sink.Close()
+	about(sink,
+		"≡ ngrams: exact action sequences repeated verbatim (no gaps). High count across many",
+		"≡ sessions = a habitual routine — script/skill candidate. Nx/Ms = N occurrences in M sessions.",
+		legendTokens)
 	sink.Head("ngrams lens=%s n=%s streams=%d grams=%d (min-count=%d min-sessions=%d)",
 		l.Name(), cmd.N, len(corpus.Streams), len(grams), cmd.MinCount, cmd.MinSessions)
 	for _, g := range grams {
@@ -741,6 +760,10 @@ func cmdSeqs() error {
 	}
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
 	defer sink.Close()
+	about(sink,
+		"≡ seqs: ordered subsequences that recur with up to max-gap other actions between steps",
+		"≡ (PrefixSpan) — habits that survive interruptions. Ns = pattern appears in N sessions. ⇝ = gap allowed.",
+		legendTokens)
 	sink.Head("seqs lens=%s streams=%d patterns=%d (min-support=%d max-gap=%d max-len=%d)",
 		l.Name(), len(corpus.Streams), len(pats), cmd.MinSupport, cmd.MaxGap, cmd.MaxLen)
 	if capped {
@@ -815,6 +838,10 @@ func cmdRank() error {
 	}
 	sink := out.NewSink(os.Stdout, 0, c.maxBytes)
 	defer sink.Close()
+	about(sink,
+		"≡ rank: mined seqs deduped + scored into review buckets. Columns: sessions · bits",
+		"≡ (predictability of the chain — lower = tighter habit) · score (review priority).",
+		legendTokens)
 	sink.Head("rank lens=%s patterns=%d → cards=%d noise=%d (min-support=%d order=%d top=%d)",
 		l.Name(), len(pats), len(cards), noise, cmd.MinSupport, cmd.Order, cmd.Top)
 	if capped {
@@ -892,6 +919,9 @@ func cmdValidate() error {
 	}
 	sink := out.NewSink(os.Stdout, 0, c.maxBytes)
 	defer sink.Close()
+	about(sink,
+		"≡ validate: do rank buckets predict task failure? fail-share = % of a bucket's sessions",
+		"≡ that failed; lift = fail-share ÷ base-fail (1.0 = no signal). Needs a labeled corpus.")
 	sink.Head("validate corpus=%s lens=%s streams=%d base-fail=%.1f%%",
 		v.Corpus, l.Name(), v.Streams, v.BaseFail)
 	for _, b := range v.Buckets {
@@ -954,6 +984,9 @@ func cmdSurprise() error {
 	}
 	sink := out.NewSink(os.Stdout, c.limit+2, c.maxBytes)
 	defer sink.Close()
+	about(sink,
+		"≡ surprise: how predictable each session is to a model trained on all your sessions",
+		"≡ (order-N context model). Low bits/tok = rote routine worth scripting; high = novel work or thrash.")
 	sink.Head("surprise lens=%s order=%d streams=%d mean=%.2f bits/tok (low=routine/scriptable, high=thrash)",
 		l.Name(), cmd.Order, len(scores), mean)
 	sink.Head("most routine:")
@@ -1035,6 +1068,9 @@ func cmdGraph() error {
 	}
 
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
+	about(sink,
+		"≡ graph: action→action transition counts (what typically follows what).",
+		"≡ --loops adds A⇄B bounce cycles — back-and-forth churn, often friction.")
 	sink.Head("graph lens=%s edges=%d (min-count=%d)", l.Name(), len(edges), cmd.MinCount)
 	for _, e := range edges {
 		if !sink.Row("%6dx  %s → %s", e.Count, corpus.Vocab[e.From], corpus.Vocab[e.To]) {
