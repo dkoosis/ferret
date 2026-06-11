@@ -12,7 +12,7 @@ SHELL := /bin/bash
 include .sandbox/lib/Makefile.doctor.mk
 include .sandbox/lib/Makefile.cross.mk
 
-.PHONY: help check audit vet lint test race build vuln dupe nilcheck install clean
+.PHONY: help check audit vet lint test race build vuln dupe nilcheck install clean corpus
 
 # Serialize golangci-lint through the machine-global mkdir mutex (see script
 # header — golangci-lint's cache lock fails exit-3 on contention instead of
@@ -44,6 +44,15 @@ race: ## Run tests with race detector (fresh run)
 
 build: ## Compile everything
 	go build ./...
+
+# CORPUS_OUT/N/SEED override the defaults: make corpus N=60 OUT=/tmp/big
+CORPUS_OUT ?= /tmp/ferret-corpus
+N          ?= 24
+SEED       ?= 42
+corpus: ## Generate a synthetic transcript corpus + ingest it
+	go run ./cmd/gen-corpus -out $(CORPUS_OUT) -sessions $(N) -seed $(SEED)
+	go run ./cmd/ferret ingest -root $(CORPUS_OUT)
+	@echo "=== corpus at $(CORPUS_OUT); try: ferret ngrams -lens coarse -n 3 ==="
 
 vuln: ## Scan for known vulnerabilities
 	govulncheck ./...

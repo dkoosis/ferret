@@ -1,0 +1,8 @@
+{"type":"user","uuid":"p-ex-1","sessionId":"sess-explore","timestamp":"2026-01-04T09:00:00Z","version":"1.0.0","message":{"role":"user","content":"explore the codebase and report"}}
+{"type":"user","uuid":"m-ex-1","sessionId":"sess-explore","isMeta":true,"message":{"role":"user","content":"<system-reminder>injected context</system-reminder>"}}
+{"type":"assistant","uuid":"u-ex-1","sessionId":"sess-explore","timestamp":"2026-01-04T09:00:03Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t-ex-1","name":"Task","input":{"subagent_type":"Explore","description":"map the codebase"}}]}}
+{"type":"user","uuid":"r-ex-1","sessionId":"sess-explore","timestamp":"2026-01-04T09:00:20Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t-ex-1","is_error":false}]}}
+{"type":"assistant","uuid":"u-ex-2","sessionId":"sess-explore","timestamp":"2026-01-04T09:00:23Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t-ex-2","name":"Bash","input":{"command":"git add -A"}}]}}
+{"type":"user","uuid":"r-ex-2","sessionId":"sess-explore","timestamp":"2026-01-04T09:00:24Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t-ex-2","is_error":false}]}}
+{"type":"assistant","uuid":"u-ex-3","sessionId":"sess-explore","timestamp":"2026-01-04T09:00:26Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t-ex-3","name":"Bash","input":{"command":"git commit -m \"report\""}}]}}
+{"type":"user","uuid":"r-ex-3","sessionId":"sess-explore","timestamp":"2026-01-04T09:00:27Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t-ex-3","is_error":false}]}}
