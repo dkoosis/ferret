@@ -144,6 +144,56 @@ func TestRankNoiseCeilingDropsIncoherentWatch(t *testing.T) {
 	}
 }
 
+func TestRankMergesPermutationFamily(t *testing.T) {
+	// edit!⇝read, read⇝edit!, edit!⇝read⇝edit are one phenomenon over base
+	// tokens {edit, read}; the bucket must show one card, not three.
+	streams := make([][]string, 0, 6)
+	for range 6 {
+		streams = append(streams, []string{"edit!", "read", "edit!", "read", "edit", "read"})
+	}
+	got, _ := rankAll(t, streams,
+		SeqOpts{MinSupport: 6, MaxGap: 1, MaxLen: 3},
+		RankOpts{})
+	var friction []*Card
+	for _, card := range got {
+		if card.Bucket == BucketFriction {
+			friction = append(friction, card)
+		}
+	}
+	if len(friction) != 1 {
+		t.Fatalf("friction cards = %d, want 1 (family merge); got %v", len(friction), keys(got))
+	}
+	if friction[0].Variants == 0 {
+		t.Error("surviving friction card should report merged variants")
+	}
+}
+
+func TestRankKeepsDistinctFamiliesApart(t *testing.T) {
+	// {a,b} churn and {c,d} churn are different phenomena — no cross-merge.
+	streams := make([][]string, 0, 6)
+	for range 6 {
+		streams = append(streams, []string{"a", "b", "a", "c", "d", "c"})
+	}
+	got, _ := rankAll(t, streams,
+		SeqOpts{MinSupport: 6, MaxGap: 1, MaxLen: 3},
+		RankOpts{})
+	fams := map[string]bool{}
+	for pat, card := range got {
+		if card.Bucket != BucketLoop {
+			continue
+		}
+		switch {
+		case strings.Contains(pat, "a"):
+			fams["ab"] = true
+		case strings.Contains(pat, "c"):
+			fams["cd"] = true
+		}
+	}
+	if !fams["ab"] || !fams["cd"] {
+		t.Errorf("both loop families must survive; got %v", keys(got))
+	}
+}
+
 func keys(m map[string]*Card) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

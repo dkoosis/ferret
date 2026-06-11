@@ -15,6 +15,7 @@ type Card struct {
 	Score           float64
 	Bucket          string
 	Folded          int // sub-patterns absorbed by this card
+	Variants        int // same-family permutations merged into this card
 	ExStream, ExSeq int
 }
 
@@ -93,8 +94,61 @@ func RankPatterns(c *Corpus, pats []*SeqPattern, opts RankOpts) (cards []*Card, 
 		})
 	}
 
+	cards = mergeFamilies(c, cards)
 	sort.Slice(cards, func(i, j int) bool { return lessCards(cards[i], cards[j]) })
 	return cards, noise
+}
+
+// mergeFamilies collapses same-bucket cards whose patterns are permutations
+// over the same base tokens (decorations stripped) into one card. δ-fold
+// can't merge these — Edit!⇝Read and Read⇝Edit! aren't subsequences of each
+// other — yet they're one phenomenon, and without merging one family can
+// fill a bucket's whole display budget. The best member (by lessCards)
+// fronts the family and absorbs the others' fold counts.
+func mergeFamilies(c *Corpus, cards []*Card) []*Card {
+	type famKey struct{ bucket, toks string }
+	best := map[famKey]*Card{}
+	for _, card := range cards {
+		k := famKey{card.Bucket, familyKey(c, card.IDs)}
+		prev, ok := best[k]
+		if !ok {
+			best[k] = card
+			continue
+		}
+		keep, drop := prev, card
+		if lessCards(card, prev) {
+			keep, drop = card, prev
+			best[k] = card
+		}
+		keep.Variants += drop.Variants + 1
+		keep.Folded += drop.Folded
+	}
+	merged := make([]*Card, 0, len(best))
+	for _, card := range best {
+		merged = append(merged, card)
+	}
+	return merged
+}
+
+// familyKey is the sorted set of base tokens in the pattern, decorations
+// ("+" run-collapse, "!"/"?" fail marks) stripped.
+func familyKey(c *Corpus, ids []uint32) string {
+	seen := map[string]bool{}
+	for _, id := range ids {
+		seen[baseToken(c.Vocab[id])] = true
+	}
+	toks := make([]string, 0, len(seen))
+	for t := range seen {
+		toks = append(toks, t)
+	}
+	sort.Strings(toks)
+	return strings.Join(toks, "\x00")
+}
+
+func baseToken(tok string) string {
+	tok = strings.TrimSuffix(tok, "+")
+	tok = strings.TrimSuffix(tok, "!")
+	return strings.TrimSuffix(tok, "?")
 }
 
 // lessCards orders by bucket, then within friction/loop by support (the

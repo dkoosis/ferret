@@ -475,6 +475,7 @@ func cmdRank(args []string) error {
 			Bits     float64  `json:"bits"`
 			Score    float64  `json:"score"`
 			Folded   int      `json:"folded"`
+			Variants int      `json:"variants"`
 			Exemplar string   `json:"exemplar"`
 		}
 		buckets := map[string][]jc{}
@@ -482,7 +483,7 @@ func cmdRank(args []string) error {
 			rows := make([]jc, 0, len(byBucket[b]))
 			for _, card := range byBucket[b] {
 				rows = append(rows, jc{corpus.Tokens(card.IDs), card.Support, card.Bits,
-					card.Score, card.Folded, exemplar(corpus, card.ExStream, card.ExSeq)})
+					card.Score, card.Folded, card.Variants, exemplar(corpus, card.ExStream, card.ExSeq)})
 			}
 			buckets[b] = rows
 		}
@@ -512,7 +513,9 @@ func cmdRank(args []string) error {
 		sink.Head("%s (%s):", strings.ToUpper(b), desc[b])
 		for _, card := range byBucket[b] {
 			fold := ""
-			if card.Folded > 0 {
+			if card.Variants > 0 {
+				fold = fmt.Sprintf(" (+%d variants)", card.Variants)
+			} else if card.Folded > 0 {
 				fold = fmt.Sprintf(" (+%d folded)", card.Folded)
 			}
 			if !sink.Row("%5ds %4.1fb %6.1f  %s%s  ex: %s",
