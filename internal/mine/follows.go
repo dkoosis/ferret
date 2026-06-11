@@ -8,7 +8,8 @@ type Edge struct {
 	Count    int
 }
 
-// Cycle is an A→B→A bounce — a friction signature.
+// Cycle is an A→B→A bounce — a friction signature. The pair is undirected
+// (A < B): A→B→A and B→A→B bounces aggregate into one cycle.
 type Cycle struct {
 	A, B  uint32
 	Count int
@@ -37,7 +38,8 @@ func BuildFollows(c *Corpus) *Follows {
 		for i := 1; i < len(st); i++ {
 			edges[[2]uint32{st[i-1].ID, st[i].ID}]++
 			if i >= 2 && st[i-2].ID == st[i].ID && st[i-1].ID != st[i].ID {
-				cycles[[2]uint32{st[i].ID, st[i-1].ID}]++
+				// undirected key: A→B→A and B→A→B are the same bounce
+				cycles[[2]uint32{min(st[i].ID, st[i-1].ID), max(st[i].ID, st[i-1].ID)}]++
 			}
 		}
 	}
@@ -48,7 +50,31 @@ func BuildFollows(c *Corpus) *Follows {
 	for k, n := range cycles {
 		f.Cycles = append(f.Cycles, Cycle{A: k[0], B: k[1], Count: n})
 	}
-	sort.Slice(f.Edges, func(i, j int) bool { return f.Edges[i].Count > f.Edges[j].Count })
-	sort.Slice(f.Cycles, func(i, j int) bool { return f.Cycles[i].Count > f.Cycles[j].Count })
+	f.sort()
 	return f
+}
+
+// sort orders by count desc, ties broken by ID so output is deterministic
+// across runs (map iteration order isn't).
+func (f *Follows) sort() {
+	sort.Slice(f.Edges, func(i, j int) bool {
+		a, b := f.Edges[i], f.Edges[j]
+		if a.Count != b.Count {
+			return a.Count > b.Count
+		}
+		if a.From != b.From {
+			return a.From < b.From
+		}
+		return a.To < b.To
+	})
+	sort.Slice(f.Cycles, func(i, j int) bool {
+		a, b := f.Cycles[i], f.Cycles[j]
+		if a.Count != b.Count {
+			return a.Count > b.Count
+		}
+		if a.A != b.A {
+			return a.A < b.A
+		}
+		return a.B < b.B
+	})
 }

@@ -93,7 +93,9 @@ func (b *Builder) consumeLine(src transcript.Source, st *fileState, line []byte)
 }
 
 // isDuplicate dedups by message UUID across the whole ingest: resumed and
-// forked sessions copy history into new files.
+// forked sessions copy history into new files. UUIDs are FNV-1a-hashed to
+// 8 bytes: the 64-bit birthday bound puts collision odds near 1e-6 even at
+// 10M events, and a collision costs one dropped event in a frequency miner.
 func (b *Builder) isDuplicate(uuid string) bool {
 	if uuid == "" {
 		return false
@@ -181,8 +183,15 @@ func finish(events []*Event, stats *Stats) {
 		if ft, ok := lastFail[key]; ok && !ev.Time.IsZero() && ev.Time.Sub(ft) <= retryWindow {
 			ev.Retry = true
 		}
-		if ev.Status == StatusFail && !ev.Time.IsZero() {
-			lastFail[key] = ev.Time
+		switch ev.Status {
+		case StatusFail:
+			if !ev.Time.IsZero() {
+				lastFail[key] = ev.Time
+			}
+		case StatusOK:
+			// Success closes the retry window: a later organic call to the
+			// same action+target is not a retry of the original failure.
+			delete(lastFail, key)
 		}
 	}
 }

@@ -108,11 +108,22 @@ func (sm *summarizer) result() *Summary {
 		b.Sessions = len(b.sessions)
 		s.Buckets = append(s.Buckets, b)
 	}
-	sort.Slice(s.Buckets, func(i, j int) bool { return s.Buckets[i].Events > s.Buckets[j].Events })
+	// ties broken by key/name so output is deterministic (map order isn't)
+	sort.Slice(s.Buckets, func(i, j int) bool {
+		if s.Buckets[i].Events != s.Buckets[j].Events {
+			return s.Buckets[i].Events > s.Buckets[j].Events
+		}
+		return s.Buckets[i].Key < s.Buckets[j].Key
+	})
 	s.TopActions = make([]TopAction, 0, len(sm.actions))
 	for _, a := range sm.actions {
 		s.TopActions = append(s.TopActions, *a)
 	}
-	sort.Slice(s.TopActions, func(i, j int) bool { return s.TopActions[i].Count > s.TopActions[j].Count })
+	sort.Slice(s.TopActions, func(i, j int) bool {
+		if s.TopActions[i].Count != s.TopActions[j].Count {
+			return s.TopActions[i].Count > s.TopActions[j].Count
+		}
+		return s.TopActions[i].Action < s.TopActions[j].Action
+	})
 	return s
 }

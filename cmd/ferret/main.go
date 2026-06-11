@@ -36,7 +36,7 @@ lenses: ` + "coarse | tool | target | exact"
 var (
 	errSessionRequired = errors.New("tokens: -session PREFIX required")
 	errNoStreamMatch   = errors.New("tokens: no stream matches")
-	errBadRange        = errors.New("bad -n range")
+	errBadRange        = errors.New("bad -n range (gram length must be ≥ 2; 1-gram frequency = summary top actions)")
 )
 
 func main() {
@@ -257,7 +257,7 @@ func cmdNgrams(args []string) error {
 	fs := flag.NewFlagSet("ngrams", flag.ExitOnError)
 	c := commonFlags(fs, 30)
 	lo := lensFlags(fs)
-	nRange := fs.String("n", "2-5", "gram lengths, e.g. 3 or 2-5")
+	nRange := fs.String("n", "2-5", "gram lengths ≥2, e.g. 3 or 2-5")
 	minCount := fs.Int("min-count", 5, "min total occurrences")
 	minSessions := fs.Int("min-sessions", 3, "min distinct streams")
 	if err := fs.Parse(args); err != nil {
@@ -471,13 +471,13 @@ func parseRange(s string) (int, int, error) {
 	if a, b, ok := strings.Cut(s, "-"); ok {
 		lo, err1 := strconv.Atoi(a)
 		hi, err2 := strconv.Atoi(b)
-		if err1 != nil || err2 != nil || lo < 1 || hi < lo {
+		if err1 != nil || err2 != nil || lo < 2 || hi < lo {
 			return 0, 0, fmt.Errorf("%w: %q", errBadRange, s)
 		}
 		return lo, hi, nil
 	}
 	n, err := strconv.Atoi(s)
-	if err != nil || n < 1 {
+	if err != nil || n < 2 {
 		return 0, 0, fmt.Errorf("%w: %q", errBadRange, s)
 	}
 	return n, n, nil

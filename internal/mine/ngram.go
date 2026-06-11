@@ -84,7 +84,8 @@ func Filter(grams map[string]*Gram, minCount, minSessions int) []*Gram {
 		}
 		out = append(out, g)
 	}
-	// v0 ranking: cross-session reach first, then volume, then length.
+	// v0 ranking: cross-session reach first, then volume, then length;
+	// ID-lexicographic last so ties are deterministic (map order isn't).
 	// Swap in lift/savings scoring at v1 without touching the counter.
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Sessions != out[j].Sessions {
@@ -93,9 +94,21 @@ func Filter(grams map[string]*Gram, minCount, minSessions int) []*Gram {
 		if out[i].Count != out[j].Count {
 			return out[i].Count > out[j].Count
 		}
-		return len(out[i].IDs) > len(out[j].IDs)
+		if len(out[i].IDs) != len(out[j].IDs) {
+			return len(out[i].IDs) > len(out[j].IDs)
+		}
+		return lessIDs(out[i].IDs, out[j].IDs)
 	})
 	return out
+}
+
+func lessIDs(a, b []uint32) bool {
+	for i := range a {
+		if a[i] != b[i] {
+			return a[i] < b[i]
+		}
+	}
+	return false
 }
 
 // suppressClosed marks the prefix and suffix of each gram suppressed when the
