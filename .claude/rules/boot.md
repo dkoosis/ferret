@@ -1,14 +1,10 @@
 # Boot
 updated: 2026-06-10
 
-→ Finish the surprise/seqs miner WIP in internal/mine — `make check` fails until it's clean.
+→ Land the real SWE-agent finding: adapter merged (PR #2, on main). Now pull a ~1k sample and run validate for the *actual* numbers — fixture n=3 only proved plumbing.
 
-1. `cd ~/Projects/ferret && make check` — 2 lint hits in rank.go (gocognit on RankPatterns, gofmt).
-2. rank.go, rank_test.go, surprise.go, main.go all uncommitted mid-flight.
-3. Test data exists now: `make corpus N=60` or `ferret ingest -root testdata/corpus`.
-
-✓ done
-- gen-corpus CLI + testdata fixtures (committed 23988d8)
+1. duckdb hf→jsonl one-liner in `testdata/README.md`; binary never touches HF.
+2. `ferret ingest -source swe-agent -root <sample> -data /tmp/swe && ferret validate -data /tmp/swe`.
 
 ‡ traps
-- internal/mine WIP breaks lint — don't commit it blind.
+- stale lint cache keys removed worktree paths → `golangci-lint cache clean` on phantom hits.
