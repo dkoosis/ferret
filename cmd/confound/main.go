@@ -167,7 +167,7 @@ func stratify(cor *mine.Corpus, member map[int]bool, outcomes map[string]event.O
 	for k := range outM {
 		keys[k] = true
 	}
-	var ks []string
+	ks := make([]string, 0, len(keys))
 	for k := range keys {
 		ks = append(ks, k)
 	}
