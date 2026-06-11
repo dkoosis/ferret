@@ -201,42 +201,79 @@ func cmdIngest(args []string) error {
 	}
 }
 
+// eventSink is the persistence seam for ingest: the real implementation is
+// *event.Writer, but tests inject a writer that fails after K records to prove
+// a mid-ingest write error aborts the run and suppresses the manifest.
+type eventSink interface {
+	Write(*event.Event) error
+	Close() error
+}
+
+// outcomeSink mirrors eventSink for the SWE-agent outcomes sidecar.
+type outcomeSink interface {
+	Write(*event.Outcome) error
+	Close() error
+}
+
+// newEventWriter / newOutcomeWriter are indirected through vars so a test can
+// substitute a failing writer without touching the event package.
+var (
+	newEventWriter   = func(path string) (eventSink, error) { return event.NewWriter(path) }
+	newOutcomeWriter = func(path string) (outcomeSink, error) { return event.NewOutcomeWriter(path) }
+)
+
+// errWriteAbort wraps the first per-record write error so ingest can abort the
+// loop and refuse to seal a manifest over a partially-written artifact.
+var errWriteAbort = errors.New("ingest aborted: record write failed")
+
 // ingestSWE adapts SWE-agent trajectory rows (JSONL — one row per stream)
 // into the standard events artifact plus an outcomes sidecar. -root may be a
 // single .jsonl file or a directory of them.
+//
+// Persistence contract: emit is fallible. The first write error aborts the
+// ingest loop, no manifest is written, and the error propagates so the process
+// exits nonzero. Stats reflect persisted records only — counters advance after
+// a successful write, never before — so a sealed manifest can never claim more
+// events than reached disk.
 func ingestSWE(dataDir, root string, dryRun bool) error {
 	files, err := jsonlFiles(root)
 	if err != nil {
 		return err
 	}
-	var w *event.Writer
-	var ow *event.OutcomeWriter
-	emit := func(*event.Event) {}
-	emitOut := func(*event.Outcome) {}
+	var w eventSink
+	var ow outcomeSink
+	var emitErr error
+	emit := func(*event.Event) error { return nil }
+	emitOut := func(*event.Outcome) error { return nil }
 	if !dryRun {
 		if err := os.MkdirAll(dataDir, 0o755); err != nil {
 			return err
 		}
-		if w, err = event.NewWriter(filepath.Join(dataDir, "events.jsonl")); err != nil {
+		if w, err = newEventWriter(filepath.Join(dataDir, "events.jsonl")); err != nil {
 			return err
 		}
-		if ow, err = event.NewOutcomeWriter(filepath.Join(dataDir, "outcomes.jsonl")); err != nil {
+		if ow, err = newOutcomeWriter(filepath.Join(dataDir, "outcomes.jsonl")); err != nil {
 			return err
 		}
-		emit = func(ev *event.Event) { _ = w.Write(ev) }
-		emitOut = func(o *event.Outcome) { _ = ow.Write(o) }
+		emit = w.Write
+		emitOut = ow.Write
 	}
 
 	start := time.Now()
 	st := event.NewStats()
 	for _, f := range files {
-		ingestSWEFile(f, st, emit, emitOut)
+		if emitErr = ingestSWEFile(f, st, emit, emitOut); emitErr != nil {
+			break
+		}
 	}
 	if w != nil {
-		if err := w.Close(); err != nil {
-			return err
-		}
-		if err := ow.Close(); err != nil {
+		// Close flushes; surface a flush error the same as a per-record error.
+		cerr := w.Close()
+		oerr := ow.Close()
+		if err := errors.Join(emitErr, cerr, oerr); err != nil {
+			// Partial run: do NOT write a manifest. The events.jsonl temp file
+			// is dropped by Writer.Close on its own error; on a per-record
+			// error the atomic artifact simply never gets sealed.
 			return err
 		}
 		m := &event.Manifest{CreatedAt: time.Now(), Root: root, Stats: st}
@@ -253,8 +290,13 @@ func ingestSWE(dataDir, root string, dryRun bool) error {
 // ingestSWEFile streams one trajectory JSONL file. A malformed row is counted
 // and skipped (loudly to stderr), never fatal. Stats reuse: Lines=rows,
 // Prompts=streams emitted (health line surfaces both).
-func ingestSWEFile(path string, st *event.Stats, emit func(*event.Event), emitOut func(*event.Outcome)) {
+//
+// A write error is fatal: it returns up so the caller aborts the whole ingest.
+// Per-stream stats (Events/Prompts/ByType) advance only after every record of
+// that stream is persisted, so the counters never overcount past a failure.
+func ingestSWEFile(path string, st *event.Stats, emit func(*event.Event) error, emitOut func(*event.Outcome) error) error {
 	st.Files++
+	var writeErr error
 	err := transcript.ReadLines(path, func(line []byte) error {
 		if len(strings.TrimSpace(string(line))) == 0 {
 			return nil
@@ -273,21 +315,31 @@ func ingestSWEFile(path string, st *event.Stats, emit func(*event.Event), emitOu
 		}
 		evs := sweagent.Events(row)
 		for _, ev := range evs {
+			if err := emit(ev); err != nil {
+				writeErr = fmt.Errorf("%w: %s: %v", errWriteAbort, path, err)
+				return writeErr // stop ReadLines
+			}
 			st.ByType[ev.Kind]++
-			emit(ev)
 		}
-		st.Events += len(evs)
-		st.Prompts++ // reused counter: streams emitted
-		emitOut(&event.Outcome{
+		if err := emitOut(&event.Outcome{
 			Stream:     sweagent.Project + "/" + row.InstanceID + "@",
 			Target:     row.Target,
 			ExitStatus: row.ExitStatus,
-		})
+		}); err != nil {
+			writeErr = fmt.Errorf("%w: %s: %v", errWriteAbort, path, err)
+			return writeErr
+		}
+		st.Events += len(evs)
+		st.Prompts++ // reused counter: streams emitted
 		return nil
 	})
+	if writeErr != nil {
+		return writeErr
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ferret: %s: %v (skipped)\n", path, err)
 	}
+	return nil
 }
 
 // jsonlFiles returns the .jsonl files at root (a file returns itself).
@@ -333,26 +385,43 @@ func ingest(dataDir, root, project string, dryRun bool) error {
 	}
 
 	b := event.NewBuilder()
+	// Builder.File takes a non-fallible emit; capture the first write error in a
+	// closure-scoped var instead. Once set, the outer loop stops and the run is
+	// treated as partial — no manifest gets sealed over a truncated artifact.
+	var emitErr error
 	emit := func(*event.Event) {}
-	var w *event.Writer
+	var w eventSink
 	if !dryRun {
 		if err := os.MkdirAll(dataDir, 0o755); err != nil {
 			return err
 		}
-		w, err = event.NewWriter(filepath.Join(dataDir, "events.jsonl"))
+		w, err = newEventWriter(filepath.Join(dataDir, "events.jsonl"))
 		if err != nil {
 			return err
 		}
-		emit = func(ev *event.Event) { _ = w.Write(ev) }
+		emit = func(ev *event.Event) {
+			if emitErr != nil {
+				return // already failed; drain remaining emits cheaply
+			}
+			if werr := w.Write(ev); werr != nil {
+				emitErr = fmt.Errorf("%w: %v", errWriteAbort, werr)
+			}
+		}
 	}
 	start := time.Now()
 	for _, src := range sources {
 		if err := b.File(src, emit); err != nil {
 			fmt.Fprintf(os.Stderr, "ferret: %s: %v (skipped)\n", src.Path, err)
 		}
+		if emitErr != nil {
+			break
+		}
 	}
 	if w != nil {
-		if err := w.Close(); err != nil {
+		cerr := w.Close()
+		if err := errors.Join(emitErr, cerr); err != nil {
+			// Partial run: refuse to write a manifest. The atomic Writer never
+			// seals events.jsonl, so no later mine runs on silently-truncated data.
 			return err
 		}
 		m := &event.Manifest{CreatedAt: time.Now(), Root: root, Stats: b.Stats}
