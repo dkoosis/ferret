@@ -7,7 +7,12 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -euo pipefail -c
 
-.PHONY: help check audit vet lint test race build vuln dupe nilcheck doctor install clean
+# ── Shared sandbox (go-sandbox) ──
+# doctor ← Makefile.doctor.mk; cross / cross-amd64 / cross-arm64 ← Makefile.cross.mk
+include .sandbox/lib/Makefile.doctor.mk
+include .sandbox/lib/Makefile.cross.mk
+
+.PHONY: help check audit vet lint test race build vuln dupe nilcheck install clean
 
 # Serialize golangci-lint through the machine-global mkdir mutex (see script
 # header — golangci-lint's cache lock fails exit-3 on contention instead of
@@ -53,21 +58,13 @@ nilcheck: ## Run nilaway (skips if not installed)
 	fi
 	nilaway -include-pkgs=github.com/dkoosis/ferret ./...
 
-doctor: ## Validate toolchain presence + versions
-	@for bin in go golangci-lint govulncheck jscpd; do \
-		if command -v $$bin >/dev/null 2>&1; then \
-			printf "  %-15s %s\n" "$$bin" "ok"; \
-		else \
-			printf "  %-15s %s\n" "$$bin" "MISSING"; FAIL=1; \
-		fi; \
-	done; \
-	printf "  %-15s %s\n" "go version" "$$(go env GOVERSION)"; \
-	printf "  %-15s %s\n" "golangci-lint" "$$(golangci-lint version --short 2>/dev/null || echo '?')"; \
-	[ -z "$${FAIL:-}" ] && echo "=== doctor pass ==="
+## doctor target provided by .sandbox/lib/Makefile.doctor.mk (project.conf-driven)
+## cross / cross-amd64 / cross-arm64 provided by .sandbox/lib/Makefile.cross.mk
 
 install: ## Install ferret to GOPATH/bin
 	go install ./cmd/ferret
 
-clean: ## Remove built binary from repo root
+clean: ## Remove built binary + sandbox build artifacts
 	@rm -f ferret
+	@rm -rf .sandbox/bin/linux-amd64 .sandbox/bin/linux-arm64 .sandbox/cache
 	@echo "=== clean ==="

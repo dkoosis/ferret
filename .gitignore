@@ -1,2 +1,9 @@
 .DS_Store
 /ferret
+
+# Sandbox: cache + transient artifacts (prebuilt binaries are tracked in .sandbox/bin/)
+.sandbox/cache/
+.sandbox/setup-report.json
+.sandbox/bin/**/*.tmp
+.sandbox/bin/**/*.upx
+.sandbox/bin/**/*.000
