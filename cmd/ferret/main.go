@@ -1,12 +1,11 @@
 // ferret mines Claude Code transcripts for repeated behavior:
 // scriptable routines, friction loops, and noisy context.
 //
-// AX-first: dense default output, -format json everywhere, hard output caps.
+// AX-first: dense default output, --format json everywhere, hard output caps.
 package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alecthomas/kong"
 	"github.com/dkoosis/ferret/internal/event"
 	"github.com/dkoosis/ferret/internal/lens"
 	"github.com/dkoosis/ferret/internal/mine"
@@ -24,30 +24,15 @@ import (
 	"github.com/dkoosis/ferret/internal/transcript"
 )
 
-const usage = `ferret — mine Claude Code transcripts for repeated behavior
-
-  ferret ingest   [-root DIR] [-source cc|swe-agent] [-project SUBSTR] [-dry-run]  build ~/.ferret/events.jsonl
-  ferret validate [-lens tool] [-min-support 20] [-min-streams 3]   rank buckets × ground-truth outcomes (needs outcomes.jsonl)
-  ferret summary  [-by corpus|project|session]                 corpus health + tool mix
-  ferret ngrams   [-lens tool] [-n 2-5] [-min-count 5] [-min-sessions 3]
-  ferret seqs     [-lens tool] [-min-support 20] [-max-gap 3] [-max-len 5]   gapped subsequences (PrefixSpan)
-  ferret rank     [-lens tool] [-min-support 20] [-order 3] [-top 10]        ranked review queue (cohesion-scored, bucketed)
-  ferret surprise [-lens tool] [-order 3] [-min-toks 20]       per-session predictability (low=scriptable, high=thrash)
-  ferret graph    [-lens tool] [-min-count 20] [-format text|json|mermaid|dot] [-loops]
-  ferret tokens   -session PREFIX [-lens tool]                 one session's token stream (lens debugger)
-
-common: -data DIR (default ~/.ferret) · -format text|json · -limit N · -max-bytes N
-lenses: ` + "coarse | tool | target | exact"
-
 var (
-	errSessionRequired = errors.New("tokens: -session PREFIX required")
+	errSessionRequired = errors.New("tokens: --session PREFIX required")
 	errNoStreamMatch   = errors.New("tokens: no stream matches")
-	errBadRange        = errors.New("bad -n range (gram length must be ≥ 2; 1-gram frequency = summary top actions)")
-	errBadFormat       = errors.New("bad -format")
-	errBadBy           = errors.New("bad -by (want corpus|project|session)")
-	errMaxBytesJSON    = errors.New("-max-bytes is not supported with -format json (use -limit)")
-	errBadIngestSrc    = errors.New("bad -source (want cc|swe-agent)")
-	errNoOutcomes      = errors.New("validate: no outcomes.jsonl — ingest a labeled corpus (e.g. -source swe-agent) first")
+	errBadRange        = errors.New("bad --n range (gram length must be ≥ 2; 1-gram frequency = summary top actions)")
+	errBadFormat       = errors.New("bad --format")
+	errBadBy           = errors.New("bad --by (want corpus|project|session)")
+	errMaxBytesJSON    = errors.New("--max-bytes is not supported with --format json (use --limit)")
+	errBadIngestSrc    = errors.New("bad --source (want cc|swe-agent)")
+	errNoOutcomes      = errors.New("validate: no outcomes.jsonl — ingest a labeled corpus (e.g. --source swe-agent) first")
 )
 
 // shared JSON response keys — every truncating JSON response carries
@@ -59,36 +44,163 @@ const (
 	keyTruncated = "truncated"
 )
 
+// ---- CLI grammar ----
+
+// defaultData returns ~/.ferret
+func defaultData() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".ferret")
+}
+
+// defaultRoot returns ~/.claude/projects
+func defaultRoot() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude", "projects")
+}
+
+// CommonFlags are shared across all analysis subcommands.
+type CommonFlags struct {
+	Data     string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
+	Format   string `help:"Output format: text|json (graph: +mermaid|dot)." default:"text" name:"format"`
+	Limit    int    `help:"Max rows (0 = unlimited)." default:"0" name:"limit"`
+	MaxBytes int    `help:"Max output bytes, text only (0 = unlimited)." default:"0" name:"max-bytes"`
+}
+
+// LensFlags are shared across all subcommands that build a corpus.
+type LensFlags struct {
+	Lens        string `help:"Token lens: coarse|tool|target|exact." default:"tool" name:"lens"`
+	NoMarkFail  bool   `help:"Don't append ! to failed-action tokens." name:"no-mark-fail"`
+	NoCollapse  bool   `help:"Don't run-length collapse repeated tokens." name:"no-collapse"`
+	NoSidechain bool   `help:"Exclude sidechain events." name:"no-sidechain"`
+}
+
+// CLI is the root grammar parsed by kong.
+var CLI struct {
+	Ingest struct {
+		Data    string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
+		Root    string `help:"Transcript root (dir or .jsonl file)." name:"root"`
+		Project string `help:"Only projects whose slug contains this substring." name:"project"`
+		Source  string `help:"Input source: cc (Claude Code transcripts) | swe-agent (trajectory JSONL)." default:"cc" name:"source"`
+		DryRun  bool   `help:"Scan and report; write nothing." name:"dry-run"`
+	} `cmd:"" help:"Build ~/.ferret/events.jsonl from transcripts." name:"ingest"`
+
+	Validate struct {
+		CommonFlags
+		LensFlags
+		MinSupport int    `help:"Min distinct streams containing the pattern." default:"20" name:"min-support"`
+		MaxGap     int    `help:"Max positions between consecutive items (1 = adjacent)." default:"3" name:"max-gap"`
+		MaxLen     int    `help:"Max pattern length." default:"5" name:"max-len"`
+		Order      int    `help:"Gram-model order for cohesion scoring." default:"3" name:"order"`
+		MinStreams int    `help:"Drop buckets supported by fewer streams (avoid tiny-n lift)." default:"3" name:"min-streams"`
+		Corpus     string `help:"Corpus label for the report header." default:"swe-agent" name:"corpus"`
+	} `cmd:"" help:"Rank buckets × ground-truth outcomes (needs outcomes.jsonl)."`
+
+	Summary struct {
+		CommonFlags
+		By string `help:"Aggregation grain: corpus|project|session." default:"corpus" name:"by"`
+	} `cmd:"" help:"Corpus health + tool mix."`
+
+	Ngrams struct {
+		CommonFlags
+		LensFlags
+		N           string `help:"Gram lengths ≥2, e.g. 3 or 2-5." default:"2-5" name:"n"`
+		MinCount    int    `help:"Min total occurrences." default:"5" name:"min-count"`
+		MinSessions int    `help:"Min distinct streams." default:"3" name:"min-sessions"`
+	} `cmd:"" help:"Repeated n-grams across streams."`
+
+	Seqs struct {
+		CommonFlags
+		LensFlags
+		MinSupport int `help:"Min distinct streams containing the pattern." default:"20" name:"min-support"`
+		MaxGap     int `help:"Max positions between consecutive items (1 = adjacent)." default:"3" name:"max-gap"`
+		MaxLen     int `help:"Max pattern length." default:"5" name:"max-len"`
+	} `cmd:"" help:"Gapped subsequences (PrefixSpan)."`
+
+	Rank struct {
+		CommonFlags
+		LensFlags
+		MinSupport int `help:"Min distinct streams containing the pattern." default:"20" name:"min-support"`
+		MaxGap     int `help:"Max positions between consecutive items (1 = adjacent)." default:"3" name:"max-gap"`
+		MaxLen     int `help:"Max pattern length." default:"5" name:"max-len"`
+		Order      int `help:"Gram-model order for cohesion scoring." default:"3" name:"order"`
+		Top        int `help:"Max cards per bucket." default:"10" name:"top"`
+	} `cmd:"" help:"Ranked review queue (cohesion-scored, bucketed)."`
+
+	Surprise struct {
+		CommonFlags
+		LensFlags
+		Order   int `help:"Model order: predict each token from up to N prior tokens." default:"3" name:"order"`
+		MinToks int `help:"Skip streams shorter than this." default:"20" name:"min-toks"`
+	} `cmd:"" help:"Per-session predictability (low=scriptable, high=thrash)."`
+
+	Graph struct {
+		CommonFlags
+		LensFlags
+		MinCount int  `help:"Min edge count." default:"20" name:"min-count"`
+		Loops    bool `help:"Show A→B→A bounce cycles (friction signatures)." name:"loops"`
+	} `cmd:"" help:"Token transition graph."`
+
+	Tokens struct {
+		CommonFlags
+		LensFlags
+		Session string `help:"Session ID prefix (required)." required:"" name:"session"`
+	} `cmd:"" help:"One session's token stream (lens debugger)."`
+}
+
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, usage)
-		os.Exit(2)
+	// Resolve dynamic defaults before parsing.
+	// kong supports ${...} interpolation only for env vars in default tags,
+	// so we patch the struct directly before Parse sees it.
+	if CLI.Ingest.Root == "" {
+		CLI.Ingest.Root = defaultRoot()
 	}
+	if CLI.Ingest.Data == "" {
+		CLI.Ingest.Data = defaultData()
+	}
+
+	k := kong.Parse(&CLI,
+		kong.Name("ferret"),
+		kong.Description(
+			"Mine Claude Code transcripts for repeated behavior:\n"+
+				"scriptable routines, friction loops, and noisy context.\n\n"+
+				"  ferret ingest   [--root DIR] [--source cc|swe-agent] [--project SUBSTR] [--dry-run]\n"+
+				"  ferret validate [--lens tool] [--min-support 20] [--min-streams 3]\n"+
+				"  ferret summary  [--by corpus|project|session]\n"+
+				"  ferret ngrams   [--lens tool] [--n 2-5] [--min-count 5] [--min-sessions 3]\n"+
+				"  ferret seqs     [--lens tool] [--min-support 20] [--max-gap 3] [--max-len 5]\n"+
+				"  ferret rank     [--lens tool] [--min-support 20] [--order 3] [--top 10]\n"+
+				"  ferret surprise [--lens tool] [--order 3] [--min-toks 20]\n"+
+				"  ferret graph    [--lens tool] [--min-count 20] [--format text|json|mermaid|dot] [--loops]\n"+
+				"  ferret tokens   --session PREFIX [--lens tool]\n\n"+
+				"common: --data DIR (default ~/.ferret)  --format text|json  --limit N  --max-bytes N\n"+
+				"lenses: coarse | tool | target | exact",
+		),
+		kong.UsageOnError(),
+		kong.ConfigureHelp(kong.HelpOptions{Compact: true}),
+	)
+
 	var err error
-	switch os.Args[1] {
+	switch k.Command() {
 	case "ingest":
-		err = cmdIngest(os.Args[2:])
+		err = cmdIngest()
 	case "validate":
-		err = cmdValidate(os.Args[2:])
+		err = cmdValidate()
 	case "summary":
-		err = cmdSummary(os.Args[2:])
+		err = cmdSummary()
 	case "ngrams":
-		err = cmdNgrams(os.Args[2:])
+		err = cmdNgrams()
 	case "seqs":
-		err = cmdSeqs(os.Args[2:])
+		err = cmdSeqs()
 	case "rank":
-		err = cmdRank(os.Args[2:])
+		err = cmdRank()
 	case "surprise":
-		err = cmdSurprise(os.Args[2:])
+		err = cmdSurprise()
 	case "graph":
-		err = cmdGraph(os.Args[2:])
+		err = cmdGraph()
 	case "tokens":
-		err = cmdTokens(os.Args[2:])
-	case "help", "-h", "--help":
-		fmt.Println(usage)
+		err = cmdTokens()
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q\n%s\n", os.Args[1], usage)
-		os.Exit(2)
+		k.Fatalf("unknown command %q", k.Command())
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "ferret:", err)
@@ -96,8 +208,10 @@ func main() {
 	}
 }
 
-// ---- shared flags ----
+// ---- shared helpers ----
 
+// common wraps CommonFlags with helper methods (kept as a receiver type so
+// the analysis helpers—validate, eventsPath, ensureData—remain unchanged).
 type common struct {
 	data     string
 	format   string
@@ -105,20 +219,18 @@ type common struct {
 	maxBytes int
 }
 
-func commonFlags(fs *flag.FlagSet, defLimit int) *common {
-	c := &common{}
-	home, _ := os.UserHomeDir()
-	fs.StringVar(&c.data, "data", filepath.Join(home, ".ferret"), "artifact directory")
-	fs.StringVar(&c.format, "format", "text", "output format: text|json (graph: +mermaid|dot)")
-	fs.IntVar(&c.limit, "limit", defLimit, "max rows (0 = unlimited)")
-	fs.IntVar(&c.maxBytes, "max-bytes", 0, "max output bytes (0 = unlimited)")
-	return c
+func fromCommonFlags(cf CommonFlags) *common {
+	data := cf.Data
+	if data == "~/.ferret" {
+		data = defaultData()
+	}
+	return &common{data: data, format: cf.Format, limit: cf.Limit, maxBytes: cf.MaxBytes}
 }
 
 func (c *common) eventsPath() string { return filepath.Join(c.data, "events.jsonl") }
 
-// validate rejects unknown -format values (a typo must not silently produce
-// text output) and -max-bytes with json (no streaming cap — refuse rather
+// validate rejects unknown --format values (a typo must not silently produce
+// text output) and --max-bytes with json (no streaming cap — refuse rather
 // than truncate silently or emit invalid JSON).
 func (c *common) validate(formats ...string) error {
 	ok := false
@@ -158,13 +270,13 @@ type lensOpts struct {
 	noSidechain bool
 }
 
-func lensFlags(fs *flag.FlagSet) *lensOpts {
-	lo := &lensOpts{}
-	fs.StringVar(&lo.lens, "lens", "tool", "token lens: "+strings.Join(lens.Names(), "|"))
-	fs.BoolVar(&lo.noMarkFail, "no-mark-fail", false, "don't append ! to failed-action tokens")
-	fs.BoolVar(&lo.noCollapse, "no-collapse", false, "don't run-length collapse repeated tokens")
-	fs.BoolVar(&lo.noSidechain, "no-sidechain", false, "exclude sidechain events")
-	return lo
+func fromLensFlags(lf LensFlags) *lensOpts {
+	return &lensOpts{
+		lens:        lf.Lens,
+		noMarkFail:  lf.NoMarkFail,
+		noCollapse:  lf.NoCollapse,
+		noSidechain: lf.NoSidechain,
+	}
 }
 
 func (lo *lensOpts) corpus(eventsPath string) (*mine.Corpus, lens.Lens, error) {
@@ -182,28 +294,23 @@ func (lo *lensOpts) corpus(eventsPath string) (*mine.Corpus, lens.Lens, error) {
 
 // ---- ingest ----
 
-func cmdIngest(args []string) error {
-	fs := flag.NewFlagSet("ingest", flag.ExitOnError)
-	home, _ := os.UserHomeDir()
-	// ingest selects its input with -source (not -format): -format is the
-	// output selector on every other command, and ingest always writes text.
-	// Keeping -format as a source selector here would overload one flag with
-	// two meanings across the CLI, so source gets its own name.
-	data := fs.String("data", filepath.Join(home, ".ferret"), "artifact directory")
-	root := fs.String("root", filepath.Join(home, ".claude", "projects"), "transcript root")
-	project := fs.String("project", "", "only projects whose slug contains this substring")
-	source := fs.String("source", "cc", "input source: cc (Claude Code transcripts) | swe-agent (trajectory JSONL)")
-	dryRun := fs.Bool("dry-run", false, "scan and report; write nothing")
-	if err := fs.Parse(args); err != nil {
-		return err
+func cmdIngest() error {
+	cmd := &CLI.Ingest
+	data := cmd.Data
+	if data == "~/.ferret" {
+		data = defaultData()
 	}
-	switch *source {
+	root := cmd.Root
+	if root == "" {
+		root = defaultRoot()
+	}
+	switch cmd.Source {
 	case "cc":
-		return ingest(*data, *root, *project, *dryRun)
+		return ingest(data, root, cmd.Project, cmd.DryRun)
 	case "swe-agent":
-		return ingestSWE(*data, *root, *dryRun)
+		return ingestSWE(data, root, cmd.DryRun)
 	default:
-		return fmt.Errorf("%w: %q", errBadIngestSrc, *source)
+		return fmt.Errorf("%w: %q", errBadIngestSrc, cmd.Source)
 	}
 }
 
@@ -239,7 +346,7 @@ var (
 var errWriteAbort = errors.New("ingest aborted: record write failed")
 
 // ingestSWE adapts SWE-agent trajectory rows (JSONL — one row per stream)
-// into the standard events artifact plus an outcomes sidecar. -root may be a
+// into the standard events artifact plus an outcomes sidecar. --root may be a
 // single .jsonl file or a directory of them.
 //
 // Persistence contract: emit is fallible. The first write error aborts the
@@ -400,8 +507,7 @@ func jsonlFiles(root string) ([]string, error) {
 
 func ingest(dataDir, root, project string, dryRun bool) error {
 	if root == "" {
-		home, _ := os.UserHomeDir()
-		root = filepath.Join(home, ".claude", "projects")
+		root = defaultRoot()
 	}
 	sources, err := transcript.Walk(root)
 	if err != nil {
@@ -483,25 +589,24 @@ func ingest(dataDir, root, project string, dryRun bool) error {
 
 // ---- summary ----
 
-func cmdSummary(args []string) error {
-	fs := flag.NewFlagSet("summary", flag.ExitOnError)
-	c := commonFlags(fs, 20)
-	by := fs.String("by", "corpus", "aggregation grain: corpus|project|session")
-	if err := fs.Parse(args); err != nil {
-		return err
+func cmdSummary() error {
+	cmd := &CLI.Summary
+	c := fromCommonFlags(cmd.CommonFlags)
+	if c.limit == 0 {
+		c.limit = 20
 	}
 	if err := c.validate("text", "json"); err != nil {
 		return err
 	}
-	switch *by {
+	switch cmd.By {
 	case "corpus", "project", "session":
 	default:
-		return fmt.Errorf("%w: %q", errBadBy, *by)
+		return fmt.Errorf("%w: %q", errBadBy, cmd.By)
 	}
 	if err := c.ensureData(); err != nil {
 		return err
 	}
-	s, err := mine.Summarize(c.eventsPath(), *by)
+	s, err := mine.Summarize(c.eventsPath(), cmd.By)
 	if err != nil {
 		return err
 	}
@@ -524,7 +629,7 @@ func cmdSummary(args []string) error {
 		sink.Row("%8d ev %5d sess fail=%.1f%% cfail=%.1f%% retry=%.1f%% unpaired=%.1f%%  %s",
 			b.Events, b.Sessions, pct(b.Fails, b.Events), pct(b.CFails, b.Events), pct(b.Retries, b.Events), pct(b.Unpaired, b.Events), b.Key)
 	}
-	if *by == "corpus" && len(s.TopActions) > 0 {
+	if cmd.By == "corpus" && len(s.TopActions) > 0 {
 		sink.Head("top actions:")
 		for i, a := range s.TopActions {
 			if i >= 15 {
@@ -538,17 +643,14 @@ func cmdSummary(args []string) error {
 
 // ---- ngrams ----
 
-func cmdNgrams(args []string) error {
-	fs := flag.NewFlagSet("ngrams", flag.ExitOnError)
-	c := commonFlags(fs, 30)
-	lo := lensFlags(fs)
-	nRange := fs.String("n", "2-5", "gram lengths ≥2, e.g. 3 or 2-5")
-	minCount := fs.Int("min-count", 5, "min total occurrences")
-	minSessions := fs.Int("min-sessions", 3, "min distinct streams")
-	if err := fs.Parse(args); err != nil {
-		return err
+func cmdNgrams() error {
+	cmd := &CLI.Ngrams
+	c := fromCommonFlags(cmd.CommonFlags)
+	if c.limit == 0 {
+		c.limit = 30
 	}
-	minN, maxN, err := parseRange(*nRange)
+	lo := fromLensFlags(cmd.LensFlags)
+	minN, maxN, err := parseRange(cmd.N)
 	if err != nil {
 		return err
 	}
@@ -562,7 +664,7 @@ func cmdNgrams(args []string) error {
 	if err != nil {
 		return err
 	}
-	grams := mine.Filter(mine.CountGrams(corpus, minN, maxN), *minCount, *minSessions)
+	grams := mine.Filter(mine.CountGrams(corpus, minN, maxN), cmd.MinCount, cmd.MinSessions)
 
 	if c.format == fmtJSON {
 		type jg struct {
@@ -579,14 +681,14 @@ func cmdNgrams(args []string) error {
 			rows = append(rows, jg{corpus.Tokens(g.IDs), g.Count, g.Sessions, exemplar(corpus, g.ExStream, g.ExSeq)})
 		}
 		return out.JSON(os.Stdout, map[string]any{
-			keyLens: l.Name(), "n": *nRange, "grams": rows,
+			keyLens: l.Name(), "n": cmd.N, "grams": rows,
 			keyTotal: len(grams), keyTruncated: len(rows) < len(grams),
 		})
 	}
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
 	defer sink.Close()
 	sink.Head("ngrams lens=%s n=%s streams=%d grams=%d (min-count=%d min-sessions=%d)",
-		l.Name(), *nRange, len(corpus.Streams), len(grams), *minCount, *minSessions)
+		l.Name(), cmd.N, len(corpus.Streams), len(grams), cmd.MinCount, cmd.MinSessions)
 	for _, g := range grams {
 		if !sink.Row("%5dx/%-4ds %s  ex: %s",
 			g.Count, g.Sessions, strings.Join(corpus.Tokens(g.IDs), " → "), exemplar(corpus, g.ExStream, g.ExSeq)) {
@@ -598,16 +700,13 @@ func cmdNgrams(args []string) error {
 
 // ---- seqs (PrefixSpan) ----
 
-func cmdSeqs(args []string) error {
-	fs := flag.NewFlagSet("seqs", flag.ExitOnError)
-	c := commonFlags(fs, 30)
-	lo := lensFlags(fs)
-	minSupport := fs.Int("min-support", 20, "min distinct streams containing the pattern")
-	maxGap := fs.Int("max-gap", 3, "max positions between consecutive items (1 = adjacent)")
-	maxLen := fs.Int("max-len", 5, "max pattern length")
-	if err := fs.Parse(args); err != nil {
-		return err
+func cmdSeqs() error {
+	cmd := &CLI.Seqs
+	c := fromCommonFlags(cmd.CommonFlags)
+	if c.limit == 0 {
+		c.limit = 30
 	}
+	lo := fromLensFlags(cmd.LensFlags)
 	if err := c.validate("text", fmtJSON); err != nil {
 		return err
 	}
@@ -619,7 +718,7 @@ func cmdSeqs(args []string) error {
 		return err
 	}
 	pats, capped := mine.MineSeqs(corpus, mine.SeqOpts{
-		MinSupport: *minSupport, MaxGap: *maxGap, MaxLen: *maxLen, MaxPatterns: 10000,
+		MinSupport: cmd.MinSupport, MaxGap: cmd.MaxGap, MaxLen: cmd.MaxLen, MaxPatterns: 10000,
 	})
 
 	if c.format == fmtJSON {
@@ -636,16 +735,16 @@ func cmdSeqs(args []string) error {
 			rows = append(rows, jp{corpus.Tokens(p.IDs), p.Support, exemplar(corpus, p.ExStream, p.ExSeq)})
 		}
 		return out.JSON(os.Stdout, map[string]any{
-			keyLens: l.Name(), "maxGap": *maxGap, "patterns": rows,
+			keyLens: l.Name(), "maxGap": cmd.MaxGap, "patterns": rows,
 			keyTotal: len(pats), keyTruncated: len(rows) < len(pats) || capped,
 		})
 	}
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
 	defer sink.Close()
 	sink.Head("seqs lens=%s streams=%d patterns=%d (min-support=%d max-gap=%d max-len=%d)",
-		l.Name(), len(corpus.Streams), len(pats), *minSupport, *maxGap, *maxLen)
+		l.Name(), len(corpus.Streams), len(pats), cmd.MinSupport, cmd.MaxGap, cmd.MaxLen)
 	if capped {
-		sink.Head("‡ search hit the 10000-pattern cap — raise -min-support")
+		sink.Head("‡ search hit the 10000-pattern cap — raise --min-support")
 	}
 	for _, p := range pats {
 		if !sink.Row("%5ds %s  ex: %s",
@@ -658,18 +757,10 @@ func cmdSeqs(args []string) error {
 
 // ---- rank (cohesion-scored review queue) ----
 
-func cmdRank(args []string) error {
-	fs := flag.NewFlagSet("rank", flag.ExitOnError)
-	c := commonFlags(fs, 0)
-	lo := lensFlags(fs)
-	minSupport := fs.Int("min-support", 20, "min distinct streams containing the pattern")
-	maxGap := fs.Int("max-gap", 3, "max positions between consecutive items (1 = adjacent)")
-	maxLen := fs.Int("max-len", 5, "max pattern length")
-	order := fs.Int("order", 3, "gram-model order for cohesion scoring")
-	top := fs.Int("top", 10, "max cards per bucket")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
+func cmdRank() error {
+	cmd := &CLI.Rank
+	c := fromCommonFlags(cmd.CommonFlags)
+	lo := fromLensFlags(cmd.LensFlags)
 	if err := c.validate("text", fmtJSON); err != nil {
 		return err
 	}
@@ -681,16 +772,16 @@ func cmdRank(args []string) error {
 		return err
 	}
 	pats, capped := mine.MineSeqs(corpus, mine.SeqOpts{
-		MinSupport: *minSupport, MaxGap: *maxGap, MaxLen: *maxLen, MaxPatterns: 10000,
+		MinSupport: cmd.MinSupport, MaxGap: cmd.MaxGap, MaxLen: cmd.MaxLen, MaxPatterns: 10000,
 	})
 	opts := mine.DefaultRankOpts()
-	opts.Order = *order
+	opts.Order = cmd.Order
 	cards, noise := mine.RankPatterns(corpus, pats, opts)
 
 	byBucket := map[string][]*mine.Card{}
 	overflow := 0
 	for _, card := range cards {
-		if *top > 0 && len(byBucket[card.Bucket]) >= *top {
+		if cmd.Top > 0 && len(byBucket[card.Bucket]) >= cmd.Top {
 			overflow++
 			continue
 		}
@@ -717,7 +808,7 @@ func cmdRank(args []string) error {
 			buckets[b] = rows
 		}
 		return out.JSON(os.Stdout, map[string]any{
-			keyLens: l.Name(), "order": *order, "buckets": buckets,
+			keyLens: l.Name(), "order": cmd.Order, "buckets": buckets,
 			"noise": noise, keyTotal: len(cards),
 			keyTruncated: overflow > 0 || capped,
 		})
@@ -725,9 +816,9 @@ func cmdRank(args []string) error {
 	sink := out.NewSink(os.Stdout, 0, c.maxBytes)
 	defer sink.Close()
 	sink.Head("rank lens=%s patterns=%d → cards=%d noise=%d (min-support=%d order=%d top=%d)",
-		l.Name(), len(pats), len(cards), noise, *minSupport, *order, *top)
+		l.Name(), len(pats), len(cards), noise, cmd.MinSupport, cmd.Order, cmd.Top)
 	if capped {
-		sink.Head("‡ seqs hit the 10000-pattern cap — raise -min-support")
+		sink.Head("‡ seqs hit the 10000-pattern cap — raise --min-support")
 	}
 	desc := map[string]string{
 		mine.BucketFriction: "fail-marked",
@@ -756,26 +847,17 @@ func cmdRank(args []string) error {
 		}
 	}
 	if overflow > 0 {
-		sink.Head("… %d more cards past -top %d", overflow, *top)
+		sink.Head("… %d more cards past --top %d", overflow, cmd.Top)
 	}
 	return nil
 }
 
 // ---- validate (rank buckets × ground-truth outcomes) ----
 
-func cmdValidate(args []string) error {
-	fs := flag.NewFlagSet("validate", flag.ExitOnError)
-	c := commonFlags(fs, 0)
-	lo := lensFlags(fs)
-	minSupport := fs.Int("min-support", 20, "min distinct streams containing the pattern")
-	maxGap := fs.Int("max-gap", 3, "max positions between consecutive items (1 = adjacent)")
-	maxLen := fs.Int("max-len", 5, "max pattern length")
-	order := fs.Int("order", 3, "gram-model order for cohesion scoring")
-	minStreams := fs.Int("min-streams", 3, "drop buckets supported by fewer streams (avoid tiny-n lift)")
-	corpus := fs.String("corpus", sweagent.Project, "corpus label for the report header")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
+func cmdValidate() error {
+	cmd := &CLI.Validate
+	c := fromCommonFlags(cmd.CommonFlags)
+	lo := fromLensFlags(cmd.LensFlags)
 	if err := c.validate("text", fmtJSON); err != nil {
 		return err
 	}
@@ -794,12 +876,12 @@ func cmdValidate(args []string) error {
 		return err
 	}
 	pats, _ := mine.MineSeqs(cor, mine.SeqOpts{
-		MinSupport: *minSupport, MaxGap: *maxGap, MaxLen: *maxLen, MaxPatterns: 10000,
+		MinSupport: cmd.MinSupport, MaxGap: cmd.MaxGap, MaxLen: cmd.MaxLen, MaxPatterns: 10000,
 	})
 	opts := mine.DefaultRankOpts()
-	opts.Order = *order
+	opts.Order = cmd.Order
 	cards, _ := mine.RankPatterns(cor, pats, opts)
-	v := mine.Validate(cor, cards, outcomes, *corpus, *minStreams, *maxGap)
+	v := mine.Validate(cor, cards, outcomes, cmd.Corpus, cmd.MinStreams, cmd.MaxGap)
 
 	if c.format == fmtJSON {
 		return out.JSON(os.Stdout, map[string]any{
@@ -823,15 +905,13 @@ func cmdValidate(args []string) error {
 
 // ---- surprise (PPM-lite) ----
 
-func cmdSurprise(args []string) error {
-	fs := flag.NewFlagSet("surprise", flag.ExitOnError)
-	c := commonFlags(fs, 20)
-	lo := lensFlags(fs)
-	order := fs.Int("order", 3, "model order: predict each token from up to N prior tokens")
-	minToks := fs.Int("min-toks", 20, "skip streams shorter than this")
-	if err := fs.Parse(args); err != nil {
-		return err
+func cmdSurprise() error {
+	cmd := &CLI.Surprise
+	c := fromCommonFlags(cmd.CommonFlags)
+	if c.limit == 0 {
+		c.limit = 20
 	}
+	lo := fromLensFlags(cmd.LensFlags)
 	if err := c.validate("text", fmtJSON); err != nil {
 		return err
 	}
@@ -842,7 +922,7 @@ func cmdSurprise(args []string) error {
 	if err != nil {
 		return err
 	}
-	scores := mine.ScoreSurprise(corpus, mine.SurpriseOpts{Order: *order, MinToks: *minToks})
+	scores := mine.ScoreSurprise(corpus, mine.SurpriseOpts{Order: cmd.Order, MinToks: cmd.MinToks})
 
 	mean := 0.0
 	for _, s := range scores {
@@ -867,7 +947,7 @@ func cmdSurprise(args []string) error {
 
 	if c.format == fmtJSON {
 		return out.JSON(os.Stdout, map[string]any{
-			keyLens: l.Name(), "order": *order, "meanBits": mean,
+			keyLens: l.Name(), "order": cmd.Order, "meanBits": mean,
 			"routine": routine, "thrash": thrash,
 			keyTotal: len(scores), keyTruncated: len(routine)+len(thrash) < len(scores),
 		})
@@ -875,7 +955,7 @@ func cmdSurprise(args []string) error {
 	sink := out.NewSink(os.Stdout, c.limit+2, c.maxBytes)
 	defer sink.Close()
 	sink.Head("surprise lens=%s order=%d streams=%d mean=%.2f bits/tok (low=routine/scriptable, high=thrash)",
-		l.Name(), *order, len(scores), mean)
+		l.Name(), cmd.Order, len(scores), mean)
 	sink.Head("most routine:")
 	for _, s := range routine {
 		if !sink.Row("%6.2f bits %5d toks  %s", s.Bits, s.Toks, s.Stream) {
@@ -893,15 +973,13 @@ func cmdSurprise(args []string) error {
 
 // ---- graph ----
 
-func cmdGraph(args []string) error {
-	fs := flag.NewFlagSet("graph", flag.ExitOnError)
-	c := commonFlags(fs, 40)
-	lo := lensFlags(fs)
-	minCount := fs.Int("min-count", 20, "min edge count")
-	loops := fs.Bool("loops", false, "show A→B→A bounce cycles (friction signatures)")
-	if err := fs.Parse(args); err != nil {
-		return err
+func cmdGraph() error {
+	cmd := &CLI.Graph
+	c := fromCommonFlags(cmd.CommonFlags)
+	if c.limit == 0 {
+		c.limit = 40
 	}
+	lo := fromLensFlags(cmd.LensFlags)
 	if err := c.validate("text", "json", "mermaid", "dot"); err != nil {
 		return err
 	}
@@ -916,7 +994,7 @@ func cmdGraph(args []string) error {
 
 	edges := f.Edges[:0:0]
 	for _, e := range f.Edges {
-		if e.Count >= *minCount {
+		if e.Count >= cmd.MinCount {
 			edges = append(edges, e)
 		}
 	}
@@ -957,7 +1035,7 @@ func cmdGraph(args []string) error {
 	}
 
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
-	sink.Head("graph lens=%s edges=%d (min-count=%d)", l.Name(), len(edges), *minCount)
+	sink.Head("graph lens=%s edges=%d (min-count=%d)", l.Name(), len(edges), cmd.MinCount)
 	for _, e := range edges {
 		if !sink.Row("%6dx  %s → %s", e.Count, corpus.Vocab[e.From], corpus.Vocab[e.To]) {
 			break
@@ -966,7 +1044,7 @@ func cmdGraph(args []string) error {
 	if err := sink.Close(); err != nil {
 		return err
 	}
-	if *loops {
+	if cmd.Loops {
 		// cycles get their own budget — they're the friction report, not overflow
 		ls := out.NewSink(os.Stdout, 20, c.maxBytes)
 		ls.Head("bounce cycles (A→B→A):")
@@ -1016,15 +1094,14 @@ func mermaidLabel(s string) string {
 
 // ---- tokens ----
 
-func cmdTokens(args []string) error {
-	fs := flag.NewFlagSet("tokens", flag.ExitOnError)
-	c := commonFlags(fs, 200)
-	lo := lensFlags(fs)
-	session := fs.String("session", "", "session id prefix (required)")
-	if err := fs.Parse(args); err != nil {
-		return err
+func cmdTokens() error {
+	cmd := &CLI.Tokens
+	c := fromCommonFlags(cmd.CommonFlags)
+	if c.limit == 0 {
+		c.limit = 200
 	}
-	if *session == "" {
+	lo := fromLensFlags(cmd.LensFlags)
+	if cmd.Session == "" {
 		return errSessionRequired
 	}
 	if err := c.validate("text", "json"); err != nil {
@@ -1040,12 +1117,12 @@ func cmdTokens(args []string) error {
 	var matches []int
 	for si, key := range corpus.StreamKeys {
 		short := key[strings.IndexByte(key, '/')+1:]
-		if strings.HasPrefix(short, *session) || strings.Contains(key, *session) {
+		if strings.HasPrefix(short, cmd.Session) || strings.Contains(key, cmd.Session) {
 			matches = append(matches, si)
 		}
 	}
 	if len(matches) == 0 {
-		return fmt.Errorf("%w: %q", errNoStreamMatch, *session)
+		return fmt.Errorf("%w: %q", errNoStreamMatch, cmd.Session)
 	}
 	if c.format == fmtJSON {
 		type jt struct {

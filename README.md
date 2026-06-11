@@ -12,22 +12,22 @@ make help           # all targets (check, audit, install…)
 ## Quickstart
 
 ```
-ferret ingest                          # 1.4GB raw → ~36MB ~/.ferret/events.jsonl (~15s)
-ferret summary  [-by project|session]  # corpus health, tool mix, failure rates
-ferret ngrams   [-lens tool] [-n 2-5]              # repeated n-grams
-ferret seqs     [-lens tool] [-max-gap 3]          # gapped subsequences (PrefixSpan)
-ferret rank     [-lens tool] [-top 10]             # ranked review queue, bucketed
-ferret surprise [-lens tool]                       # per-session predictability (low=scriptable, high=thrash)
-ferret graph    [-loops] [-format mermaid|dot]     # transition graph
-ferret validate [-lens exact]                      # buckets × ground-truth outcomes (needs outcomes.jsonl)
-ferret tokens   -session PREFIX                    # one session's token stream (lens debugger)
+ferret ingest                               # 1.4GB raw → ~36MB ~/.ferret/events.jsonl (~15s)
+ferret summary  [--by project|session]      # corpus health, tool mix, failure rates
+ferret ngrams   [--lens tool] [--n 2-5]               # repeated n-grams
+ferret seqs     [--lens tool] [--max-gap 3]           # gapped subsequences (PrefixSpan)
+ferret rank     [--lens tool] [--top 10]              # ranked review queue, bucketed
+ferret surprise [--lens tool]                         # per-session predictability (low=scriptable, high=thrash)
+ferret graph    [--loops] [--format mermaid|dot]      # transition graph
+ferret validate [--lens exact]                        # buckets × ground-truth outcomes (needs outcomes.jsonl)
+ferret tokens   --session PREFIX                      # one session's token stream (lens debugger)
 ```
 
-Everything takes `-data DIR` (default `~/.ferret`), `-format json`, `-limit`, `-max-bytes`. Truncation is never silent.
+Everything takes `--data DIR` (default `~/.ferret`), `--format json`, `--limit`, `--max-bytes`. Truncation is never silent.
 
 ## Lenses
 
-Lenses re-slice the same canonical events at different granularity; pick with `-lens`.
+Lenses re-slice the same canonical events at different granularity; pick with `--lens`.
 
 | Lens | Token | Example |
 |------|-------|---------|
