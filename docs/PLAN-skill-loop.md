@@ -1,6 +1,12 @@
 # Plan for review — make the ferret skill close the loop
 
-_Drafted 2026-06-12. For dk's review before any edit. Companion to `docs/DESIGN.md`._
+_Drafted 2026-06-12. Executed same day. Companion to `docs/DESIGN.md`._
+
+**Status: A, B, C, D2 shipped** (cc-plugins ferret skill v0.2.0). Schema decision: the fix
+ledger uses the existing `metric.skill.ferret.outcome` nug pattern (trixi skill-metrics
+taxonomy) rather than a new `reference.ferret-fix` flavor — structured body with the
+verbatim motif as join key, so a future D1 CLI can parse it. D1 stays gated: bead filed,
+blocked until a scan shows fixes actually get recorded and the eyeballed delta isn't enough.
 
 ## The problem
 
