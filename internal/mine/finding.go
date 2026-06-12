@@ -118,7 +118,7 @@ func measure(c *Corpus, ids []uint32, maxGap int) (count, sessions, burnBytes in
 // maxGap positions of the prior match. Returns the end position and summed
 // member bytes on success.
 func matchAt(st []Tok, start int, ids []uint32, maxGap int) (end, bytes int, ok bool) {
-	if start >= len(st) || st[start].ID != ids[0] {
+	if len(ids) == 0 || start >= len(st) || st[start].ID != ids[0] {
 		return 0, 0, false
 	}
 	pos := start

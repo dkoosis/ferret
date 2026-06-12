@@ -36,10 +36,16 @@ func bytesCorpus(streams [][]tb) *Corpus {
 func idsFor(c *Corpus, toks ...string) []uint32 {
 	out := make([]uint32, len(toks))
 	for i, t := range toks {
+		found := false
 		for id, v := range c.Vocab {
 			if v == t {
 				out[i] = uint32(id)
+				found = true
+				break
 			}
+		}
+		if !found {
+			panic("idsFor: token not in vocab: " + t)
 		}
 	}
 	return out
