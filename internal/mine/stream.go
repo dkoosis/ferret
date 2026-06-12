@@ -9,8 +9,9 @@ import (
 
 // Tok is one token occurrence in a stream.
 type Tok struct {
-	ID  uint32
-	Seq int // event Seq of the occurrence (run start, if collapsed)
+	ID    uint32
+	Seq   int // event Seq of the occurrence (run start, if collapsed)
+	Bytes int // measured context cost of the occurrence (summed over a collapsed run)
 }
 
 // Corpus is the tokenized view of the whole events artifact under one lens.
@@ -68,7 +69,7 @@ func Build(eventsPath string, l lens.Lens, opts Options) (*Corpus, error) {
 			c.Streams = append(c.Streams, nil)
 			c.StreamKeys = append(c.StreamKeys, key)
 		}
-		c.Streams[si] = append(c.Streams[si], Tok{ID: c.intern(intern, tok), Seq: ev.Seq})
+		c.Streams[si] = append(c.Streams[si], Tok{ID: c.intern(intern, tok), Seq: ev.Seq, Bytes: ev.Bytes})
 		return nil
 	})
 	if err != nil {
@@ -107,7 +108,13 @@ func (c *Corpus) collapse(intern map[string]uint32) {
 				j++
 			}
 			if j-i >= 2 {
-				out = append(out, Tok{ID: c.plusID(plus, intern, st[i].ID), Seq: st[i].Seq})
+				// Collapsed token carries the whole run's measured cost: a
+				// read+ that absorbed five reads burned all five reads' bytes.
+				bytes := 0
+				for k := i; k < j; k++ {
+					bytes += st[k].Bytes
+				}
+				out = append(out, Tok{ID: c.plusID(plus, intern, st[i].ID), Seq: st[i].Seq, Bytes: bytes})
 			} else {
 				out = append(out, st[i])
 			}

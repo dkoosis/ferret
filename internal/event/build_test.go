@@ -32,6 +32,11 @@ func toolResult(uuid, id string, isError bool) string {
 		uuid, id, isError)
 }
 
+func toolResultContent(uuid, id, contentJSON string) string {
+	return fmt.Sprintf(`{"type":"user","uuid":%q,"timestamp":"2026-06-10T10:00:05Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":%q,"content":%s}]}}`,
+		uuid, id, contentJSON)
+}
+
 func ingest(t *testing.T, src transcript.Source) []*Event {
 	t.Helper()
 	b := NewBuilder()
@@ -61,6 +66,42 @@ func TestPairingAndStatus(t *testing.T) {
 	}
 	if evs[0].Target != "a.go" || evs[2].Target != "x" {
 		t.Errorf("targets = %q, %q; want a.go, x", evs[0].Target, evs[2].Target)
+	}
+}
+
+func TestBurnBytesCaptureInputPlusResult(t *testing.T) {
+	input := `{"file_path":"a.go"}` // 20 bytes of tool_use input
+	content := `"0123456789"`       // 12 bytes of tool_result payload (quotes included)
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Read", input),
+		toolResultContent("u2", "t1", content),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 1 {
+		t.Fatalf("events = %d, want 1", len(evs))
+	}
+	want := len(input) + len(content)
+	if evs[0].Bytes != want {
+		t.Errorf("Bytes = %d, want %d (input %d + result %d)", evs[0].Bytes, want, len(input), len(content))
+	}
+}
+
+func TestBurnBytesSplitAcrossCompoundSegments(t *testing.T) {
+	// One result resolves a 2-segment chain: its payload is split across both.
+	content := `"01234567"` // 10 bytes → 5 each
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"a && b"}`),
+		toolResultContent("u2", "t1", content),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 2 {
+		t.Fatalf("events = %d, want 2", len(evs))
+	}
+	for _, ev := range evs {
+		// each segment: its own command-segment bytes + half the result payload
+		if ev.Bytes <= len(content)/2 {
+			t.Errorf("segment %q Bytes = %d, want > %d (seg input + result share)", ev.Action, ev.Bytes, len(content)/2)
+		}
 	}
 }
 

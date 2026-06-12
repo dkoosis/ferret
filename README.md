@@ -1,6 +1,6 @@
 # ferret
 
-Mines agent transcripts — Claude Code (`~/.claude/projects/**/*.jsonl`) or SWE-agent trajectories — for repeated behavior: scriptable routines, friction loops, and noisy context. AX-first — the primary consumer is Claude itself.
+Mines Claude Code transcripts (`~/.claude/projects/**/*.jsonl`) for repeated behavior: scriptable routines, friction loops, and noisy context. AX-first — the primary consumer is Claude itself.
 
 ## Install
 
@@ -17,9 +17,9 @@ ferret summary  [--by project|session]      # corpus health, tool mix, failure r
 ferret ngrams   [--lens tool] [--n 2-5]               # repeated n-grams
 ferret seqs     [--lens tool] [--max-gap 3]           # gapped subsequences (PrefixSpan)
 ferret rank     [--lens tool] [--top 10]              # ranked review queue, bucketed
+ferret report   [--kind routine|friction|loop|noise] # findings → action verb, ranked by measured burn
 ferret surprise [--lens tool]                         # per-session predictability (low=scriptable, high=thrash)
 ferret graph    [--loops] [--format mermaid|dot]      # transition graph
-ferret validate [--lens exact]                        # buckets × ground-truth outcomes (needs outcomes.jsonl)
 ferret tokens   --session PREFIX                      # one session's token stream (lens debugger)
 ```
 
@@ -35,12 +35,6 @@ Lenses re-slice the same canonical events at different granularity; pick with `-
 | `tool` | tool identity | `Read`, `sh:git_diff`, `mcp:trixi.set_nug` |
 | `target` | tool + target class | `Edit:.go`, `Read:.md` |
 | `exact` | tool + full normalized target | `Edit:internal/lens/lens.go` |
-
-## Outcomes
-
-`validate` joins pattern buckets against per-stream ground-truth labels in `<data>/outcomes.jsonl` (`{"stream","target","exitStatus"}`). Labeled corpora write it at ingest (SWE-agent `target`/`exit_status`); CC ingest writes none — there is no ground truth in raw transcripts.
-
-For acquiring the SWE-agent dataset (duckdb recipe, field tolerance): `testdata/README.md`.
 
 ## Design
 

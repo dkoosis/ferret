@@ -114,7 +114,8 @@ func (b *Builder) isDuplicate(uuid string) bool {
 
 // assistantLine extracts tool_use blocks and parks them pending a status.
 func (b *Builder) assistantLine(src transcript.Source, st *fileState, raw *transcript.Raw, ts time.Time) {
-	for _, blk := range raw.Message.Content {
+	for i := range raw.Message.Content {
+		blk := &raw.Message.Content[i]
 		if blk.Type != "tool_use" {
 			continue
 		}
@@ -133,7 +134,8 @@ func (b *Builder) assistantLine(src transcript.Source, st *fileState, raw *trans
 func (b *Builder) userLine(src transcript.Source, st *fileState, raw *transcript.Raw, ts time.Time) {
 	sawResult := false
 	sawText := false
-	for _, blk := range raw.Message.Content {
+	for i := range raw.Message.Content {
+		blk := &raw.Message.Content[i]
 		switch blk.Type {
 		case "tool_result":
 			sawResult = true
@@ -159,7 +161,7 @@ func (b *Builder) userLine(src transcript.Source, st *fileState, raw *transcript
 // resolve applies a tool_result's status and latency to its pending events.
 // A failed compound chain gets cfail, not fail: the result says the invocation
 // failed, not which segment — fail on every segment would invent friction.
-func (st *fileState) resolve(blk transcript.Block, ts time.Time) {
+func (st *fileState) resolve(blk *transcript.Block, ts time.Time) {
 	evs := st.pending[blk.ToolUseID]
 	status := StatusOK
 	if blk.IsError != nil && *blk.IsError {
@@ -168,8 +170,15 @@ func (st *fileState) resolve(blk transcript.Block, ts time.Time) {
 			status = StatusCFail
 		}
 	}
+	// Attribute the result payload's measured size across the (possibly
+	// compound) events it resolves — this is real context the call returned.
+	var share int
+	if n := len(evs); n > 0 {
+		share = len(blk.Content) / n
+	}
 	for _, ev := range evs {
 		ev.Status = status
+		ev.Bytes += share
 		if ct, ok := st.callTime[blk.ToolUseID]; ok && !ts.IsZero() {
 			ev.DurMS = ts.Sub(ct).Milliseconds()
 		}
@@ -205,7 +214,7 @@ func finish(events []*Event, stats *Stats) {
 	}
 }
 
-func (b *Builder) fromToolUse(src transcript.Source, raw *transcript.Raw, blk transcript.Block, seq int, ts time.Time) []*Event {
+func (b *Builder) fromToolUse(src transcript.Source, raw *transcript.Raw, blk *transcript.Block, seq int, ts time.Time) []*Event {
 	base := Event{
 		Seq: seq, Time: ts,
 		Project: src.Project, Session: session(src, raw), Agent: src.Agent,
@@ -227,6 +236,7 @@ func (b *Builder) fromToolUse(src transcript.Source, raw *transcript.Raw, blk tr
 			ev.Kind = KindShell
 			ev.Action = "sh"
 			ev.Detail = trunc(cmd, detailMax)
+			ev.Bytes = len(cmd)
 			return []*Event{&ev}
 		}
 		out := make([]*Event, 0, len(segs))
@@ -235,6 +245,7 @@ func (b *Builder) fromToolUse(src transcript.Source, raw *transcript.Raw, blk tr
 			ev.Kind = KindShell
 			ev.Action = seg.Cmd
 			ev.Detail = trunc(seg.Raw, detailMax)
+			ev.Bytes = len(seg.Raw)
 			ev.Compound = len(segs) > 1
 			out = append(out, &ev)
 		}
@@ -245,6 +256,7 @@ func (b *Builder) fromToolUse(src transcript.Source, raw *transcript.Raw, blk tr
 	ev.Kind = KindTool
 	ev.Action = blk.Name
 	ev.Target = target(input)
+	ev.Bytes = len(blk.Input)
 	return []*Event{&ev}
 }
 
