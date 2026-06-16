@@ -30,6 +30,12 @@ var syncDir = func(dir string) error {
 // and assert it is surfaced rather than silently swallowed.
 var removeFile = os.Remove
 
+// stderr is the diagnostic-log seam. The codec's failure paths (rolled-back
+// temp cleanup, salvaged truncated read) log to it instead of os.Stderr
+// directly so a test can capture the line with a plain buffer rather than
+// hijacking the process-global os.Stderr through a pipe.
+var stderr io.Writer = os.Stderr
+
 // removeTmp deletes a rolled-back temp artifact, surfacing a removal failure to
 // stderr instead of swallowing it. A silently-dropped failure leaves an orphan
 // events.jsonl.tmp that looks like an in-progress ingest and is undetectable by
@@ -42,7 +48,7 @@ func removeTmp(tmp string) {
 		return
 	}
 	if err := removeFile(tmp); err != nil && !errors.Is(err, os.ErrNotExist) {
-		fmt.Fprintf(os.Stderr, "ferret: %s: temp cleanup failed: %v; orphan .tmp may linger (re-ingest to repair)\n", tmp, err)
+		fmt.Fprintf(stderr, "ferret: %s: temp cleanup failed: %v; orphan .tmp may linger (re-ingest to repair)\n", tmp, err)
 	}
 }
 
@@ -147,7 +153,7 @@ func Read(path string, fn func(*Event) error) error {
 			// present, but the object never completed and no input follows.
 			// Salvage the events already streamed instead of poisoning the run.
 			if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
-				fmt.Fprintf(os.Stderr, "ferret: %s: truncated trailing record dropped (1 fragment); re-ingest to repair\n", path)
+				fmt.Fprintf(stderr, "ferret: %s: truncated trailing record dropped (1 fragment); re-ingest to repair\n", path)
 				return nil
 			}
 			return err

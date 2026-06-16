@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,28 +29,18 @@ func hookRemoveFile(t *testing.T, err error) *[]string {
 	return &calls
 }
 
-// captureStderr redirects os.Stderr to a pipe for the duration of fn and
-// returns everything written, restoring the real stderr on return.
-func captureStderr(t *testing.T, fn func()) string {
+// hookStderr swaps the package stderr seam to an in-memory buffer for the
+// duration of fn and returns everything written, restoring the real stderr on
+// cleanup. Unlike hijacking the process-global os.Stderr through a pipe, this
+// is a plain pointer swap — no goroutine, no OS pipe, nothing global to race on.
+func hookStderr(t *testing.T, fn func()) string {
 	t.Helper()
-	orig := os.Stderr
-	r, wp, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	os.Stderr = wp
-	done := make(chan string, 1)
-	go func() {
-		var b bytes.Buffer
-		_, _ = io.Copy(&b, r)
-		done <- b.String()
-	}()
+	orig := stderr
+	t.Cleanup(func() { stderr = orig })
+	var buf bytes.Buffer
+	stderr = &buf
 	fn()
-	_ = wp.Close()
-	os.Stderr = orig
-	out := <-done
-	_ = r.Close()
-	return out
+	return buf.String()
 }
 
 // TestWriterAbort_LogsCleanupFailure asserts Abort surfaces a temp-removal
@@ -68,7 +57,7 @@ func TestWriterAbort_LogsCleanupFailure(t *testing.T) {
 		t.Fatalf("NewWriter: %v", err)
 	}
 
-	out := captureStderr(t, func() { w.Abort() })
+	out := hookStderr(t, func() { w.Abort() })
 
 	if len(*calls) != 1 || (*calls)[0] != path+".tmp" {
 		t.Errorf("expected removeFile called once on %q, got %v", path+".tmp", *calls)
@@ -96,7 +85,7 @@ func TestWriterClose_LogsCleanupFailure(t *testing.T) {
 	_ = w.Write(&Event{}) // buffer bytes so Flush attempts a write
 
 	var cerr error
-	out := captureStderr(t, func() { cerr = w.Close() })
+	out := hookStderr(t, func() { cerr = w.Close() })
 
 	if cerr == nil {
 		t.Fatal("expected Close to fail on interrupted run, got nil")
@@ -121,7 +110,7 @@ func TestWriterAbort_SilentWhenTmpAlreadyGone(t *testing.T) {
 		t.Fatalf("NewWriter: %v", err)
 	}
 
-	out := captureStderr(t, func() { w.Abort() })
+	out := hookStderr(t, func() { w.Abort() })
 
 	if strings.Contains(out, "cleanup failed") {
 		t.Errorf("expected no log for already-absent tmp, got %q", out)
