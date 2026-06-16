@@ -59,7 +59,7 @@ var errNoHomeDir = errors.New("cannot resolve home directory (set --data/--root 
 func defaultData() (string, error) {
 	home, err := userHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", errNoHomeDir, err)
+		return "", fmt.Errorf("%w: %w", errNoHomeDir, err)
 	}
 	return filepath.Join(home, ".ferret"), nil
 }
@@ -69,7 +69,7 @@ func defaultData() (string, error) {
 func defaultRoot() (string, error) {
 	home, err := userHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", errNoHomeDir, err)
+		return "", fmt.Errorf("%w: %w", errNoHomeDir, err)
 	}
 	return filepath.Join(home, ".claude", "projects"), nil
 }

@@ -77,11 +77,13 @@ func TestValidateFormat(t *testing.T) {
 // relative ".ferret" / ".claude/projects" path (which then writes artifacts
 // under the current working dir, making corpus location silently depend on CWD).
 // They must surface the error instead.
+var errTestNoHome = errors.New("$HOME is not defined")
+
 func TestDefaultPathsSurfaceHomeError(t *testing.T) {
 	orig := userHomeDir
 	t.Cleanup(func() { userHomeDir = orig })
 	userHomeDir = func() (string, error) {
-		return "", errors.New("$HOME is not defined")
+		return "", errTestNoHome
 	}
 
 	if got, err := defaultData(); err == nil {
@@ -97,14 +99,15 @@ func TestDefaultPathsSurfaceHomeError(t *testing.T) {
 func TestDefaultPathsAbsoluteOnSuccess(t *testing.T) {
 	orig := userHomeDir
 	t.Cleanup(func() { userHomeDir = orig })
-	userHomeDir = func() (string, error) { return "/home/u", nil }
+	home := "/home/u"
+	userHomeDir = func() (string, error) { return home, nil }
 
 	d, err := defaultData()
-	if err != nil || d != filepath.Join("/home/u", ".ferret") {
+	if err != nil || d != filepath.Join(home, ".ferret") {
 		t.Errorf("defaultData() = %q, %v; want /home/u/.ferret, nil", d, err)
 	}
 	r, err := defaultRoot()
-	if err != nil || r != filepath.Join("/home/u", ".claude", "projects") {
+	if err != nil || r != filepath.Join(home, ".claude", "projects") {
 		t.Errorf("defaultRoot() = %q, %v; want /home/u/.claude/projects, nil", r, err)
 	}
 }
