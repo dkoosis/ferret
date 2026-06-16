@@ -21,6 +21,7 @@ type Event struct {
 	DurMS     int64     `json:"ms,omitempty"` // tool_use → tool_result latency
 	Retry     bool      `json:"rt,omitempty"` // same action+target shortly after a failure
 	Compound  bool      `json:"cp,omitempty"` // segment of a split compound bash chain
+	Approx    bool      `json:"ax,omitempty"` // tool served via fuzzy/semantic fallback (snipe ~approx marker in tool_result); silence = exact match
 	Bytes     int       `json:"b,omitempty"`  // measured context cost: tool_use input + tool_result content
 	Skill     string    `json:"skill,omitempty"`
 	Plugin    string    `json:"plug,omitempty"`
