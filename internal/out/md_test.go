@@ -32,7 +32,7 @@ func TestMarkdownReport(t *testing.T) {
 	}
 	// Cost-first order: 💸 leaks → 🔁 churn → ✅ routines.
 	iLeak, iChurn, iRoutine := strings.Index(got, "💸"), strings.Index(got, "🔁"), strings.Index(got, "✅")
-	if !(iLeak < iChurn && iChurn < iRoutine) {
+	if iLeak >= iChurn || iChurn >= iRoutine {
 		t.Errorf("sections out of order: 💸=%d 🔁=%d ✅=%d", iLeak, iChurn, iRoutine)
 	}
 
