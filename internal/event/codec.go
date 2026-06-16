@@ -121,10 +121,39 @@ func Read(path string, fn func(*Event) error) error {
 	return nil
 }
 
+// WriteManifest publishes the completeness sentinel atomically and durably.
+// A bare os.WriteFile truncates-then-writes in place: a crash mid-write would
+// leave a present-but-0-byte/partial manifest that ensureData's existence gate
+// would mistake for a complete corpus. Instead we write path+".tmp", fsync it
+// durable, then rename onto path — the rename is atomic, so a reader sees
+// either the old manifest or the fully-written new one, never a fragment.
 func WriteManifest(path string, m *Manifest) error {
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
