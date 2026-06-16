@@ -44,16 +44,34 @@ const (
 
 // ---- CLI grammar ----
 
-// defaultData returns ~/.ferret
-func defaultData() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".ferret")
+// userHomeDir is indirected through a var so a test can fault-inject a missing
+// home dir (HOME/USERPROFILE unset) without manipulating process env globally.
+var userHomeDir = os.UserHomeDir
+
+// errNoHomeDir explains why a default path could not be resolved and points the
+// user at the explicit flag that bypasses home-dir resolution.
+var errNoHomeDir = errors.New("cannot resolve home directory (set --data/--root explicitly)")
+
+// defaultData returns ~/.ferret. It surfaces the UserHomeDir error rather than
+// discarding it: with HOME unset, a discarded error yields home=="" and a
+// RELATIVE ".ferret" path, so artifacts land under the current working dir and
+// the corpus location silently depends on CWD.
+func defaultData() (string, error) {
+	home, err := userHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", errNoHomeDir, err)
+	}
+	return filepath.Join(home, ".ferret"), nil
 }
 
-// defaultRoot returns ~/.claude/projects
-func defaultRoot() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude", "projects")
+// defaultRoot returns ~/.claude/projects. Like defaultData, it surfaces the
+// UserHomeDir error instead of falling back to a relative path.
+func defaultRoot() (string, error) {
+	home, err := userHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", errNoHomeDir, err)
+	}
+	return filepath.Join(home, ".claude", "projects"), nil
 }
 
 // CommonFlags are shared across all analysis subcommands.
@@ -149,10 +167,20 @@ func main() {
 	// kong supports ${...} interpolation only for env vars in default tags,
 	// so we patch the struct directly before Parse sees it.
 	if CLI.Ingest.Root == "" {
-		CLI.Ingest.Root = defaultRoot()
+		root, err := defaultRoot()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ferret:", err)
+			os.Exit(2)
+		}
+		CLI.Ingest.Root = root
 	}
 	if CLI.Ingest.Data == "" {
-		CLI.Ingest.Data = defaultData()
+		data, err := defaultData()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ferret:", err)
+			os.Exit(2)
+		}
+		CLI.Ingest.Data = data
 	}
 
 	k := kong.Parse(&CLI,
@@ -216,12 +244,16 @@ type common struct {
 	maxBytes int
 }
 
-func fromCommonFlags(cf CommonFlags) *common {
+func fromCommonFlags(cf CommonFlags) (*common, error) {
 	data := cf.Data
 	if data == "~/.ferret" {
-		data = defaultData()
+		d, err := defaultData()
+		if err != nil {
+			return nil, err
+		}
+		data = d
 	}
-	return &common{data: data, format: cf.Format, limit: cf.Limit, maxBytes: cf.MaxBytes}
+	return &common{data: data, format: cf.Format, limit: cf.Limit, maxBytes: cf.MaxBytes}, nil
 }
 
 func (c *common) eventsPath() string { return filepath.Join(c.data, "events.jsonl") }
@@ -306,11 +338,19 @@ func cmdIngest() error {
 	cmd := &CLI.Ingest
 	data := cmd.Data
 	if data == "~/.ferret" {
-		data = defaultData()
+		d, err := defaultData()
+		if err != nil {
+			return err
+		}
+		data = d
 	}
 	root := cmd.Root
 	if root == "" {
-		root = defaultRoot()
+		r, err := defaultRoot()
+		if err != nil {
+			return err
+		}
+		root = r
 	}
 	return ingest(data, root, cmd.Project, cmd.DryRun)
 }
@@ -335,7 +375,11 @@ var errWriteAbort = errors.New("ingest aborted: record write failed")
 
 func ingest(dataDir, root, project string, dryRun bool) error {
 	if root == "" {
-		root = defaultRoot()
+		r, err := defaultRoot()
+		if err != nil {
+			return err
+		}
+		root = r
 	}
 	sources, err := transcript.Walk(root)
 	if err != nil {
@@ -419,7 +463,10 @@ func ingest(dataDir, root, project string, dryRun bool) error {
 
 func cmdSummary() error {
 	cmd := &CLI.Summary
-	c := fromCommonFlags(cmd.CommonFlags)
+	c, err := fromCommonFlags(cmd.CommonFlags)
+	if err != nil {
+		return err
+	}
 	if c.limit == 0 {
 		c.limit = 20
 	}
@@ -488,7 +535,10 @@ func about(sink *out.Sink, lines ...string) {
 
 func cmdNgrams() error {
 	cmd := &CLI.Ngrams
-	c := fromCommonFlags(cmd.CommonFlags)
+	c, err := fromCommonFlags(cmd.CommonFlags)
+	if err != nil {
+		return err
+	}
 	if c.limit == 0 {
 		c.limit = 30
 	}
@@ -549,7 +599,10 @@ func cmdNgrams() error {
 
 func cmdSeqs() error {
 	cmd := &CLI.Seqs
-	c := fromCommonFlags(cmd.CommonFlags)
+	c, err := fromCommonFlags(cmd.CommonFlags)
+	if err != nil {
+		return err
+	}
 	if c.limit == 0 {
 		c.limit = 30
 	}
@@ -610,7 +663,10 @@ func cmdSeqs() error {
 
 func cmdRank() error {
 	cmd := &CLI.Rank
-	c := fromCommonFlags(cmd.CommonFlags)
+	c, err := fromCommonFlags(cmd.CommonFlags)
+	if err != nil {
+		return err
+	}
 	lo := fromLensFlags(cmd.LensFlags)
 	if err := c.validate("text", fmtJSON); err != nil {
 		return err
@@ -713,7 +769,10 @@ var errBadKind = errors.New("bad --kind (want routine|friction|loop|noise)")
 
 func cmdReport() error {
 	cmd := &CLI.Report
-	c := fromCommonFlags(cmd.CommonFlags)
+	c, err := fromCommonFlags(cmd.CommonFlags)
+	if err != nil {
+		return err
+	}
 	if c.limit == 0 {
 		c.limit = 30
 	}
@@ -824,7 +883,10 @@ func cmdReport() error {
 
 func cmdSurprise() error {
 	cmd := &CLI.Surprise
-	c := fromCommonFlags(cmd.CommonFlags)
+	c, err := fromCommonFlags(cmd.CommonFlags)
+	if err != nil {
+		return err
+	}
 	if c.limit == 0 {
 		c.limit = 20
 	}
@@ -895,7 +957,10 @@ func cmdSurprise() error {
 
 func cmdGraph() error {
 	cmd := &CLI.Graph
-	c := fromCommonFlags(cmd.CommonFlags)
+	c, err := fromCommonFlags(cmd.CommonFlags)
+	if err != nil {
+		return err
+	}
 	if c.limit == 0 {
 		c.limit = 40
 	}
@@ -1019,7 +1084,10 @@ func mermaidLabel(s string) string {
 
 func cmdTokens() error {
 	cmd := &CLI.Tokens
-	c := fromCommonFlags(cmd.CommonFlags)
+	c, err := fromCommonFlags(cmd.CommonFlags)
+	if err != nil {
+		return err
+	}
 	if c.limit == 0 {
 		c.limit = 200
 	}

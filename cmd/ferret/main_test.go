@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,5 +68,43 @@ func TestValidateFormat(t *testing.T) {
 	c = &common{format: "json"}
 	if err := c.validate("text", "json"); err != nil {
 		t.Errorf("valid format rejected: %v", err)
+	}
+}
+
+// TestDefaultPathsSurfaceHomeError guards against the silent-relative-path bug:
+// when os.UserHomeDir fails (HOME/USERPROFILE unset under cron, systemd, minimal
+// Docker, CI), defaultData/defaultRoot must NOT discard the error and return a
+// relative ".ferret" / ".claude/projects" path (which then writes artifacts
+// under the current working dir, making corpus location silently depend on CWD).
+// They must surface the error instead.
+func TestDefaultPathsSurfaceHomeError(t *testing.T) {
+	orig := userHomeDir
+	t.Cleanup(func() { userHomeDir = orig })
+	userHomeDir = func() (string, error) {
+		return "", errors.New("$HOME is not defined")
+	}
+
+	if got, err := defaultData(); err == nil {
+		t.Errorf("defaultData must surface UserHomeDir error, got path %q, nil err", got)
+	}
+	if got, err := defaultRoot(); err == nil {
+		t.Errorf("defaultRoot must surface UserHomeDir error, got path %q, nil err", got)
+	}
+}
+
+// TestDefaultPathsAbsoluteOnSuccess: the happy path still returns the expected
+// absolute paths under the home dir.
+func TestDefaultPathsAbsoluteOnSuccess(t *testing.T) {
+	orig := userHomeDir
+	t.Cleanup(func() { userHomeDir = orig })
+	userHomeDir = func() (string, error) { return "/home/u", nil }
+
+	d, err := defaultData()
+	if err != nil || d != filepath.Join("/home/u", ".ferret") {
+		t.Errorf("defaultData() = %q, %v; want /home/u/.ferret, nil", d, err)
+	}
+	r, err := defaultRoot()
+	if err != nil || r != filepath.Join("/home/u", ".claude", "projects") {
+		t.Errorf("defaultRoot() = %q, %v; want /home/u/.claude/projects, nil", r, err)
 	}
 }
