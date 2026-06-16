@@ -1,6 +1,10 @@
 package shellnorm
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"unicode/utf8"
+)
 
 func cmds(segs []Segment) []string {
 	out := make([]string, len(segs))
@@ -36,6 +40,31 @@ func TestSplit(t *testing.T) {
 				t.Errorf("Split(%q)[%d] = %q, want %q", c.in, i, got[i], c.want[i])
 			}
 		}
+	}
+}
+
+// TestSplitFallbackRuneBoundary covers the fallback path (AST parse fails) for
+// a command whose multibyte rune straddles the 160-byte truncation point. The
+// truncated Segment.Raw must remain valid UTF-8 — never split mid-rune.
+func TestSplitFallbackRuneBoundary(t *testing.T) {
+	// A 3-byte rune (€) whose first byte lands at offset 159 → bytes 159,160,161.
+	// A naive raw[:160] keeps only byte 159, producing an invalid UTF-8 tail.
+	// "git " (4) + padding (155) puts the rune's first byte at index 159.
+	// An unterminated single quote forces the bash AST parse to fail.
+	cmd := "git " + strings.Repeat("a", 155) + "€'unterminated"
+	if cmd[159] == 0 || utf8.RuneStart(cmd[160]) {
+		t.Fatalf("test setup: rune not straddling byte 160 (cmd[159]=%d cmd[160]=%d)", cmd[159], cmd[160])
+	}
+
+	segs, fb := Split(cmd)
+	if !fb {
+		t.Fatal("expected fallback path (parse failure)")
+	}
+	if len(segs) != 1 {
+		t.Fatalf("want 1 segment, got %d", len(segs))
+	}
+	if got := segs[0].Raw; !utf8.ValidString(got) {
+		t.Errorf("Segment.Raw is not valid UTF-8: %q", got)
 	}
 }
 
