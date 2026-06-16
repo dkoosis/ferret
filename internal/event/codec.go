@@ -26,6 +26,32 @@ var syncDir = func(dir string) error {
 	return d.Close()
 }
 
+// removeFile is the os.Remove seam so a test can force a temp-cleanup failure
+// and assert it is surfaced rather than silently swallowed.
+var removeFile = os.Remove
+
+// stderr is the diagnostic-log seam. The codec's failure paths (rolled-back
+// temp cleanup, salvaged truncated read) log to it instead of os.Stderr
+// directly so a test can capture the line with a plain buffer rather than
+// hijacking the process-global os.Stderr through a pipe.
+var stderr io.Writer = os.Stderr
+
+// removeTmp deletes a rolled-back temp artifact, surfacing a removal failure to
+// stderr instead of swallowing it. A silently-dropped failure leaves an orphan
+// events.jsonl.tmp that looks like an in-progress ingest and is undetectable by
+// callers; the log lets an operator tell a stale rollback artifact from a live
+// run. An already-absent tmp is the success case (nothing orphaned), so
+// os.ErrNotExist is not reported. Content integrity is unaffected either way —
+// the next ingest's os.Create truncates any lingering tmp.
+func removeTmp(tmp string) {
+	if tmp == "" {
+		return
+	}
+	if err := removeFile(tmp); err != nil && !errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintf(stderr, "ferret: %s: temp cleanup failed: %v; orphan .tmp may linger (re-ingest to repair)\n", tmp, err)
+	}
+}
+
 // Manifest records what an events.jsonl was built from.
 type Manifest struct {
 	CreatedAt time.Time `json:"createdAt"`
@@ -66,9 +92,7 @@ func (w *Writer) Close() error {
 	w.closed = true
 	if err := w.finish(); err != nil {
 		// Failed run: drop the partial temp file, leave any prior path intact.
-		if w.tmp != "" {
-			_ = os.Remove(w.tmp)
-		}
+		removeTmp(w.tmp)
 		return err
 	}
 	if w.tmp != "" {
@@ -90,9 +114,7 @@ func (w *Writer) Abort() {
 	}
 	w.closed = true
 	_ = w.f.Close()
-	if w.tmp != "" {
-		_ = os.Remove(w.tmp)
-	}
+	removeTmp(w.tmp)
 }
 
 // finish flushes buffered bytes, fsyncs durable, and closes the fd. The fd is
@@ -131,7 +153,7 @@ func Read(path string, fn func(*Event) error) error {
 			// present, but the object never completed and no input follows.
 			// Salvage the events already streamed instead of poisoning the run.
 			if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
-				fmt.Fprintf(os.Stderr, "ferret: %s: truncated trailing record dropped (1 fragment); re-ingest to repair\n", path)
+				fmt.Fprintf(stderr, "ferret: %s: truncated trailing record dropped (1 fragment); re-ingest to repair\n", path)
 				return nil
 			}
 			return err
