@@ -19,12 +19,13 @@ const (
 // The uuid seen-set spans the whole ingest: resumed/forked sessions copy
 // history into new files and would otherwise double-count.
 type Builder struct {
-	seen  map[uint64]struct{}
-	Stats *Stats
+	seen     map[uint64]struct{}
+	resolved map[string]struct{} // tool_use ids whose result we've applied, across the ingest
+	Stats    *Stats
 }
 
 func NewBuilder() *Builder {
-	return &Builder{seen: map[uint64]struct{}{}, Stats: NewStats()}
+	return &Builder{seen: map[uint64]struct{}{}, resolved: map[string]struct{}{}, Stats: NewStats()}
 }
 
 // fileState is the per-transcript accumulator: events buffer plus the
@@ -51,6 +52,20 @@ func (b *Builder) File(src transcript.Source, emit func(*Event)) error {
 	})
 	if err != nil {
 		return err
+	}
+
+	// A use still pending here whose id was already resolved in an earlier file
+	// is a resumed/forked duplicate whose result was deduped. It WAS resolved
+	// before, so leaving it status-less would make finish count it unpaired and
+	// inflate the reported unpaired rate. Mark it resolved-without-status: it is
+	// not friction, just a copied call whose result we already accounted.
+	for id, evs := range st.pending {
+		if _, done := b.resolved[id]; done {
+			for _, ev := range evs {
+				ev.Status = StatusOK
+			}
+			delete(st.pending, id)
+		}
 	}
 
 	finish(st.events, b.Stats)
@@ -139,7 +154,7 @@ func (b *Builder) userLine(src transcript.Source, st *fileState, raw *transcript
 		switch blk.Type {
 		case "tool_result":
 			sawResult = true
-			st.resolve(blk, ts)
+			b.resolve(st, blk, ts)
 		case "text":
 			if len(blk.Text) > 0 {
 				sawText = true
@@ -161,8 +176,21 @@ func (b *Builder) userLine(src transcript.Source, st *fileState, raw *transcript
 // resolve applies a tool_result's status and latency to its pending events.
 // A failed compound chain gets cfail, not fail: the result says the invocation
 // failed, not which segment — fail on every segment would invent friction.
-func (st *fileState) resolve(blk *transcript.Block, ts time.Time) {
+func (b *Builder) resolve(st *fileState, blk *transcript.Block, ts time.Time) {
 	evs := st.pending[blk.ToolUseID]
+	if len(evs) == 0 {
+		// No pending use for this id. On a resumed/forked transcript the use
+		// line was a copied duplicate, dropped at isDuplicate before parking,
+		// while this result carries a fresh message UUID and reaches us. Any
+		// result arriving here has already passed UUID dedup, so it is genuine
+		// returned context — account its bytes rather than dropping them. This
+		// is a stray result, not an unpaired use, so Stats.Unpaired is
+		// untouched. Record the id so a later forked use of it isn't counted
+		// unpaired either.
+		b.Stats.OrphanBytes += len(blk.Content)
+		b.resolved[blk.ToolUseID] = struct{}{}
+		return
+	}
 	status := StatusOK
 	if blk.IsError != nil && *blk.IsError {
 		status = StatusFail
@@ -172,17 +200,23 @@ func (st *fileState) resolve(blk *transcript.Block, ts time.Time) {
 	}
 	// Attribute the result payload's measured size across the (possibly
 	// compound) events it resolves — this is real context the call returned.
-	var share int
-	if n := len(evs); n > 0 {
-		share = len(blk.Content) / n
-	}
-	for _, ev := range evs {
+	// Integer division drops up to n-1 bytes; carry the remainder onto the
+	// leading segments so the full payload is conserved in burn.
+	n := len(evs)
+	share := len(blk.Content) / n
+	rem := len(blk.Content) % n
+	ct, haveCT := st.callTime[blk.ToolUseID]
+	for i, ev := range evs {
 		ev.Status = status
 		ev.Bytes += share
-		if ct, ok := st.callTime[blk.ToolUseID]; ok && !ts.IsZero() {
+		if i < rem {
+			ev.Bytes++
+		}
+		if haveCT && !ts.IsZero() {
 			ev.DurMS = ts.Sub(ct).Milliseconds()
 		}
 	}
+	b.resolved[blk.ToolUseID] = struct{}{}
 	delete(st.pending, blk.ToolUseID)
 	delete(st.callTime, blk.ToolUseID)
 }
