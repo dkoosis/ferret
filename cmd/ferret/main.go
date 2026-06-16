@@ -32,12 +32,14 @@ var (
 	errBadFormat       = errors.New("bad --format")
 	errBadBy           = errors.New("bad --by (want corpus|project|session)")
 	errMaxBytesJSON    = errors.New("--max-bytes is not supported with --format json (use --limit)")
+	errMaxBytesMD      = errors.New("--max-bytes is not supported with --format md (whole-document output; use --limit)")
 )
 
 // shared JSON response keys — every truncating JSON response carries
 // keyTotal + keyTruncated (the AX truncation contract)
 const (
 	fmtJSON      = "json"
+	fmtMD        = "md"
 	keyLens      = "lens"
 	keyTotal     = "total"
 	keyTruncated = "truncated"
@@ -209,7 +211,7 @@ func main() {
 				"  ferret ngrams   [--lens tool] [--n 2-5] [--min-count 5] [--min-sessions 3]\n"+
 				"  ferret seqs     [--lens tool] [--min-support 20] [--max-gap 3] [--max-len 5]\n"+
 				"  ferret rank     [--lens tool] [--min-support 20] [--order 3] [--top 10]\n"+
-				"  ferret report   [--lens tool] [--kind routine|friction|loop|noise] [--since-fixes] [--format json]\n"+
+				"  ferret report   [--lens tool] [--kind routine|friction|loop|noise] [--since-fixes] [--format json|md]\n"+
 				"  ferret surprise [--lens tool] [--order 3] [--min-toks 20]\n"+
 				"  ferret graph    [--lens tool] [--min-count 20] [--format text|json|mermaid|dot] [--loops]\n"+
 				"  ferret tokens   --session PREFIX [--lens tool]\n"+
@@ -850,8 +852,11 @@ func cmdReport() error {
 		c.limit = 30
 	}
 	lo := fromLensFlags(cmd.LensFlags)
-	if err := c.validate("text", fmtJSON); err != nil {
+	if err := c.validate("text", fmtJSON, fmtMD); err != nil {
 		return err
+	}
+	if c.format == fmtMD && c.maxBytes > 0 {
+		return errMaxBytesMD
 	}
 	switch cmd.Kind {
 	case "", string(mine.KindRoutine), string(mine.KindFriction), string(mine.KindLoop), string(mine.KindNoise):
@@ -933,6 +938,24 @@ func cmdReport() error {
 			keyLens: l.Name(), "findings": rows,
 			keyTotal: len(findings), keyTruncated: len(rows) < len(findings) || capped,
 		})
+	}
+
+	// --format md renders the human cost report: the same findings projected into
+	// out.MDFinding (motif + exemplar resolved to strings) and grouped into the
+	// 💸/🔁/✅ sections. The renderer owns layout; main only flattens + caps.
+	if c.format == fmtMD {
+		rows := make([]out.MDFinding, 0, len(findings))
+		for i, f := range findings {
+			if c.limit > 0 && i >= c.limit {
+				break
+			}
+			rows = append(rows, out.MDFinding{
+				Motif: corpus.Tokens(f.IDs), Kind: string(f.Kind), Action: string(f.Action),
+				Count: f.Count, Sessions: f.Sessions, FailRate: f.FailRate,
+				Burn: f.Burn, Evidence: exemplar(corpus, f.ExStream, f.ExSeq),
+			})
+		}
+		return out.Markdown(os.Stdout, l.Name(), len(findings), rows)
 	}
 
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
