@@ -116,3 +116,37 @@ func TestWriterFailLeavesPriorIntact(t *testing.T) {
 		t.Errorf("expected .tmp cleaned up after failed run, stat err=%v", err)
 	}
 }
+
+// TestWriteManifestAtomic asserts WriteManifest publishes atomically: the
+// final manifest is valid JSON, no .tmp is left dangling, and round-trips.
+// A bare os.WriteFile truncates then writes — a crash mid-write would leave
+// a 0-byte/partial completeness sentinel.
+func TestWriteManifestAtomic(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.json")
+
+	m := &Manifest{Root: "/some/root", Stats: &Stats{}}
+	if err := WriteManifest(path, m); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if len(b) == 0 || !json.Valid(b) {
+		t.Errorf("manifest not valid non-empty JSON: %q", b)
+	}
+	var got Manifest
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("unmarshal manifest: %v", err)
+	}
+	if got.Root != "/some/root" {
+		t.Errorf("round-trip Root = %q, want /some/root", got.Root)
+	}
+
+	// No dangling temp file after a successful publish.
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("expected manifest .tmp cleaned up, stat err=%v", err)
+	}
+}

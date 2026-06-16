@@ -5,6 +5,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -244,15 +245,26 @@ func (c *common) validate(formats ...string) error {
 	return nil
 }
 
+// manifestComplete reports whether the manifest at path is a trustworthy
+// completeness sentinel. A bare os.Stat is not sufficient: an interrupted or
+// crashed ingest can leave a present-but-0-byte or truncated manifest.json,
+// which existence-only gating would mistake for a complete corpus and skip
+// re-ingest — silently mining a partial events.jsonl. We require the file to
+// be non-empty AND parseable JSON before trusting it.
+func manifestComplete(path string) bool {
+	b, err := os.ReadFile(path)
+	return err == nil && len(b) > 0 && json.Valid(b)
+}
+
 // ensureData runs a default ingest when the artifact is missing or incomplete.
 // A bare os.Stat is not sufficient: a 0-byte file (from an interrupted ingest)
 // or a file with no companion manifest passes Stat but represents a broken
-// corpus. The manifest is written last by every ingest path, so its presence
-// is the correct completeness signal.
+// corpus. The manifest is written last by every ingest path, so a non-empty,
+// valid-JSON manifest is the correct completeness signal.
 func (c *common) ensureData() error {
 	manifestPath := filepath.Join(c.data, "manifest.json")
-	if _, err := os.Stat(manifestPath); err == nil {
-		// manifest exists → ingest completed successfully
+	if manifestComplete(manifestPath) {
+		// manifest present, non-empty, valid JSON → ingest completed
 		return nil
 	}
 	fmt.Fprintln(os.Stderr, "ferret: no events artifact — running ingest first")
