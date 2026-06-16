@@ -22,7 +22,7 @@ type Lens interface {
 }
 
 // registry is populated in lenses.go; no init() — explicit construction.
-var registry = newRegistry(coarse{}, tool{}, target{}, exact{})
+var registry = newRegistry(coarse{}, tool{}, target{}, exact{}, confidence{})
 
 func newRegistry(ls ...Lens) map[string]Lens {
 	m := make(map[string]Lens, len(ls))

@@ -3,6 +3,7 @@ package event
 import (
 	"encoding/json"
 	"hash/fnv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -216,6 +217,15 @@ func (b *Builder) resolve(st *fileState, blk *transcript.Block, ts time.Time) {
 			ev.DurMS = ts.Sub(ct).Milliseconds()
 		}
 	}
+	// snipe emits a single trailing "~approx" token on fuzzy/semantic fallback
+	// (silence = exact match). It is the last token of the result body, so it
+	// belongs to the trailing segment of a (possibly compound) invocation;
+	// attribute it only when that segment is the snipe call — an earlier snipe
+	// in a chain whose output is followed by another command's is not the one
+	// the marker describes.
+	if last := evs[n-1]; isSnipe(last) && snipeApprox(blk.Content) {
+		last.Approx = true
+	}
 	b.resolved[blk.ToolUseID] = struct{}{}
 	delete(st.pending, blk.ToolUseID)
 	delete(st.callTime, blk.ToolUseID)
@@ -322,4 +332,71 @@ func trunc(s string, n int) string {
 		n--
 	}
 	return s[:n]
+}
+
+// snipeApproxMarker is the single trailing token snipe appends to a tool_result
+// body when it served via fuzzy/semantic fallback rather than an exact match.
+const snipeApproxMarker = "~approx"
+
+// isSnipe reports whether ev is a snipe shell invocation. shellnorm keeps the
+// subcommand for snipe (snipe_callers, snipe_pack…); a bare or flag-first call
+// normalizes to "snipe".
+func isSnipe(ev *Event) bool {
+	return ev.Kind == KindShell && (ev.Action == "snipe" || strings.HasPrefix(ev.Action, "snipe_"))
+}
+
+// snipeApprox reports whether the tool_result body ends with snipe's fallback
+// marker as a standalone trailing token. The body is the raw JSON tool_result
+// content — either a JSON string or an array of content blocks.
+func snipeApprox(content json.RawMessage) bool {
+	text, ok := resultText(content)
+	if !ok {
+		return false
+	}
+	text = strings.TrimRight(text, " \t\r\n")
+	if !strings.HasSuffix(text, snipeApproxMarker) {
+		return false
+	}
+	// Require a whitespace boundary (or start of body) before the marker so a
+	// word that merely ends in "~approx" is not mistaken for the token.
+	rest := text[:len(text)-len(snipeApproxMarker)]
+	if rest == "" {
+		return true
+	}
+	switch rest[len(rest)-1] {
+	case ' ', '\t', '\r', '\n':
+		return true
+	}
+	return false
+}
+
+// resultText decodes a tool_result content payload into its text. CC emits it
+// as either a JSON string or an array of blocks ({"type":"text","text":...});
+// for the array form the block texts are concatenated.
+func resultText(content json.RawMessage) (string, bool) {
+	trimmed := strings.TrimLeft(string(content), " \t\r\n")
+	if trimmed == "" {
+		return "", false
+	}
+	switch trimmed[0] {
+	case '"':
+		var s string
+		if json.Unmarshal(content, &s) != nil {
+			return "", false
+		}
+		return s, true
+	case '[':
+		var blocks []struct {
+			Text string `json:"text"`
+		}
+		if json.Unmarshal(content, &blocks) != nil {
+			return "", false
+		}
+		var sb strings.Builder
+		for i := range blocks {
+			sb.WriteString(blocks[i].Text)
+		}
+		return sb.String(), true
+	}
+	return "", false
 }

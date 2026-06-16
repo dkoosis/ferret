@@ -102,6 +102,28 @@ func (target) Token(e *event.Event) (string, bool) {
 	return base, true
 }
 
+// ---- confidence: tool identity + snipe's fallback marker ----
+//
+// Identical to the tool lens except a call snipe served via fuzzy/semantic
+// fallback (Event.Approx, parsed from the tool_result body) gets a "~approx"
+// suffix. That splits one opaque "sh:snipe_callers" token into served vs
+// almost-missed, so the sequence miner reads "snipe~approx → sh:rg" as
+// friction-with-cause rather than two indistinguishable calls.
+type confidence struct{}
+
+func (confidence) Name() string { return "confidence" }
+
+func (confidence) Token(e *event.Event) (string, bool) {
+	base, ok := tool{}.Token(e)
+	if !ok {
+		return "", false
+	}
+	if e.Approx {
+		return base + "~approx", true
+	}
+	return base, true
+}
+
 // ---- exact: tool + full normalized target ----
 
 type exact struct{}

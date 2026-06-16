@@ -301,3 +301,112 @@ func TestTruncRuneBoundary(t *testing.T) {
 		}
 	}
 }
+
+// snipeApproxBit returns the Approx bit of the (single) snipe segment among
+// evs, or false if no snipe segment is present.
+func snipeApproxBit(evs []*Event) bool {
+	for _, ev := range evs {
+		if ev.Kind == KindShell && (ev.Action == "snipe" || strings.HasPrefix(ev.Action, "snipe_")) {
+			return ev.Approx
+		}
+	}
+	return false
+}
+
+// anyApprox reports whether any event carries the fallback bit — used to prove
+// non-snipe results never get tagged.
+func anyApprox(evs []*Event) bool {
+	for _, ev := range evs {
+		if ev.Approx {
+			return true
+		}
+	}
+	return false
+}
+
+// TestSnipeApproxMarker covers the tool-internal signal: snipe emits a single
+// trailing "~approx" token on fuzzy/semantic fallback; silence means it served
+// an exact match. ferret parses that token from the tool_result body it already
+// holds and sets Event.Approx on the snipe segment only.
+func TestSnipeApproxMarker(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		content string // raw JSON for the tool_result content field
+		want    bool   // expected Approx on the snipe segment
+	}{
+		{
+			name:    "fallback marker present",
+			command: "snipe callers Foo",
+			content: `"caller a\ncaller b\n~approx"`,
+			want:    true,
+		},
+		{
+			name:    "served exact, no marker",
+			command: "snipe callers Foo",
+			content: `"caller a\ncaller b\n"`,
+			want:    false,
+		},
+		{
+			name:    "marker as suffix of a word is not a trailing token",
+			command: "snipe callers Foo",
+			content: `"result~approx"`,
+			want:    false,
+		},
+		{
+			name:    "array-form content with trailing marker",
+			command: "snipe pack Foo",
+			content: `[{"type":"text","text":"sym dump\n~approx"}]`,
+			want:    true,
+		},
+		{
+			name:    "marker with trailing whitespace still counts",
+			command: "snipe search Foo",
+			content: `"hit\n~approx\n"`,
+			want:    true,
+		},
+		{
+			name:    "compound chain: snipe is the trailing segment",
+			command: "git status && snipe callers Foo",
+			content: `"clean\nhit\n~approx"`,
+			want:    true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			src := writeTranscript(t,
+				toolUse("u1", "t1", "Bash", fmt.Sprintf(`{"command":%q}`, tc.command)),
+				toolResultContent("u2", "t1", tc.content),
+			)
+			evs := ingest(t, src)
+			if got := snipeApproxBit(evs); got != tc.want {
+				t.Errorf("snipe Approx = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSnipeApproxNonSnipeUntagged proves the bit is gated on snipe: a non-snipe
+// result whose body happens to end in the marker must never be tagged, and in a
+// compound chain only a trailing snipe segment is tagged (not an earlier one).
+func TestSnipeApproxNonSnipeUntagged(t *testing.T) {
+	t.Run("non-snipe body ending in marker", func(t *testing.T) {
+		src := writeTranscript(t,
+			toolUse("u1", "t1", "Bash", `{"command":"rg Foo"}`),
+			toolResultContent("u2", "t1", `"hit\n~approx"`),
+		)
+		if anyApprox(ingest(t, src)) {
+			t.Error("non-snipe event tagged Approx; marker must be snipe-gated")
+		}
+	})
+	t.Run("snipe not trailing segment: trailing token belongs to rg", func(t *testing.T) {
+		src := writeTranscript(t,
+			toolUse("u1", "t1", "Bash", `{"command":"snipe callers Foo && rg Foo"}`),
+			toolResultContent("u2", "t1", `"hit\n~approx"`),
+		)
+		// The ~approx trails rg's output, not snipe's, so nothing is tagged.
+		if anyApprox(ingest(t, src)) {
+			t.Error("tagged Approx when snipe was not the trailing segment")
+		}
+	})
+}
