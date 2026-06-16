@@ -56,6 +56,7 @@ func (b *Blocks) UnmarshalJSON(data []byte) error {
 type Block struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text"`
+	Thinking  string          `json:"thinking"` // body of a "thinking" block (CC keys it separately from text)
 	ID        string          `json:"id"`
 	Name      string          `json:"name"`
 	Input     json.RawMessage `json:"input"`
