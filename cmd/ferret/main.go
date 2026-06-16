@@ -293,14 +293,65 @@ func manifestComplete(path string) bool {
 // or a file with no companion manifest passes Stat but represents a broken
 // corpus. The manifest is written last by every ingest path, so a non-empty,
 // valid-JSON manifest is the correct completeness signal.
+//
+// Refresh semantics: ensureData auto-builds ONLY when the corpus is missing or
+// incomplete. It deliberately never auto-REFRESHES a present corpus, because a
+// re-ingest is expensive (full transcript walk + parse) — refreshing is an
+// explicit 'ferret ingest'. To keep that staleness from being silent (the
+// failure mode where day-1 data is mined for weeks, ferret-17q), it warns to
+// stderr when transcripts have changed since the corpus was built, then mines
+// the existing corpus anyway.
 func (c *common) ensureData() error {
 	manifestPath := filepath.Join(c.data, "manifest.json")
 	if manifestComplete(manifestPath) {
 		// manifest present, non-empty, valid JSON → ingest completed
+		if stale, builtAt, newest := corpusStale(manifestPath); stale {
+			fmt.Fprintf(os.Stderr,
+				"ferret: corpus built %s is stale — transcripts changed since (newest %s); run 'ferret ingest' to refresh\n",
+				builtAt.Format(time.RFC3339), newest.Format(time.RFC3339))
+		}
 		return nil
 	}
 	fmt.Fprintln(os.Stderr, "ferret: no events artifact — running ingest first")
 	return ingest(c.data, "", "", false)
+}
+
+// corpusStale reports whether the corpus described by the manifest at
+// manifestPath is older than the newest transcript under its recorded root,
+// returning the build time and newest-transcript time for the warning message.
+// It is best-effort and advisory: an unreadable/unparseable manifest, a
+// manifest that records no root, or an unreadable transcript tree all yield
+// (false, …) so the caller stays silent rather than warning spuriously.
+func corpusStale(manifestPath string) (stale bool, builtAt, newest time.Time) {
+	b, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return false, time.Time{}, time.Time{}
+	}
+	var m event.Manifest
+	if err := json.Unmarshal(b, &m); err != nil || m.Root == "" {
+		return false, time.Time{}, time.Time{}
+	}
+	newest = newestTranscriptMod(m.Root)
+	return newest.After(m.CreatedAt), m.CreatedAt, newest
+}
+
+// newestTranscriptMod returns the most recent modification time among the
+// transcript files under root (the same set ingest would walk), or the zero
+// Time when root is unreadable or holds no transcripts. Unreadable degrades to
+// zero rather than erroring because the result feeds an advisory staleness
+// warning, not a correctness gate.
+func newestTranscriptMod(root string) time.Time {
+	srcs, err := transcript.Walk(root)
+	if err != nil {
+		return time.Time{}
+	}
+	var newest time.Time
+	for _, s := range srcs {
+		if fi, err := os.Stat(s.Path); err == nil && fi.ModTime().After(newest) {
+			newest = fi.ModTime()
+		}
+	}
+	return newest
 }
 
 type lensOpts struct {
