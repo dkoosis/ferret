@@ -19,6 +19,7 @@ type Finding struct {
 	Sessions int         // distinct streams containing the motif
 	FailRate float64     // share of member tokens that are fail-marked
 	Burn     int         // measured tokens of context the motif's occurrences consumed
+	Surprise float64     // mean bits/tok of the sessions the motif recurs in (0 = no signal)
 	ExStream int         // exemplar location
 	ExSeq    int
 }
@@ -63,7 +64,13 @@ func bucketKind(bucket string) (FindingKind, Action) {
 // motif's real occurrence count and burn against the corpus, then sorting by
 // burn (the cost-leak ranking). maxGap must match the value that mined the
 // cards so the re-match sees the same gapped occurrences.
-func Findings(c *Corpus, cards []*Card, maxGap int) []*Finding {
+//
+// surprise (stream key → mean bits/tok from ScoreSurprise) splits the ambiguous
+// routine bucket: a recurring chain whose host sessions are more surprising than
+// cut isn't a routine to script — it's friction to fix, so it's re-filed under
+// friction/hook. A nil surprise index disables the split and leaves base kinds
+// intact (the fix-baseline path, which only needs burn, passes nil).
+func Findings(c *Corpus, cards []*Card, maxGap int, surprise map[string]float64, cut float64) []*Finding {
 	out := make([]*Finding, 0, len(cards))
 	for _, card := range cards {
 		kind, action := bucketKind(card.Bucket)
@@ -71,11 +78,21 @@ func Findings(c *Corpus, cards []*Card, maxGap int) []*Finding {
 		if count == 0 {
 			continue // motif no longer matches (shouldn't happen, but never emit a phantom)
 		}
+		surp := 0.0
+		if s, ok := motifSurprise(c, card.IDs, maxGap, surprise); ok {
+			surp = s
+			// low-surprise recurring seq → routine (script it);
+			// high-surprise recurring seq → friction (a loop wearing routine's clothes).
+			if kind == KindRoutine && s > cut {
+				kind, action = KindFriction, ActionHook
+			}
+		}
 		out = append(out, &Finding{
 			IDs: card.IDs, Kind: kind, Action: action,
 			Count: count, Sessions: sessions,
 			FailRate: failRate(c, card.IDs),
 			Burn:     burnBytes / bytesPerToken,
+			Surprise: surp,
 			ExStream: card.ExStream, ExSeq: card.ExSeq,
 		})
 	}
@@ -138,6 +155,42 @@ func matchAt(st []Tok, start int, ids []uint32, maxGap int) (end, bytes int, ok 
 		pos = next
 	}
 	return pos, bytes, true
+}
+
+// motifSurprise returns the mean surprise (bits/tok) of the scored streams the
+// motif occurs in, and whether any such stream existed. Streams absent from the
+// index (too short to score, or no surprise computed) don't contribute; a motif
+// seen only in unscored streams yields ok=false, so the caller keeps its base
+// kind. A nil index always yields ok=false — the split is off.
+func motifSurprise(c *Corpus, ids []uint32, maxGap int, idx map[string]float64) (float64, bool) {
+	if idx == nil {
+		return 0, false
+	}
+	sum, n := 0.0, 0
+	for si, st := range c.Streams {
+		if !containsMotif(st, ids, maxGap) {
+			continue
+		}
+		if bits, ok := idx[c.StreamKeys[si]]; ok {
+			sum += bits
+			n++
+		}
+	}
+	if n == 0 {
+		return 0, false
+	}
+	return sum / float64(n), true
+}
+
+// containsMotif reports whether the motif matches anywhere in the stream, under
+// the same gapped greedy match the burn measurement uses.
+func containsMotif(st []Tok, ids []uint32, maxGap int) bool {
+	for i := range st {
+		if _, _, ok := matchAt(st, i, ids, maxGap); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // failRate is the share of the motif's member tokens carrying a fail mark —

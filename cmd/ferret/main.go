@@ -870,7 +870,16 @@ func cmdReport() error {
 	if err != nil {
 		return err
 	}
-	findings, capped := mineFindings(corpus, cmd.MinSupport, cmd.MaxGap, cmd.MaxLen, cmd.Order, cmd.Top)
+	// Surprise (per-session predictability) splits the routine bucket: a recurring
+	// motif whose host sessions are outlying-surprising (≥ 1σ above the corpus mean)
+	// is friction to fix, not a routine to script. Computed once over the same corpus
+	// and routed into Findings' kind assignment — same backoff model the cohesion
+	// scorer trains. FrictionCut's σ margin keeps average-surprise routines (which a
+	// bare mean would mislabel) on the routine side.
+	sscores := mine.ScoreSurprise(corpus, mine.SurpriseOpts{Order: cmd.Order, MinToks: reportSurpriseMinToks})
+	surpriseIdx := mine.SurpriseIndex(sscores)
+	surpriseCut := mine.FrictionCut(sscores)
+	findings, capped := mineFindings(corpus, cmd.MinSupport, cmd.MaxGap, cmd.MaxLen, cmd.Order, cmd.Top, surpriseIdx, surpriseCut)
 	if cmd.Kind != "" {
 		filtered := findings[:0:0]
 		for _, f := range findings {
@@ -912,6 +921,7 @@ func cmdReport() error {
 			Sessions     int      `json:"sessions"`
 			FailRate     float64  `json:"failRate"`
 			Burn         int      `json:"burn"`
+			Surprise     float64  `json:"surprise"`
 			Evidence     string   `json:"evidence"`
 			Fixed        bool     `json:"fixed,omitempty"`
 			Fix          string   `json:"fix,omitempty"`
@@ -926,7 +936,7 @@ func cmdReport() error {
 			row := jf{
 				Motif: corpus.Tokens(f.IDs), Kind: string(f.Kind), Action: string(f.Action),
 				Count: f.Count, Sessions: f.Sessions, FailRate: f.FailRate,
-				Burn: f.Burn, Evidence: exemplar(corpus, f.ExStream, f.ExSeq),
+				Burn: f.Burn, Surprise: f.Surprise, Evidence: exemplar(corpus, f.ExStream, f.ExSeq),
 			}
 			if e, ok := fixIdx[fixes.MotifKey(corpus.Tokens(f.IDs))]; ok {
 				row.Fixed, row.Fix = true, e.Fix
@@ -963,6 +973,7 @@ func cmdReport() error {
 	about(sink,
 		"≡ report: motifs classified into an action verb, ranked by burn — measured tokens of",
 		"≡ context the motif's occurrences cost across the corpus. burn×nothing else; it's the leak size.",
+		"≡ surp = mean bits/tok of the sessions a motif recurs in: a high-surp routine is friction (fix it), low-surp is routine (script it).",
 		legendMarks)
 	if fixIdx != nil {
 		sink.Head("≡ since-fixes: [fixed DATE burn BASE→NOW ↓/↑/=] annotates motifs in the ledger (↓ = fix landed).")
@@ -973,8 +984,8 @@ func cmdReport() error {
 		sink.Head("‡ seqs hit the 10000-pattern cap — raise --min-support")
 	}
 	for _, f := range findings {
-		row := fmt.Sprintf("%-8s %-8s burn=%-8d n=%-5d sess=%-4d fail=%2.0f%%  %s  ex: %s",
-			f.Kind, f.Action, f.Burn, f.Count, f.Sessions, f.FailRate*100,
+		row := fmt.Sprintf("%-8s %-8s burn=%-8d n=%-5d sess=%-4d fail=%2.0f%% surp=%4.1f  %s  ex: %s",
+			f.Kind, f.Action, f.Burn, f.Count, f.Sessions, f.FailRate*100, f.Surprise,
 			strings.Join(corpus.Tokens(f.IDs), " ⇝ "), exemplar(corpus, f.ExStream, f.ExSeq))
 		if ann, ok := sinceFixAnnotation(fixIdx, corpus.Tokens(f.IDs), f.Burn); ok {
 			row += ann
@@ -990,7 +1001,7 @@ func cmdReport() error {
 // report and the fix-ledger baseline capture depend on, so the burn a fix
 // records at add time is measured the same way the report measures it later.
 // Cards are capped per bucket (parity with rank --top) before projection.
-func mineFindings(corpus *mine.Corpus, minSupport, maxGap, maxLen, order, top int) (findings []*mine.Finding, capped bool) {
+func mineFindings(corpus *mine.Corpus, minSupport, maxGap, maxLen, order, top int, surprise map[string]float64, cut float64) (findings []*mine.Finding, capped bool) {
 	pats, capped := mine.MineSeqs(corpus, mine.SeqOpts{
 		MinSupport: minSupport, MaxGap: maxGap, MaxLen: maxLen, MaxPatterns: 10000,
 	})
@@ -1007,7 +1018,7 @@ func mineFindings(corpus *mine.Corpus, minSupport, maxGap, maxLen, order, top in
 		perBucket[card.Bucket]++
 		kept = append(kept, card)
 	}
-	return mine.Findings(corpus, kept, maxGap), capped
+	return mine.Findings(corpus, kept, maxGap, surprise, cut), capped
 }
 
 // ---- fixes (the loop-closing ledger) ----
@@ -1022,6 +1033,9 @@ const (
 	reportMaxLen     = 5
 	reportOrder      = 3
 	reportTop        = 10
+	// reportSurpriseMinToks skips streams too short for a stable surprise mean
+	// when splitting routine vs friction — matches the surprise command default.
+	reportSurpriseMinToks = 20
 )
 
 var errFixMotifRequired = errors.New("fixes add: --motif must not be empty")
@@ -1061,7 +1075,9 @@ func cmdFixesAdd() error {
 	if err != nil {
 		return err
 	}
-	findings, _ := mineFindings(corpus, reportMinSupport, reportMaxGap, reportMaxLen, reportOrder, reportTop)
+	// nil surprise index: the baseline only needs each motif's burn (surprise-
+	// independent), so the routine/friction split is irrelevant here.
+	findings, _ := mineFindings(corpus, reportMinSupport, reportMaxGap, reportMaxLen, reportOrder, reportTop, nil, 0)
 	baseline := 0
 	for _, f := range findings {
 		if fixes.MotifKey(corpus.Tokens(f.IDs)) == motif {

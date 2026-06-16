@@ -33,6 +33,38 @@ func TestSurpriseRanksRoutineBelowThrash(t *testing.T) {
 	}
 }
 
+func TestSurpriseIndexAndMeanBits(t *testing.T) {
+	scores := []StreamScore{
+		{Stream: "p/a@", Bits: 1.0},
+		{Stream: "p/b@", Bits: 3.0},
+	}
+	idx := SurpriseIndex(scores)
+	if idx["p/a@"] != 1.0 || idx["p/b@"] != 3.0 {
+		t.Errorf("SurpriseIndex = %v, want a@=1.0 b@=3.0", idx)
+	}
+	if m := MeanBits(scores); m != 2.0 {
+		t.Errorf("MeanBits = %.2f, want 2.0", m)
+	}
+	if m := MeanBits(nil); m != 0 {
+		t.Errorf("MeanBits(nil) = %.2f, want 0", m)
+	}
+}
+
+func TestFrictionCut(t *testing.T) {
+	// bits {1,3}: mean 2, σ 1 → cut 3. The σ margin lifts the cut above the mean
+	// so average-surprise motifs stay routine.
+	if c := FrictionCut([]StreamScore{{Bits: 1}, {Bits: 3}}); c != 3 {
+		t.Errorf("FrictionCut = %.2f, want 3 (mean 2 + σ 1)", c)
+	}
+	// Zero variance → cut collapses to the mean.
+	if c := FrictionCut([]StreamScore{{Bits: 2}, {Bits: 2}}); c != 2 {
+		t.Errorf("FrictionCut (no spread) = %.2f, want 2", c)
+	}
+	if c := FrictionCut(nil); c != 0 {
+		t.Errorf("FrictionCut(nil) = %.2f, want 0", c)
+	}
+}
+
 func TestSurpriseSkipsShortStreams(t *testing.T) {
 	c := corpusFrom([][]string{
 		{"a", "b"},
