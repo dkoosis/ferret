@@ -14,6 +14,72 @@ import (
 // returned by the failing writer used to force a flush error mid-run.
 var errBoomAtomic = errors.New("boom-atomic")
 
+// hookSyncDir swaps the package syncDir seam for the duration of a test,
+// recording every directory path it is asked to fsync, and restores the
+// real implementation on cleanup.
+func hookSyncDir(t *testing.T) *[]string {
+	t.Helper()
+	var dirs []string
+	orig := syncDir
+	syncDir = func(dir string) error {
+		dirs = append(dirs, dir)
+		return orig(dir)
+	}
+	t.Cleanup(func() { syncDir = orig })
+	return &dirs
+}
+
+// TestWriterClose_SyncsParentDir asserts the publish path fsyncs the parent
+// directory after the rename so the rename is crash-durable. os.Rename only
+// mutates the directory entry; without fsync'ing the dir inode the rename can
+// be lost on power-loss, diverging from the manifest.
+func TestWriterClose_SyncsParentDir(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	dirs := hookSyncDir(t)
+
+	w, err := NewWriter(path)
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
+	if err := w.Write(&Event{}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if !contains(*dirs, dir) {
+		t.Errorf("expected parent dir %q fsync'd after rename, got dirs=%v", dir, *dirs)
+	}
+}
+
+// TestWriteManifest_SyncsParentDir asserts WriteManifest also fsyncs the
+// parent directory after its rename, so the manifest and events.jsonl cannot
+// diverge across a power-loss window.
+func TestWriteManifest_SyncsParentDir(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.json")
+	dirs := hookSyncDir(t)
+
+	if err := WriteManifest(path, &Manifest{Root: "/some/root", Stats: &Stats{}}); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+
+	if !contains(*dirs, dir) {
+		t.Errorf("expected parent dir %q fsync'd after rename, got dirs=%v", dir, *dirs)
+	}
+}
+
+func contains(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
 // failWriter fails every Write, forcing bufio.Writer.Flush to error so we can
 // exercise the interrupted-run path without a real disk-full.
 type failWriter struct{}
