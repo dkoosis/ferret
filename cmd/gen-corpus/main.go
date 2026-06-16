@@ -139,12 +139,52 @@ func (g *gen) flush() error {
 			return err
 		}
 		sub := strings.Join(g.subLines, "\n") + "\n"
-		if err := os.WriteFile(filepath.Join(dir, "agent-"+g.subAgent+".jsonl"), []byte(sub), 0o600); err != nil {
+		if err := writeAtomic(filepath.Join(dir, "agent-"+g.subAgent+".jsonl"), []byte(sub), 0o600); err != nil {
 			return err
 		}
 	}
 	body := strings.Join(g.lines, "\n") + "\n"
-	return os.WriteFile(filepath.Join(g.projDir, g.session+".jsonl"), []byte(body), 0o600)
+	return writeAtomic(filepath.Join(g.projDir, g.session+".jsonl"), []byte(body), 0o600)
+}
+
+// writeAtomic writes data to path durably and atomically: it writes to a
+// temp sibling, fsyncs it, then renames over the destination. A crash or error
+// mid-write can therefore never leave a torn/partial file at path — the
+// destination is either the prior content (or absent) or the complete new
+// content, never a truncated state. The temp file is removed on any failure so
+// no stray *.tmp artifact is left to poison a corpus consumer.
+func writeAtomic(path string, data []byte, perm os.FileMode) error {
+	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	// Until the rename lands, any return is a failure: drop the temp file
+	// rather than leak it. (Double-close after a successful Close is harmless.)
+	renamed := false
+	defer func() {
+		if !renamed {
+			_ = f.Close()
+			_ = os.Remove(tmp)
+		}
+	}()
+	if _, e := f.Write(data); e != nil {
+		return e
+	}
+	if e := f.Chmod(perm); e != nil {
+		return e
+	}
+	if e := f.Sync(); e != nil {
+		return e
+	}
+	if e := f.Close(); e != nil {
+		return e
+	}
+	if e := os.Rename(tmp, path); e != nil {
+		return e
+	}
+	renamed = true
+	return nil
 }
 
 // ---- archetypes ----

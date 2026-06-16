@@ -41,15 +41,16 @@ const (
 
 // Stats accumulates ingest health counters.
 type Stats struct {
-	Files      int            `json:"files"`
-	Lines      int            `json:"lines"`
-	Events     int            `json:"events"`
-	Prompts    int            `json:"prompts"`
-	Unpaired   int            `json:"unpaired"`
-	Fallback   int            `json:"shellFallback"`
-	Deduped    int            `json:"deduped"`
-	DecodeErrs int            `json:"decodeErrs"`
-	ByType     map[string]int `json:"byType"`
+	Files       int            `json:"files"`
+	Lines       int            `json:"lines"`
+	Events      int            `json:"events"`
+	Prompts     int            `json:"prompts"`
+	Unpaired    int            `json:"unpaired"`
+	Fallback    int            `json:"shellFallback"`
+	Deduped     int            `json:"deduped"`
+	OrphanBytes int            `json:"orphanBytes"` // tool_result payload for a deduped/forked use with no pending event — accounted, not attributed to a burn row
+	DecodeErrs  int            `json:"decodeErrs"`
+	ByType      map[string]int `json:"byType"`
 }
 
 func NewStats() *Stats { return &Stats{ByType: map[string]int{}} }

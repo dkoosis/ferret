@@ -1,9 +1,46 @@
 package main
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// TestManifestComplete guards the ensureData completeness gate: a bare
+// os.Stat is not enough. A 0-byte manifest (interrupted ingest) or a
+// truncated/invalid-JSON manifest must NOT count as a complete corpus,
+// or ensureData skips re-ingest and silently mines a partial events.jsonl.
+func TestManifestComplete(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "manifest.json")
+
+	if manifestComplete(p) {
+		t.Error("missing manifest must not be complete")
+	}
+
+	if err := os.WriteFile(p, []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if manifestComplete(p) {
+		t.Error("0-byte manifest must not be complete (interrupted ingest)")
+	}
+
+	if err := os.WriteFile(p, []byte(`{"root":"/x","stats":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if manifestComplete(p) {
+		t.Error("truncated/invalid-JSON manifest must not be complete")
+	}
+
+	if err := os.WriteFile(p, []byte(`{"root":"/x"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !manifestComplete(p) {
+		t.Error("non-empty, valid-JSON manifest must be complete")
+	}
+}
 
 func TestMermaidLabelEscaping(t *testing.T) {
 	for in, want := range map[string]string{
@@ -31,5 +68,46 @@ func TestValidateFormat(t *testing.T) {
 	c = &common{format: "json"}
 	if err := c.validate("text", "json"); err != nil {
 		t.Errorf("valid format rejected: %v", err)
+	}
+}
+
+// TestDefaultPathsSurfaceHomeError guards against the silent-relative-path bug:
+// when os.UserHomeDir fails (HOME/USERPROFILE unset under cron, systemd, minimal
+// Docker, CI), defaultData/defaultRoot must NOT discard the error and return a
+// relative ".ferret" / ".claude/projects" path (which then writes artifacts
+// under the current working dir, making corpus location silently depend on CWD).
+// They must surface the error instead.
+var errTestNoHome = errors.New("$HOME is not defined")
+
+func TestDefaultPathsSurfaceHomeError(t *testing.T) {
+	orig := userHomeDir
+	t.Cleanup(func() { userHomeDir = orig })
+	userHomeDir = func() (string, error) {
+		return "", errTestNoHome
+	}
+
+	if got, err := defaultData(); err == nil {
+		t.Errorf("defaultData must surface UserHomeDir error, got path %q, nil err", got)
+	}
+	if got, err := defaultRoot(); err == nil {
+		t.Errorf("defaultRoot must surface UserHomeDir error, got path %q, nil err", got)
+	}
+}
+
+// TestDefaultPathsAbsoluteOnSuccess: the happy path still returns the expected
+// absolute paths under the home dir.
+func TestDefaultPathsAbsoluteOnSuccess(t *testing.T) {
+	orig := userHomeDir
+	t.Cleanup(func() { userHomeDir = orig })
+	home := "/home/u"
+	userHomeDir = func() (string, error) { return home, nil }
+
+	d, err := defaultData()
+	if err != nil || d != filepath.Join(home, ".ferret") {
+		t.Errorf("defaultData() = %q, %v; want /home/u/.ferret, nil", d, err)
+	}
+	r, err := defaultRoot()
+	if err != nil || r != filepath.Join(home, ".claude", "projects") {
+		t.Errorf("defaultRoot() = %q, %v; want /home/u/.claude/projects, nil", r, err)
 	}
 }

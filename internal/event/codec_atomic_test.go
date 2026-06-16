@@ -7,12 +7,70 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
 // errBoomAtomic is a static sentinel (err113: no dynamic errors in tests)
 // returned by the failing writer used to force a flush error mid-run.
 var errBoomAtomic = errors.New("boom-atomic")
+
+// hookSyncDir swaps the package syncDir seam for the duration of a test,
+// recording every directory path it is asked to fsync, and restores the
+// real implementation on cleanup.
+func hookSyncDir(t *testing.T) *[]string {
+	t.Helper()
+	var dirs []string
+	orig := syncDir
+	syncDir = func(dir string) error {
+		dirs = append(dirs, dir)
+		return orig(dir)
+	}
+	t.Cleanup(func() { syncDir = orig })
+	return &dirs
+}
+
+// TestWriterClose_SyncsParentDir asserts the publish path fsyncs the parent
+// directory after the rename so the rename is crash-durable. os.Rename only
+// mutates the directory entry; without fsync'ing the dir inode the rename can
+// be lost on power-loss, diverging from the manifest.
+func TestWriterClose_SyncsParentDir(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	dirs := hookSyncDir(t)
+
+	w, err := NewWriter(path)
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
+	if err := w.Write(&Event{}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if !slices.Contains(*dirs, dir) {
+		t.Errorf("expected parent dir %q fsync'd after rename, got dirs=%v", dir, *dirs)
+	}
+}
+
+// TestWriteManifest_SyncsParentDir asserts WriteManifest also fsyncs the
+// parent directory after its rename, so the manifest and events.jsonl cannot
+// diverge across a power-loss window.
+func TestWriteManifest_SyncsParentDir(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.json")
+	dirs := hookSyncDir(t)
+
+	if err := WriteManifest(path, &Manifest{Root: "/some/root", Stats: &Stats{}}); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+
+	if !slices.Contains(*dirs, dir) {
+		t.Errorf("expected parent dir %q fsync'd after rename, got dirs=%v", dir, *dirs)
+	}
+}
 
 // failWriter fails every Write, forcing bufio.Writer.Flush to error so we can
 // exercise the interrupted-run path without a real disk-full.
@@ -114,5 +172,39 @@ func TestWriterFailLeavesPriorIntact(t *testing.T) {
 	// No dangling .tmp.
 	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
 		t.Errorf("expected .tmp cleaned up after failed run, stat err=%v", err)
+	}
+}
+
+// TestWriteManifestAtomic asserts WriteManifest publishes atomically: the
+// final manifest is valid JSON, no .tmp is left dangling, and round-trips.
+// A bare os.WriteFile truncates then writes — a crash mid-write would leave
+// a 0-byte/partial completeness sentinel.
+func TestWriteManifestAtomic(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.json")
+
+	m := &Manifest{Root: "/some/root", Stats: &Stats{}}
+	if err := WriteManifest(path, m); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if len(b) == 0 || !json.Valid(b) {
+		t.Errorf("manifest not valid non-empty JSON: %q", b)
+	}
+	var got Manifest
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("unmarshal manifest: %v", err)
+	}
+	if got.Root != "/some/root" {
+		t.Errorf("round-trip Root = %q, want /some/root", got.Root)
+	}
+
+	// No dangling temp file after a successful publish.
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("expected manifest .tmp cleaned up, stat err=%v", err)
 	}
 }

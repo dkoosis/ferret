@@ -105,6 +105,80 @@ func TestBurnBytesSplitAcrossCompoundSegments(t *testing.T) {
 	}
 }
 
+func TestBurnBytesConservedAcrossCompoundSegments(t *testing.T) {
+	// 10-byte payload across 3 segments: integer division gives 3 each = 9,
+	// dropping 1 byte. The remainder must be carried so no bytes vanish from burn.
+	content := `"01234567"` // 10 bytes
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"a && b && c"}`),
+		toolResultContent("u2", "t1", content),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 3 {
+		t.Fatalf("events = %d, want 3", len(evs))
+	}
+	var resultBytes int
+	for _, ev := range evs {
+		// each segment's bytes = its own command-segment len + a share of the payload
+		resultBytes += ev.Bytes - len(ev.Detail)
+	}
+	if resultBytes != len(content) {
+		t.Errorf("result bytes distributed = %d, want %d (remainder dropped)", resultBytes, len(content))
+	}
+}
+
+// TestResumedForkDuplicateUseFreshResult covers the orphaned-pair byte loss:
+// a resumed session copies a tool_use (same UUID → deduped, never parked) but
+// its tool_result carries a fresh UUID, reaches resolve, finds nothing pending,
+// and its bytes silently vanish from burn. Bytes must be conserved.
+func TestResumedForkDuplicateUseFreshResult(t *testing.T) {
+	use := toolUse("dupuse", "t1", "Read", `{"file_path":"a.go"}`)
+	// File 1: original use + result, fully counted.
+	src1 := writeTranscript(t, use, toolResult("r1", "t1", false))
+	// File 2: resumed — same use UUID (deduped), but a NEW result UUID + payload.
+	content := `"abcdefghij"` // 12 bytes of returned context
+	src2 := writeTranscript(t, use, toolResultContent("r2", "t1", content))
+
+	b := NewBuilder()
+	var evs []*Event
+	for _, src := range []transcript.Source{src1, src2} {
+		if err := b.File(src, func(ev *Event) { evs = append(evs, ev) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = evs
+	// The orphaned fresh result must not inflate Unpaired (it is a result, not a use).
+	if b.Stats.Unpaired != 0 {
+		t.Errorf("Stats.Unpaired = %d, want 0 (a stray result must not be counted as an unpaired use)", b.Stats.Unpaired)
+	}
+	// The fresh result's bytes must be accounted, not silently dropped.
+	if b.Stats.OrphanBytes != len(content) {
+		t.Errorf("Stats.OrphanBytes = %d, want %d (fresh result payload lost)", b.Stats.OrphanBytes, len(content))
+	}
+}
+
+// TestResumedForkDuplicateResultFreshUse covers the symmetric inflation case:
+// the tool_result is deduped (same UUID), but the tool_use is fresh. The use is
+// parked, never resolved, and counted as Unpaired — inflating the reported
+// unpaired rate even though it WAS resolved in the original file.
+func TestResumedForkDuplicateResultFreshUse(t *testing.T) {
+	result := toolResult("dupres", "t1", false)
+	src1 := writeTranscript(t, toolUse("u1", "t1", "Read", `{"file_path":"a.go"}`), result)
+	// File 2: fresh use UUID (parked), same result UUID (deduped → never resolves it).
+	src2 := writeTranscript(t, toolUse("u2", "t1", "Read", `{"file_path":"a.go"}`), result)
+
+	b := NewBuilder()
+	var evs []*Event
+	for _, src := range []transcript.Source{src1, src2} {
+		if err := b.File(src, func(ev *Event) { evs = append(evs, ev) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if b.Stats.Unpaired != 0 {
+		t.Errorf("Stats.Unpaired = %d, want 0 (resumed use whose result was deduped should not inflate unpaired)", b.Stats.Unpaired)
+	}
+}
+
 func TestCompoundFailureIsCFailNotFail(t *testing.T) {
 	src := writeTranscript(t,
 		toolUse("u1", "t1", "Bash", `{"command":"go test ./... && go build ./..."}`),

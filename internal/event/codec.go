@@ -7,8 +7,24 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 )
+
+// syncDir fsyncs a directory so a just-published rename within it survives a
+// crash/power-loss. os.Rename only mutates the directory entry; the dir inode
+// must itself be fsync'd or the rename can be lost in the dirty-inode window.
+// It is a package var so tests can observe that the publish path invokes it.
+var syncDir = func(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		return errors.Join(err, d.Close())
+	}
+	return d.Close()
+}
 
 // Manifest records what an events.jsonl was built from.
 type Manifest struct {
@@ -20,6 +36,8 @@ type Manifest struct {
 // Writer streams events to an ndjson artifact. Writes go to path+".tmp" and
 // are atomically renamed onto path only on a fully successful flush+sync+close,
 // so an interrupted run never truncates or corrupts a prior artifact in place.
+// After the rename the parent directory is fsync'd so the publish survives a
+// crash/power-loss — os.Rename alone only dirties the dir inode.
 type Writer struct {
 	f      *os.File
 	buf    *bufio.Writer
@@ -54,7 +72,11 @@ func (w *Writer) Close() error {
 		return err
 	}
 	if w.tmp != "" {
-		return os.Rename(w.tmp, w.path)
+		if err := os.Rename(w.tmp, w.path); err != nil {
+			return err
+		}
+		// fsync the parent dir so the rename itself is crash-durable.
+		return syncDir(filepath.Dir(w.path))
 	}
 	return nil
 }
@@ -121,10 +143,41 @@ func Read(path string, fn func(*Event) error) error {
 	return nil
 }
 
+// WriteManifest publishes the completeness sentinel atomically and durably.
+// A bare os.WriteFile truncates-then-writes in place: a crash mid-write would
+// leave a present-but-0-byte/partial manifest that ensureData's existence gate
+// would mistake for a complete corpus. Instead we write path+".tmp", fsync it
+// durable, then rename onto path — the rename is atomic, so a reader sees
+// either the old manifest or the fully-written new one, never a fragment.
 func WriteManifest(path string, m *Manifest) error {
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	// fsync the parent dir so the manifest rename is crash-durable and cannot
+	// diverge from the events.jsonl rename across a power-loss window.
+	return syncDir(filepath.Dir(path))
 }
