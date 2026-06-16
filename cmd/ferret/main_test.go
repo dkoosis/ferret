@@ -1,13 +1,17 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/dkoosis/ferret/internal/event"
+	"github.com/dkoosis/ferret/internal/fixes"
 	"github.com/dkoosis/ferret/internal/mine"
 )
 
@@ -100,6 +104,108 @@ func TestManifestComplete(t *testing.T) {
 	}
 }
 
+// writeTestManifest writes a manifest.json with a controlled CreatedAt/Root so
+// the staleness helpers can be exercised without a real ingest.
+func writeTestManifest(t *testing.T, path, root string, createdAt time.Time) {
+	t.Helper()
+	b, err := json.Marshal(event.Manifest{CreatedAt: createdAt, Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeTranscript drops a *.jsonl under a project-slug dir (transcript.Walk
+// requires ≥2 path segments) and stamps it with the given mtime.
+func writeTranscript(t *testing.T, root, slug, name string, mtime time.Time) string {
+	t.Helper()
+	dir := filepath.Join(root, slug)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(p, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// TestNewestTranscriptMod: the helper returns the most recent transcript mtime
+// under root, and degrades to the zero time for an empty/unreadable tree rather
+// than erroring (staleness is advisory).
+func TestNewestTranscriptMod(t *testing.T) {
+	if got := newestTranscriptMod(filepath.Join(t.TempDir(), "absent")); !got.IsZero() {
+		t.Errorf("unreadable root must yield zero time, got %v", got)
+	}
+
+	root := t.TempDir()
+	if got := newestTranscriptMod(root); !got.IsZero() {
+		t.Errorf("empty root must yield zero time, got %v", got)
+	}
+
+	base := time.Now().Add(-time.Hour).Truncate(time.Second)
+	writeTranscript(t, root, "proj-a", "old.jsonl", base)
+	newest := base.Add(30 * time.Minute)
+	writeTranscript(t, root, "proj-b", "new.jsonl", newest)
+
+	if got := newestTranscriptMod(root); !got.Equal(newest) {
+		t.Errorf("newestTranscriptMod = %v, want newest %v", got, newest)
+	}
+}
+
+// TestCorpusStale guards ferret-17q: ensureData served a built corpus forever,
+// never noticing that the source transcripts had moved on. corpusStale must
+// report true when any transcript under the manifest's recorded root is newer
+// than the corpus build time, and stay silent (false) when the manifest is
+// missing/unreadable or records no root — staleness is advisory, so absence of
+// evidence must not produce a spurious warning.
+func TestCorpusStale(t *testing.T) {
+	dataDir := t.TempDir()
+	root := t.TempDir()
+	manifestPath := filepath.Join(dataDir, "manifest.json")
+
+	built := time.Now().Add(-time.Hour).Truncate(time.Second)
+	tx := writeTranscript(t, root, "proj-slug", "sess1.jsonl", built.Add(30*time.Minute))
+	writeTestManifest(t, manifestPath, root, built)
+
+	stale, gotBuilt, gotNewest := corpusStale(manifestPath)
+	if !stale {
+		t.Error("transcript newer than build time must be stale")
+	}
+	if !gotBuilt.Equal(built) {
+		t.Errorf("reported build time = %v, want %v", gotBuilt, built)
+	}
+	if gotNewest.Before(built) {
+		t.Errorf("reported newest %v should be after build %v", gotNewest, built)
+	}
+
+	// Transcript older than the build → fresh.
+	older := built.Add(-30 * time.Minute)
+	if err := os.Chtimes(tx, older, older); err != nil {
+		t.Fatal(err)
+	}
+	if stale, _, _ := corpusStale(manifestPath); stale {
+		t.Error("transcript older than build time must not be stale")
+	}
+
+	// Missing manifest → advisory silence, not stale.
+	if stale, _, _ := corpusStale(filepath.Join(dataDir, "absent.json")); stale {
+		t.Error("missing manifest must not report stale")
+	}
+
+	// Manifest recording no root → cannot judge staleness → not stale.
+	emptyRoot := filepath.Join(dataDir, "emptyroot.json")
+	writeTestManifest(t, emptyRoot, "", built)
+	if stale, _, _ := corpusStale(emptyRoot); stale {
+		t.Error("manifest with empty root must not report stale")
+	}
+}
+
 func TestMermaidLabelEscaping(t *testing.T) {
 	for in, want := range map[string]string{
 		`Grep:"foo"`:    "Grep:#quot;foo#quot;",
@@ -149,6 +255,60 @@ func TestDefaultPathsSurfaceHomeError(t *testing.T) {
 	}
 	if got, err := defaultRoot(); err == nil {
 		t.Errorf("defaultRoot must surface UserHomeDir error, got path %q, nil err", got)
+	}
+}
+
+// TestSinceFixAnnotation guards the report --since-fixes join: a finding whose
+// motif is in the ledger gets a "[fixed DATE burn BASE→NOW ↓]" suffix, the
+// arrow reflects the burn direction, an unmatched motif gets nothing, and a nil
+// index (flag off) is a safe no-op. The join is keyed on the comma-joined motif
+// — the stable sort key — so it survives across ingests.
+func TestSinceFixAnnotation(t *testing.T) {
+	at := time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC)
+	idx := fixes.Index([]fixes.Entry{
+		{Motif: "Edit!,Read", Fix: "hookify read-before-edit", AddedAt: at, BaselineBurn: 253000},
+	})
+
+	// Matched motif, burn fell → ↓ with compacted before→after figures.
+	got, ok := sinceFixAnnotation(idx, []string{"Edit!", "Read"}, 11000)
+	if !ok {
+		t.Fatal("expected a match for a ledgered motif")
+	}
+	for _, want := range []string{"fixed 2026-06-12", "253k", "11k", "↓"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("annotation %q missing %q", got, want)
+		}
+	}
+
+	// Matched motif, burn rose → ↑ (regression).
+	if up, _ := sinceFixAnnotation(idx, []string{"Edit!", "Read"}, 300000); !strings.Contains(up, "↑") {
+		t.Errorf("rising burn must read ↑, got %q", up)
+	}
+
+	// Unmatched motif → no annotation.
+	if _, ok := sinceFixAnnotation(idx, []string{"Grep", "Read"}, 9000); ok {
+		t.Error("unledgered motif must not annotate")
+	}
+
+	// Nil index (flag off) → safe no-op.
+	if _, ok := sinceFixAnnotation(nil, []string{"Edit!", "Read"}, 11000); ok {
+		t.Error("nil index must not annotate")
+	}
+}
+
+// TestCompactBurn: inline annotations show a glance-readable magnitude — sub-1k
+// verbatim, ≥1k as a k-suffixed integer.
+func TestCompactBurn(t *testing.T) {
+	for in, want := range map[int]string{
+		0:      "0",
+		999:    "999",
+		1000:   "1k",
+		11500:  "11k",
+		253000: "253k",
+	} {
+		if got := compactBurn(in); got != want {
+			t.Errorf("compactBurn(%d) = %q, want %q", in, got, want)
+		}
 	}
 }
 

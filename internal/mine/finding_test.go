@@ -9,8 +9,19 @@ type tb struct {
 }
 
 // bytesCorpus builds a Corpus from streams of (token, bytes) pairs so the
-// burn measurement has real sizes to sum.
+// burn measurement has real sizes to sum. Every stream gets the same key — use
+// bytesCorpusKeyed when a test needs to distinguish streams (e.g. by surprise).
 func bytesCorpus(streams [][]tb) *Corpus {
+	keys := make([]string, len(streams))
+	for i := range keys {
+		keys[i] = "p/s@"
+	}
+	return bytesCorpusKeyed(streams, keys)
+}
+
+// bytesCorpusKeyed is bytesCorpus with an explicit per-stream key, so a test can
+// attach a distinct surprise score to each stream.
+func bytesCorpusKeyed(streams [][]tb, keys []string) *Corpus {
 	c := &Corpus{}
 	intern := map[string]uint32{}
 	id := func(t string) uint32 {
@@ -22,13 +33,13 @@ func bytesCorpus(streams [][]tb) *Corpus {
 		c.Vocab = append(c.Vocab, t)
 		return v
 	}
-	for _, toks := range streams {
+	for si, toks := range streams {
 		st := make([]Tok, 0, len(toks))
 		for i, x := range toks {
 			st = append(st, Tok{ID: id(x.tok), Seq: i, Bytes: x.bytes})
 		}
 		c.Streams = append(c.Streams, st)
-		c.StreamKeys = append(c.StreamKeys, "p/s@")
+		c.StreamKeys = append(c.StreamKeys, keys[si])
 	}
 	return c
 }
@@ -118,7 +129,7 @@ func TestFindingsSortsByBurnAndProjectsKind(t *testing.T) {
 		{IDs: idsFor(c2, "a", "b"), Bucket: BucketScript},
 		{IDs: idsFor(c2, "c", "d"), Bucket: BucketFriction},
 	}
-	got := Findings(c2, cards, 3)
+	got := Findings(c2, cards, 3, nil, 0)
 	if len(got) != 2 {
 		t.Fatalf("got %d findings, want 2", len(got))
 	}
@@ -135,7 +146,50 @@ func TestFindingsSkipsPhantomMotif(t *testing.T) {
 	// A card whose motif never matches (z not in corpus would panic on vocab;
 	// use a real-but-absent ordering instead: b then a never occurs).
 	cards := []*Card{{IDs: idsFor(c, "b", "a"), Bucket: BucketScript}}
-	if got := Findings(c, cards, 3); len(got) != 0 {
+	if got := Findings(c, cards, 3, nil, 0); len(got) != 0 {
 		t.Errorf("got %d findings for a never-matching motif, want 0", len(got))
+	}
+}
+
+// TestFindingsSplitsRoutineBySurprise guards ferret-c7r: the SAME recurring
+// motif is a routine to script when its host sessions are predictable, but
+// friction to fix when those sessions are surprising. Surprise — not the motif
+// itself — decides routine vs friction; a nil surprise index leaves the base
+// kind untouched (the fix-baseline path), and the chosen kind drives the action.
+func TestFindingsSplitsRoutineBySurprise(t *testing.T) {
+	// One routine motif a→b→c recurring across two distinctly-keyed sessions.
+	c := bytesCorpusKeyed([][]tb{
+		{{"a", 1}, {"b", 1}, {"c", 1}},
+		{{"a", 1}, {"b", 1}, {"c", 1}},
+	}, []string{"p/lo@", "p/hi@"})
+
+	cases := []struct {
+		name       string
+		surprise   map[string]float64
+		cut        float64
+		wantKind   FindingKind
+		wantAction Action
+	}{
+		{"low surprise stays routine",
+			map[string]float64{"p/lo@": 0.5, "p/hi@": 0.7}, 1.0, KindRoutine, ActionScript},
+		{"high surprise becomes friction",
+			map[string]float64{"p/lo@": 2.0, "p/hi@": 3.0}, 1.0, KindFriction, ActionHook},
+		{"no surprise signal keeps base kind",
+			nil, 1.0, KindRoutine, ActionScript},
+		{"unscored streams keep base kind",
+			map[string]float64{"other@": 9.0}, 1.0, KindRoutine, ActionScript},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cards := []*Card{{IDs: idsFor(c, "a", "b", "c"), Bucket: BucketScript}}
+			got := Findings(c, cards, 3, tc.surprise, tc.cut)
+			if len(got) != 1 {
+				t.Fatalf("got %d findings, want 1", len(got))
+			}
+			if got[0].Kind != tc.wantKind || got[0].Action != tc.wantAction {
+				t.Errorf("kind/action = %s/%s, want %s/%s (surprise=%v cut=%.1f)",
+					got[0].Kind, got[0].Action, tc.wantKind, tc.wantAction, tc.surprise, tc.cut)
+			}
+		})
 	}
 }

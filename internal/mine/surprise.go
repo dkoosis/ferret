@@ -65,6 +65,53 @@ func ScoreSurprise(c *Corpus, opts SurpriseOpts) []StreamScore {
 	return out
 }
 
+// SurpriseIndex maps each scored stream's key to its mean surprise (bits/tok),
+// so a finding can look up how predictable the sessions it recurs in were.
+// Streams too short to score are simply absent (the report treats a miss as "no
+// surprise signal" and leaves the finding's base kind untouched).
+func SurpriseIndex(scores []StreamScore) map[string]float64 {
+	idx := make(map[string]float64, len(scores))
+	for _, s := range scores {
+		idx[s.Stream] = s.Bits
+	}
+	return idx
+}
+
+// MeanBits is the corpus-wide mean surprise across the scored streams.
+func MeanBits(scores []StreamScore) float64 {
+	if len(scores) == 0 {
+		return 0
+	}
+	sum := 0.0
+	for _, s := range scores {
+		sum += s.Bits
+	}
+	return sum / float64(len(scores))
+}
+
+// FrictionCut is the surprise threshold above which a recurring routine reads as
+// friction (fix it) rather than something to script: one standard deviation
+// above the corpus-mean session surprise.
+//
+// A bare mean is the wrong cut. A motif's surprise is averaged over every
+// session it appears in, which regresses widespread motifs to the corpus mean —
+// so a mean cut bisects the dense centre of the distribution and mislabels
+// average-surprise routines (e.g. git_add⇝git_commit, which lands ~at the mean)
+// as friction. Requiring a full σ of EXCESS surprise flips only routines whose
+// host sessions are genuine outliers — a true "loop wearing a routine's clothes".
+func FrictionCut(scores []StreamScore) float64 {
+	m := MeanBits(scores)
+	if len(scores) == 0 {
+		return m
+	}
+	v := 0.0
+	for _, s := range scores {
+		d := s.Bits - m
+		v += d * d
+	}
+	return m + math.Sqrt(v/float64(len(scores)))
+}
+
 // trainGrams counts every packed id sequence of length 1..order+1.
 func trainGrams(c *Corpus, order int) (map[string]int, int) {
 	grams := map[string]int{}

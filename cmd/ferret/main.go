@@ -18,6 +18,7 @@ import (
 
 	"github.com/alecthomas/kong"
 	"github.com/dkoosis/ferret/internal/event"
+	"github.com/dkoosis/ferret/internal/fixes"
 	"github.com/dkoosis/ferret/internal/lens"
 	"github.com/dkoosis/ferret/internal/mine"
 	"github.com/dkoosis/ferret/internal/out"
@@ -31,12 +32,14 @@ var (
 	errBadFormat       = errors.New("bad --format")
 	errBadBy           = errors.New("bad --by (want corpus|project|session)")
 	errMaxBytesJSON    = errors.New("--max-bytes is not supported with --format json (use --limit)")
+	errMaxBytesMD      = errors.New("--max-bytes is not supported with --format md (whole-document output; use --limit)")
 )
 
 // shared JSON response keys — every truncating JSON response carries
 // keyTotal + keyTruncated (the AX truncation contract)
 const (
 	fmtJSON      = "json"
+	fmtMD        = "md"
 	keyLens      = "lens"
 	keyTotal     = "total"
 	keyTruncated = "truncated"
@@ -139,6 +142,7 @@ var CLI struct {
 		Order      int    `help:"Gram-model order for cohesion scoring." default:"3" name:"order"`
 		Top        int    `help:"Max cards per bucket fed to the projection." default:"10" name:"top"`
 		Kind       string `help:"Only this kind: routine|friction|loop|noise (default: all but noise)." name:"kind"`
+		SinceFixes bool   `help:"Annotate findings against the fix ledger: fixed-date + burn baseline→now." name:"since-fixes"`
 	} `cmd:"" help:"Findings: motifs classified into actions, ranked by measured burn."`
 
 	Surprise struct {
@@ -160,6 +164,20 @@ var CLI struct {
 		LensFlags
 		Session string `help:"Session ID prefix (required)." required:"" name:"session"`
 	} `cmd:"" help:"One session's token stream (lens debugger)."`
+
+	Fixes struct {
+		Add struct {
+			Data  string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
+			Lens  string `help:"Token lens used to capture the baseline burn (match your scan)." default:"tool" name:"lens"`
+			Motif string `help:"Comma-joined motif tokens — the report's stable join key, e.g. \"Edit!,Read\"." required:"" name:"motif"`
+			Fix   string `help:"The fix artifact, e.g. \"hookify read-before-edit\"." required:"" name:"fix"`
+			Note  string `help:"Optional free-text note." name:"note"`
+		} `cmd:"" help:"Record motif→fix, capturing the motif's current burn as the baseline."`
+		List struct {
+			Data   string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
+			Format string `help:"Output format: text|json." default:"text" name:"format"`
+		} `cmd:"" help:"List recorded fixes."`
+	} `cmd:"" help:"Fix ledger: record motif→fix, then 'report --since-fixes' computes burn-delta."`
 }
 
 func main() {
@@ -193,10 +211,12 @@ func main() {
 				"  ferret ngrams   [--lens tool] [--n 2-5] [--min-count 5] [--min-sessions 3]\n"+
 				"  ferret seqs     [--lens tool] [--min-support 20] [--max-gap 3] [--max-len 5]\n"+
 				"  ferret rank     [--lens tool] [--min-support 20] [--order 3] [--top 10]\n"+
-				"  ferret report   [--lens tool] [--kind routine|friction|loop|noise] [--format json]\n"+
+				"  ferret report   [--lens tool] [--kind routine|friction|loop|noise] [--since-fixes] [--format json|md]\n"+
 				"  ferret surprise [--lens tool] [--order 3] [--min-toks 20]\n"+
 				"  ferret graph    [--lens tool] [--min-count 20] [--format text|json|mermaid|dot] [--loops]\n"+
-				"  ferret tokens   --session PREFIX [--lens tool]\n\n"+
+				"  ferret tokens   --session PREFIX [--lens tool]\n"+
+				"  ferret fixes add  --motif \"Edit!,Read\" --fix \"hookify read-before-edit\" [--note ...]\n"+
+				"  ferret fixes list [--format json]\n\n"+
 				"common: --data DIR (default ~/.ferret)  --format text|json  --limit N  --max-bytes N\n"+
 				"lenses: coarse | tool | target | exact",
 		),
@@ -224,6 +244,10 @@ func main() {
 		err = cmdGraph()
 	case "tokens":
 		err = cmdTokens()
+	case "fixes add":
+		err = cmdFixesAdd()
+	case "fixes list":
+		err = cmdFixesList()
 	default:
 		k.Fatalf("unknown command %q", k.Command())
 	}
@@ -293,14 +317,65 @@ func manifestComplete(path string) bool {
 // or a file with no companion manifest passes Stat but represents a broken
 // corpus. The manifest is written last by every ingest path, so a non-empty,
 // valid-JSON manifest is the correct completeness signal.
+//
+// Refresh semantics: ensureData auto-builds ONLY when the corpus is missing or
+// incomplete. It deliberately never auto-REFRESHES a present corpus, because a
+// re-ingest is expensive (full transcript walk + parse) — refreshing is an
+// explicit 'ferret ingest'. To keep that staleness from being silent (the
+// failure mode where day-1 data is mined for weeks, ferret-17q), it warns to
+// stderr when transcripts have changed since the corpus was built, then mines
+// the existing corpus anyway.
 func (c *common) ensureData() error {
 	manifestPath := filepath.Join(c.data, "manifest.json")
 	if manifestComplete(manifestPath) {
 		// manifest present, non-empty, valid JSON → ingest completed
+		if stale, builtAt, newest := corpusStale(manifestPath); stale {
+			fmt.Fprintf(os.Stderr,
+				"ferret: corpus built %s is stale — transcripts changed since (newest %s); run 'ferret ingest' to refresh\n",
+				builtAt.Format(time.RFC3339), newest.Format(time.RFC3339))
+		}
 		return nil
 	}
 	fmt.Fprintln(os.Stderr, "ferret: no events artifact — running ingest first")
 	return ingest(c.data, "", "", false)
+}
+
+// corpusStale reports whether the corpus described by the manifest at
+// manifestPath is older than the newest transcript under its recorded root,
+// returning the build time and newest-transcript time for the warning message.
+// It is best-effort and advisory: an unreadable/unparseable manifest, a
+// manifest that records no root, or an unreadable transcript tree all yield
+// (false, …) so the caller stays silent rather than warning spuriously.
+func corpusStale(manifestPath string) (stale bool, builtAt, newest time.Time) {
+	b, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return false, time.Time{}, time.Time{}
+	}
+	var m event.Manifest
+	if err := json.Unmarshal(b, &m); err != nil || m.Root == "" {
+		return false, time.Time{}, time.Time{}
+	}
+	newest = newestTranscriptMod(m.Root)
+	return newest.After(m.CreatedAt), m.CreatedAt, newest
+}
+
+// newestTranscriptMod returns the most recent modification time among the
+// transcript files under root (the same set ingest would walk), or the zero
+// Time when root is unreadable or holds no transcripts. Unreadable degrades to
+// zero rather than erroring because the result feeds an advisory staleness
+// warning, not a correctness gate.
+func newestTranscriptMod(root string) time.Time {
+	srcs, err := transcript.Walk(root)
+	if err != nil {
+		return time.Time{}
+	}
+	var newest time.Time
+	for _, s := range srcs {
+		if fi, err := os.Stat(s.Path); err == nil && fi.ModTime().After(newest) {
+			newest = fi.ModTime()
+		}
+	}
+	return newest
 }
 
 type lensOpts struct {
@@ -777,8 +852,11 @@ func cmdReport() error {
 		c.limit = 30
 	}
 	lo := fromLensFlags(cmd.LensFlags)
-	if err := c.validate("text", fmtJSON); err != nil {
+	if err := c.validate("text", fmtJSON, fmtMD); err != nil {
 		return err
+	}
+	if c.format == fmtMD && c.maxBytes > 0 {
+		return errMaxBytesMD
 	}
 	switch cmd.Kind {
 	case "", string(mine.KindRoutine), string(mine.KindFriction), string(mine.KindLoop), string(mine.KindNoise):
@@ -792,25 +870,16 @@ func cmdReport() error {
 	if err != nil {
 		return err
 	}
-	pats, capped := mine.MineSeqs(corpus, mine.SeqOpts{
-		MinSupport: cmd.MinSupport, MaxGap: cmd.MaxGap, MaxLen: cmd.MaxLen, MaxPatterns: 10000,
-	})
-	opts := mine.DefaultRankOpts()
-	opts.Order = cmd.Order
-	cards, _ := mine.RankPatterns(corpus, pats, opts)
-
-	// Cap cards per bucket (parity with rank --top) before projecting.
-	perBucket := map[string]int{}
-	kept := cards[:0:0]
-	for _, card := range cards {
-		if cmd.Top > 0 && perBucket[card.Bucket] >= cmd.Top {
-			continue
-		}
-		perBucket[card.Bucket]++
-		kept = append(kept, card)
-	}
-
-	findings := mine.Findings(corpus, kept, cmd.MaxGap)
+	// Surprise (per-session predictability) splits the routine bucket: a recurring
+	// motif whose host sessions are outlying-surprising (≥ 1σ above the corpus mean)
+	// is friction to fix, not a routine to script. Computed once over the same corpus
+	// and routed into Findings' kind assignment — same backoff model the cohesion
+	// scorer trains. FrictionCut's σ margin keeps average-surprise routines (which a
+	// bare mean would mislabel) on the routine side.
+	sscores := mine.ScoreSurprise(corpus, mine.SurpriseOpts{Order: cmd.Order, MinToks: reportSurpriseMinToks})
+	surpriseIdx := mine.SurpriseIndex(sscores)
+	surpriseCut := mine.FrictionCut(sscores)
+	findings, capped := mineFindings(corpus, cmd.MinSupport, cmd.MaxGap, cmd.MaxLen, cmd.Order, cmd.Top, surpriseIdx, surpriseCut)
 	if cmd.Kind != "" {
 		filtered := findings[:0:0]
 		for _, f := range findings {
@@ -830,27 +899,50 @@ func cmdReport() error {
 		findings = drop
 	}
 
+	// --since-fixes joins each finding to the fix ledger by motif key, turning
+	// the report from a fresh snapshot into a before→after on recorded fixes.
+	// A nil index means the flag is off; an empty (non-nil) index means it is on
+	// but no fix has been recorded yet.
+	var fixIdx map[string]fixes.Entry
+	if cmd.SinceFixes {
+		entries, err := fixes.Load(fixes.Path(c.data))
+		if err != nil {
+			return err
+		}
+		fixIdx = fixes.Index(entries)
+	}
+
 	if c.format == fmtJSON {
 		type jf struct {
-			Motif    []string `json:"motif"`
-			Kind     string   `json:"kind"`
-			Action   string   `json:"action"`
-			Count    int      `json:"count"`
-			Sessions int      `json:"sessions"`
-			FailRate float64  `json:"failRate"`
-			Burn     int      `json:"burn"`
-			Evidence string   `json:"evidence"`
+			Motif        []string `json:"motif"`
+			Kind         string   `json:"kind"`
+			Action       string   `json:"action"`
+			Count        int      `json:"count"`
+			Sessions     int      `json:"sessions"`
+			FailRate     float64  `json:"failRate"`
+			Burn         int      `json:"burn"`
+			Surprise     float64  `json:"surprise"`
+			Evidence     string   `json:"evidence"`
+			Fixed        bool     `json:"fixed,omitempty"`
+			Fix          string   `json:"fix,omitempty"`
+			FixedAt      string   `json:"fixedAt,omitempty"`
+			BaselineBurn int      `json:"baselineBurn,omitempty"`
 		}
 		rows := make([]jf, 0, len(findings))
 		for i, f := range findings {
 			if c.limit > 0 && i >= c.limit {
 				break
 			}
-			rows = append(rows, jf{
+			row := jf{
 				Motif: corpus.Tokens(f.IDs), Kind: string(f.Kind), Action: string(f.Action),
 				Count: f.Count, Sessions: f.Sessions, FailRate: f.FailRate,
-				Burn: f.Burn, Evidence: exemplar(corpus, f.ExStream, f.ExSeq),
-			})
+				Burn: f.Burn, Surprise: f.Surprise, Evidence: exemplar(corpus, f.ExStream, f.ExSeq),
+			}
+			if e, ok := fixIdx[fixes.MotifKey(corpus.Tokens(f.IDs))]; ok {
+				row.Fixed, row.Fix = true, e.Fix
+				row.FixedAt, row.BaselineBurn = e.AddedAt.Format("2006-01-02"), e.BaselineBurn
+			}
+			rows = append(rows, row)
 		}
 		return out.JSON(os.Stdout, map[string]any{
 			keyLens: l.Name(), "findings": rows,
@@ -858,25 +950,209 @@ func cmdReport() error {
 		})
 	}
 
+	// --format md renders the human cost report: the same findings projected into
+	// out.MDFinding (motif + exemplar resolved to strings) and grouped into the
+	// 💸/🔁/✅ sections. The renderer owns layout; main only flattens + caps.
+	if c.format == fmtMD {
+		rows := make([]out.MDFinding, 0, len(findings))
+		for i, f := range findings {
+			if c.limit > 0 && i >= c.limit {
+				break
+			}
+			rows = append(rows, out.MDFinding{
+				Motif: corpus.Tokens(f.IDs), Kind: string(f.Kind), Action: string(f.Action),
+				Count: f.Count, Sessions: f.Sessions, FailRate: f.FailRate,
+				Burn: f.Burn, Evidence: exemplar(corpus, f.ExStream, f.ExSeq),
+			})
+		}
+		return out.Markdown(os.Stdout, l.Name(), len(findings), rows)
+	}
+
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
 	defer sink.Close()
 	about(sink,
 		"≡ report: motifs classified into an action verb, ranked by burn — measured tokens of",
 		"≡ context the motif's occurrences cost across the corpus. burn×nothing else; it's the leak size.",
+		"≡ surp = mean bits/tok of the sessions a motif recurs in: a high-surp routine is friction (fix it), low-surp is routine (script it).",
 		legendMarks)
+	if fixIdx != nil {
+		sink.Head("≡ since-fixes: [fixed DATE burn BASE→NOW ↓/↑/=] annotates motifs in the ledger (↓ = fix landed).")
+	}
 	sink.Head("report lens=%s findings=%d (min-support=%d order=%d)",
 		l.Name(), len(findings), cmd.MinSupport, cmd.Order)
 	if capped {
 		sink.Head("‡ seqs hit the 10000-pattern cap — raise --min-support")
 	}
 	for _, f := range findings {
-		if !sink.Row("%-8s %-8s burn=%-8d n=%-5d sess=%-4d fail=%2.0f%%  %s  ex: %s",
-			f.Kind, f.Action, f.Burn, f.Count, f.Sessions, f.FailRate*100,
-			strings.Join(corpus.Tokens(f.IDs), " ⇝ "), exemplar(corpus, f.ExStream, f.ExSeq)) {
+		row := fmt.Sprintf("%-8s %-8s burn=%-8d n=%-5d sess=%-4d fail=%2.0f%% surp=%4.1f  %s  ex: %s",
+			f.Kind, f.Action, f.Burn, f.Count, f.Sessions, f.FailRate*100, f.Surprise,
+			strings.Join(corpus.Tokens(f.IDs), " ⇝ "), exemplar(corpus, f.ExStream, f.ExSeq))
+		if ann, ok := sinceFixAnnotation(fixIdx, corpus.Tokens(f.IDs), f.Burn); ok {
+			row += ann
+		}
+		if !sink.Row("%s", row) {
 			break
 		}
 	}
 	return nil
+}
+
+// mineFindings runs the shared seqs→rank→cap→project pipeline that both the
+// report and the fix-ledger baseline capture depend on, so the burn a fix
+// records at add time is measured the same way the report measures it later.
+// Cards are capped per bucket (parity with rank --top) before projection.
+func mineFindings(corpus *mine.Corpus, minSupport, maxGap, maxLen, order, top int, surprise map[string]float64, cut float64) (findings []*mine.Finding, capped bool) {
+	pats, capped := mine.MineSeqs(corpus, mine.SeqOpts{
+		MinSupport: minSupport, MaxGap: maxGap, MaxLen: maxLen, MaxPatterns: 10000,
+	})
+	opts := mine.DefaultRankOpts()
+	opts.Order = order
+	cards, _ := mine.RankPatterns(corpus, pats, opts)
+
+	perBucket := map[string]int{}
+	kept := cards[:0:0]
+	for _, card := range cards {
+		if top > 0 && perBucket[card.Bucket] >= top {
+			continue
+		}
+		perBucket[card.Bucket]++
+		kept = append(kept, card)
+	}
+	return mine.Findings(corpus, kept, maxGap, surprise, cut), capped
+}
+
+// ---- fixes (the loop-closing ledger) ----
+
+// Report defaults mirrored as constants so 'fixes add' captures a baseline burn
+// with the SAME mining params the report later re-measures with — otherwise the
+// baseline and the current burn would not be comparable. Kept in sync with the
+// kong default tags on CLI.Report by hand (kong tags must be string literals).
+const (
+	reportMinSupport = 20
+	reportMaxGap     = 3
+	reportMaxLen     = 5
+	reportOrder      = 3
+	reportTop        = 10
+	// reportSurpriseMinToks skips streams too short for a stable surprise mean
+	// when splitting routine vs friction — matches the surprise command default.
+	reportSurpriseMinToks = 20
+)
+
+var errFixMotifRequired = errors.New("fixes add: --motif must not be empty")
+
+// resolveData expands the "~/.ferret" sentinel default the same way
+// fromCommonFlags does, for the fixes subcommands that don't carry CommonFlags.
+func resolveData(data string) (string, error) {
+	if data == "~/.ferret" {
+		return defaultData()
+	}
+	return data, nil
+}
+
+// cmdFixesAdd records motif→fix in the ledger, capturing the motif's CURRENT
+// burn as the baseline. The baseline is measured through the same findings
+// pipeline the report uses, so the later 'report --since-fixes' delta is a true
+// before→after rather than an eyeballed guess. A motif that isn't currently a
+// finding records a 0 baseline (with a stderr note) — the user is recording a
+// fix for friction the corpus no longer shows.
+func cmdFixesAdd() error {
+	cmd := &CLI.Fixes.Add
+	data, err := resolveData(cmd.Data)
+	if err != nil {
+		return err
+	}
+	motif := strings.TrimSpace(cmd.Motif)
+	if motif == "" {
+		return errFixMotifRequired
+	}
+
+	c := &common{data: data, format: "text"}
+	if err := c.ensureData(); err != nil {
+		return err
+	}
+	lo := &lensOpts{lens: cmd.Lens}
+	corpus, _, err := lo.corpus(c.eventsPath())
+	if err != nil {
+		return err
+	}
+	// nil surprise index: the baseline only needs each motif's burn (surprise-
+	// independent), so the routine/friction split is irrelevant here.
+	findings, _ := mineFindings(corpus, reportMinSupport, reportMaxGap, reportMaxLen, reportOrder, reportTop, nil, 0)
+	baseline := 0
+	for _, f := range findings {
+		if fixes.MotifKey(corpus.Tokens(f.IDs)) == motif {
+			baseline = f.Burn
+			break
+		}
+	}
+
+	e := fixes.Entry{Motif: motif, Fix: cmd.Fix, Note: cmd.Note, AddedAt: time.Now(), BaselineBurn: baseline}
+	if err := fixes.Append(fixes.Path(data), e); err != nil {
+		return err
+	}
+	if baseline == 0 {
+		fmt.Fprintf(os.Stderr,
+			"ferret: motif %q is not a current finding (lens=%s) — baseline burn recorded as 0\n", motif, cmd.Lens)
+	}
+	fmt.Printf("recorded fix: %s → %s (baseline burn %d toks)\n", motif, cmd.Fix, baseline)
+	return nil
+}
+
+// cmdFixesList prints the recorded fixes, newest concerns last (append order).
+func cmdFixesList() error {
+	cmd := &CLI.Fixes.List
+	data, err := resolveData(cmd.Data)
+	if err != nil {
+		return err
+	}
+	if cmd.Format != "text" && cmd.Format != fmtJSON {
+		return fmt.Errorf("%w: %q (want text|json)", errBadFormat, cmd.Format)
+	}
+	entries, err := fixes.Load(fixes.Path(data))
+	if err != nil {
+		return err
+	}
+	if cmd.Format == fmtJSON {
+		return out.JSON(os.Stdout, map[string]any{
+			"fixes": entries, keyTotal: len(entries),
+		})
+	}
+	sink := out.NewSink(os.Stdout, 0, 0)
+	defer sink.Close()
+	sink.Head("fixes recorded=%d (ledger %s)", len(entries), fixes.Path(data))
+	for _, e := range entries {
+		note := ""
+		if e.Note != "" {
+			note = "  — " + e.Note
+		}
+		sink.Row("%s  burn@fix=%-8d  %s → %s%s",
+			e.AddedAt.Format("2006-01-02"), e.BaselineBurn, e.Motif, e.Fix, note)
+	}
+	return nil
+}
+
+// sinceFixAnnotation joins one finding's motif to the fix ledger index,
+// returning the human-readable annotation suffix and whether a fix matched.
+// Pure (no corpus/disk) so the motif-keyed join + burn-delta formatting is
+// unit-testable. A nil index (flag off) yields no match.
+func sinceFixAnnotation(idx map[string]fixes.Entry, motif []string, currentBurn int) (string, bool) {
+	e, ok := idx[fixes.MotifKey(motif)]
+	if !ok {
+		return "", false
+	}
+	a := fixes.Annotation{Entry: e, Current: currentBurn}
+	return fmt.Sprintf("  [fixed %s burn %s→%s %s]",
+		e.AddedAt.Format("2006-01-02"), compactBurn(e.BaselineBurn), compactBurn(currentBurn), a.Arrow()), true
+}
+
+// compactBurn renders a token count compactly for inline annotations: 253000 →
+// "253k", 990 → "990". Lossy by design — an annotation wants a glance-readable
+// magnitude, not an exact figure (the JSON output carries the precise numbers).
+func compactBurn(n int) string {
+	if n < 1000 {
+		return strconv.Itoa(n)
+	}
+	return strconv.Itoa(n/1000) + "k"
 }
 
 // ---- surprise (PPM-lite) ----
