@@ -17,3 +17,6 @@
 
 # snipe local index
 .snipe/
+
+# /team run ephemera (heartbeat logs)
+.team/
