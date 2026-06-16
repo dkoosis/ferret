@@ -153,34 +153,37 @@ func (g *gen) flush() error {
 // destination is either the prior content (or absent) or the complete new
 // content, never a truncated state. The temp file is removed on any failure so
 // no stray *.tmp artifact is left to poison a corpus consumer.
-func writeAtomic(path string, data []byte, perm os.FileMode) (err error) {
+func writeAtomic(path string, data []byte, perm os.FileMode) error {
 	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return err
 	}
 	tmp := f.Name()
-	// On any error after creation, drop the temp file rather than leak it.
+	// Until the rename lands, any return is a failure: drop the temp file
+	// rather than leak it. (Double-close after a successful Close is harmless.)
+	renamed := false
 	defer func() {
-		if err != nil {
+		if !renamed {
 			_ = f.Close()
 			_ = os.Remove(tmp)
 		}
 	}()
-	if _, err = f.Write(data); err != nil {
-		return err
+	if _, e := f.Write(data); e != nil {
+		return e
 	}
-	if err = f.Chmod(perm); err != nil {
-		return err
+	if e := f.Chmod(perm); e != nil {
+		return e
 	}
-	if err = f.Sync(); err != nil {
-		return err
+	if e := f.Sync(); e != nil {
+		return e
 	}
-	if err = f.Close(); err != nil {
-		return err
+	if e := f.Close(); e != nil {
+		return e
 	}
-	if err = os.Rename(tmp, path); err != nil {
-		return err
+	if e := os.Rename(tmp, path); e != nil {
+		return e
 	}
+	renamed = true
 	return nil
 }
 
