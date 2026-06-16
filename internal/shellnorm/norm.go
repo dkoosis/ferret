@@ -4,6 +4,7 @@ package shellnorm
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"mvdan.cc/sh/v3/syntax"
 )
@@ -146,7 +147,13 @@ func fallbackSegment(command string) (Segment, bool) {
 	}
 	raw := command
 	if len(raw) > 160 {
-		raw = raw[:160]
+		// Walk back to a rune boundary so the tail is never split mid-rune,
+		// keeping Segment.Raw valid UTF-8 for exact-lens tokens and graph labels.
+		end := 160
+		for end > 0 && !utf8.RuneStart(raw[end]) {
+			end--
+		}
+		raw = raw[:end]
 	}
 	return Segment{Cmd: base, Raw: raw}, true
 }
