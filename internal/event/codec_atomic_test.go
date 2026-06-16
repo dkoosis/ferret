@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -49,7 +50,7 @@ func TestWriterClose_SyncsParentDir(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	if !contains(*dirs, dir) {
+	if !slices.Contains(*dirs, dir) {
 		t.Errorf("expected parent dir %q fsync'd after rename, got dirs=%v", dir, *dirs)
 	}
 }
@@ -66,18 +67,9 @@ func TestWriteManifest_SyncsParentDir(t *testing.T) {
 		t.Fatalf("WriteManifest: %v", err)
 	}
 
-	if !contains(*dirs, dir) {
+	if !slices.Contains(*dirs, dir) {
 		t.Errorf("expected parent dir %q fsync'd after rename, got dirs=%v", dir, *dirs)
 	}
-}
-
-func contains(ss []string, want string) bool {
-	for _, s := range ss {
-		if s == want {
-			return true
-		}
-	}
-	return false
 }
 
 // failWriter fails every Write, forcing bufio.Writer.Flush to error so we can
