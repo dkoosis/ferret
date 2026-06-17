@@ -411,14 +411,16 @@ func cmdSegments() error {
 	return segments(os.Stdout, root, cmd.Session, cmd.Format)
 }
 
-// segments resolves session (a prefix) to one transcript under root and streams
-// its deterministic task-boundary candidates to w. It reuses resolveSpineSource
-// (so spine and segments agree on which transcript a prefix names) and the same
-// line-tolerant decode.
-func segments(w io.Writer, root, session, format string) error {
+// segmentSession resolves session (a prefix) to one transcript under root and
+// streams it through the deterministic segmenter, returning the finished
+// segResult. It is the shared entry both `segments` and `candidates` build on, so
+// the two commands segment a session identically (same boundary rules, same
+// per-task cost). It reuses resolveSpineSource (spine/segments/candidates agree on
+// which transcript a prefix names) and the same line-tolerant decode.
+func segmentSession(root, session string) (segResult, error) {
 	src, distinct, err := resolveSpineSource(root, session)
 	if err != nil {
-		return err
+		return segResult{}, err
 	}
 	if distinct > 1 {
 		fmt.Fprintf(os.Stderr,
@@ -431,9 +433,18 @@ func segments(w io.Writer, root, session, format string) error {
 		sm.feed(line)
 		return nil
 	}); err != nil {
+		return segResult{}, err
+	}
+	return sm.result(src), nil
+}
+
+// segments resolves session (a prefix) to one transcript under root and streams
+// its deterministic task-boundary candidates to w.
+func segments(w io.Writer, root, session, format string) error {
+	res, err := segmentSession(root, session)
+	if err != nil {
 		return err
 	}
-	res := sm.result(src)
 
 	if format == fmtJSON {
 		return writeSegmentsJSON(w, res)

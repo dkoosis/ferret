@@ -177,6 +177,13 @@ var CLI struct {
 		Format  string `help:"Output format: text|json." default:"text" name:"format"`
 	} `cmd:"" help:"Deterministic task-boundary candidates (1 per user prompt) + thinking-pivot hints."`
 
+	Candidates struct {
+		Session string `help:"Session ID prefix (required)." required:"" name:"session"`
+		Root    string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
+		Format  string `help:"Output format: text|json." default:"text" name:"format"`
+		Top     int    `help:"Max candidate tasks (0 = all)." default:"10" name:"top"`
+	} `cmd:"" help:"Rank a session's tasks as cost-leak candidates (cost × out-weight × thrash) for the analyst proposal loop."`
+
 	Conformance struct {
 		Spec   string `help:"JSON spec file (reference plan + observed labeled calls); '-' or empty = stdin." name:"spec"`
 		Format string `help:"Output format: text|json." default:"text" name:"format"`
@@ -243,6 +250,7 @@ func main() {
 				"  ferret tokens   --session PREFIX [--lens tool]\n"+
 				"  ferret spine    --session PREFIX [--root DIR]\n"+
 				"  ferret segments --session PREFIX [--root DIR] [--format text|json]\n"+
+				"  ferret candidates --session PREFIX [--root DIR] [--top 10] [--format text|json]\n"+
 				"  ferret conformance [--spec FILE] [--format text|json]   (reads stdin if no --spec)\n"+
 				"  ferret adjudicate  --session PREFIX [--model ID] [--emit-prompt] [--format text|json]\n"+
 				"  ferret fixes add  --motif \"Edit!,Read\" --fix \"hookify read-before-edit\" [--note ...]\n"+
@@ -278,6 +286,8 @@ func main() {
 		err = cmdSpine()
 	case "segments":
 		err = cmdSegments()
+	case "candidates":
+		err = cmdCandidates()
 	case "conformance":
 		err = cmdConformance()
 	case "adjudicate":
