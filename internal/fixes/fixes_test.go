@@ -109,6 +109,128 @@ func TestIndexLatestWins(t *testing.T) {
 	}
 }
 
+// TestDispBackCompat: a row with no disposition (every ledger row written before
+// the field existed) must read as a fix, preserving the original baseline→delta
+// behavior. wontfix/watch read back verbatim.
+func TestDispBackCompat(t *testing.T) {
+	cases := []struct {
+		name string
+		e    Entry
+		want string
+	}{
+		{"empty reads as fix", Entry{}, DispositionFix},
+		{"explicit fix", Entry{Disposition: DispositionFix}, DispositionFix},
+		{"wontfix", Entry{Disposition: DispositionWontfix}, DispositionWontfix},
+		{"watch", Entry{Disposition: DispositionWatch}, DispositionWatch},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.e.Disp(); got != tc.want {
+				t.Errorf("Disp() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSuppressed: only the non-fix verdicts (wontfix/watch) suppress a motif
+// from the actionable report; a fix (incl. the empty back-compat default) does
+// not.
+func TestSuppressed(t *testing.T) {
+	cases := []struct {
+		name string
+		e    Entry
+		want bool
+	}{
+		{"empty (default fix)", Entry{}, false},
+		{"fix", Entry{Disposition: DispositionFix}, false},
+		{"wontfix", Entry{Disposition: DispositionWontfix}, true},
+		{"watch", Entry{Disposition: DispositionWatch}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.e.Suppressed(); got != tc.want {
+				t.Errorf("Suppressed() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestValidDisposition: the empty string is valid (normalizes to fix); the three
+// named verdicts are valid; anything else is rejected so the writer can fail
+// fast on a typo.
+func TestValidDisposition(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"", true},
+		{DispositionFix, true},
+		{DispositionWontfix, true},
+		{DispositionWatch, true},
+		{"bogus", false},
+		{"FIX", false},
+	}
+	for _, tc := range cases {
+		if got := ValidDisposition(tc.in); got != tc.want {
+			t.Errorf("ValidDisposition(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestDispositionRoundTrip: a non-fix verdict written through Append must come
+// back from Load intact, and a row whose JSON omits the field must Load as a fix
+// — the on-disk back-compat contract, not just the in-memory Disp() default.
+func TestDispositionRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fixes.jsonl")
+	at := time.Date(2026, 6, 16, 9, 0, 0, 0, time.UTC)
+	want := []Entry{
+		{Motif: "Edit!,Read", Fix: "hook can't reclaim spent payload", Note: "behavioral-only", AddedAt: at, Disposition: DispositionWontfix},
+		{Motif: "Grep,Read", Fix: "re-rank after ferret-07s", AddedAt: at.Add(time.Hour), Disposition: DispositionWatch},
+		{Motif: "Write!,Read", Fix: "skill: write-once", AddedAt: at.Add(2 * time.Hour), BaselineBurn: 41000, Disposition: DispositionFix},
+	}
+	for _, e := range want {
+		if err := Append(path, e); err != nil {
+			t.Fatalf("Append(%q): %v", e.Motif, err)
+		}
+	}
+	// A legacy row whose JSON has no disposition field at all.
+	legacy := `{"motif":"Bash!,Bash","fix":"old","addedAt":"2026-06-01T00:00:00Z","baselineBurn":7000}` + "\n"
+	if err := appendRaw(path, legacy); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("Load returned %d entries, want 4", len(got))
+	}
+	for i := range want {
+		if got[i].Disp() != want[i].Disp() {
+			t.Errorf("entry %d disposition = %q, want %q", i, got[i].Disp(), want[i].Disp())
+		}
+	}
+	if d := got[3].Disp(); d != DispositionFix {
+		t.Errorf("legacy row (no disposition field) Disp() = %q, want %q", d, DispositionFix)
+	}
+	if got[3].Suppressed() {
+		t.Error("legacy row must not be suppressed — it reads as a fix")
+	}
+}
+
+func appendRaw(path, line string) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.WriteString(line); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
+}
+
 // TestAnnotationArrow: the delta direction reads ↓ when burn fell (the fix
 // landed), ↑ when it rose (regression), = when unchanged.
 func TestAnnotationArrow(t *testing.T) {
