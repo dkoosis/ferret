@@ -14,6 +14,26 @@ type Tok struct {
 	Bytes int // measured context cost of the occurrence (summed over a collapsed run)
 }
 
+// sameCall reports whether two tokens are segments of the SAME compound bash
+// invocation. The ingest gives every segment of one tool_use line that line's
+// Seq, so two adjacent tokens with an equal Seq are within-call segments — not
+// a cross-call transition. The transition-counting miners (follows, n-grams,
+// PrefixSpan) use this to avoid reading one atomic `a && b && c` call as a
+// multi-step routine, which roughly doubled top burn rankings (ferret-07s).
+func sameCall(a, b Tok) bool { return a.Seq == b.Seq }
+
+// spansMultipleCalls reports whether a run of stream positions covers at least
+// two distinct calls (distinct Seqs). A contiguous gram or a matched sequence
+// confined to one call is not a cross-call routine and must not be mined.
+func spansMultipleCalls(toks []Tok) bool {
+	for i := 1; i < len(toks); i++ {
+		if !sameCall(toks[i-1], toks[i]) {
+			return true
+		}
+	}
+	return false
+}
+
 // Corpus is the tokenized view of the whole events artifact under one lens.
 type Corpus struct {
 	Streams    [][]Tok

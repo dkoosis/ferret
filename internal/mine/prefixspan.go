@@ -125,13 +125,38 @@ func (m *seqMiner) grow(pat []uint32, proj *projection) {
 			m.grow(append(pat[:len(pat):len(pat)], id), m.project(proj, id))
 		}
 	}
-	if len(pat) >= 2 && bestChild*10 < len(proj.streams)*8 {
-		m.emit(pat, proj)
+	// Support is cross-call support: streams whose match spans ≥2 distinct
+	// bash calls. A pattern matched only within single compound calls (one
+	// `a && b && c` invocation) is not a cross-call routine (ferret-07s).
+	if support := m.crossCallSupport(proj); len(pat) >= 2 && support >= m.opts.MinSupport &&
+		bestChild*10 < support*8 {
+		m.emit(pat, proj, support)
 	}
 }
 
-// extSupports counts, per candidate extension item, the distinct streams
-// where it occurs within MaxGap of a current match end.
+// crossCallSupport counts distinct streams in proj that hold at least one span
+// covering two distinct calls (start and end in different Seqs). A span confined
+// to one call is the within-call segment adjacency of a single compound bash
+// invocation — not a cross-call occurrence.
+func (m *seqMiner) crossCallSupport(proj *projection) int {
+	n := 0
+	for i, si := range proj.streams {
+		st := m.c.Streams[si]
+		for _, sp := range proj.spans[i] {
+			if st[sp.start].Seq != st[sp.end].Seq {
+				n++
+				break
+			}
+		}
+	}
+	return n
+}
+
+// extSupports counts, per candidate extension item, the distinct streams where
+// extending the pattern yields a CROSS-CALL occurrence — i.e. the new span
+// (sp.start … p) covers two distinct calls. An extension that stays inside one
+// compound call is a within-call segment adjacency, not a cross-call step, and
+// must not earn support (ferret-07s).
 func (m *seqMiner) extSupports(proj *projection) map[uint32]int {
 	sup := map[uint32]int{}
 	for i, si := range proj.streams {
@@ -139,10 +164,12 @@ func (m *seqMiner) extSupports(proj *projection) map[uint32]int {
 		seen := map[uint32]bool{}
 		for _, sp := range proj.spans[i] {
 			for p := sp.end + 1; p <= sp.end+m.opts.MaxGap && p < len(st); p++ {
-				if id := st[p].ID; !seen[id] {
-					seen[id] = true
-					sup[id]++
+				id := st[p].ID
+				if seen[id] || st[sp.start].Seq == st[p].Seq {
+					continue
 				}
+				seen[id] = true
+				sup[id]++
 			}
 		}
 	}
@@ -174,7 +201,7 @@ func (m *seqMiner) project(proj *projection, id uint32) *projection {
 	return np
 }
 
-func (m *seqMiner) emit(pat []uint32, proj *projection) {
+func (m *seqMiner) emit(pat []uint32, proj *projection, support int) {
 	if uniform(pat) {
 		return // gapped Read…Read trivia — run-collapse only catches adjacent
 	}
@@ -184,16 +211,25 @@ func (m *seqMiner) emit(pat []uint32, proj *projection) {
 	}
 	ids := make([]uint32, len(pat))
 	copy(ids, pat)
-	si := proj.streams[0]
-	var exSeq int
-	if len(proj.spans) > 0 && len(proj.spans[0]) > 0 {
+	// Exemplar must be a genuine (cross-call) occurrence, so the card a reviewer
+	// inspects is a real multi-call routine, not a within-call segment chain.
+	exStream, exSeq := m.crossCallExemplar(proj)
+	m.out = append(m.out, &SeqPattern{
+		IDs: ids, Support: support,
+		ExStream: exStream, ExSeq: exSeq,
+	})
+}
+
+// crossCallExemplar returns the stream index and start Seq of the first span
+// that spans two distinct calls — the routine's first genuine cross-call match.
+func (m *seqMiner) crossCallExemplar(proj *projection) (exStream, exSeq int) {
+	for i, si := range proj.streams {
 		st := m.c.Streams[si]
-		if p := proj.spans[0][0].start; st != nil && p < len(st) {
-			exSeq = st[p].Seq
+		for _, sp := range proj.spans[i] {
+			if st[sp.start].Seq != st[sp.end].Seq {
+				return si, st[sp.start].Seq
+			}
 		}
 	}
-	m.out = append(m.out, &SeqPattern{
-		IDs: ids, Support: len(proj.streams),
-		ExStream: si, ExSeq: exSeq,
-	})
+	return proj.streams[0], 0
 }
