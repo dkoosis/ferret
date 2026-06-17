@@ -182,6 +182,14 @@ var CLI struct {
 		Format string `help:"Output format: text|json." default:"text" name:"format"`
 	} `cmd:"" help:"Score a task's calls against a reference plan: fitness/precision + alignment localizes the deviating call."`
 
+	Adjudicate struct {
+		Session    string `help:"Session ID prefix (required)." required:"" name:"session"`
+		Root       string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
+		Model      string `help:"Claude model ID (default: claude-sonnet-4-6; use claude-opus-4-8 for calibration)." name:"model"`
+		Format     string `help:"Output format: text|json." default:"text" name:"format"`
+		EmitPrompt bool   `help:"Assemble + print the prompt without calling the model (no API key needed)." name:"emit-prompt"`
+	} `cmd:"" help:"LLM analyst: flag tool-for-intent mismatches in a session (precision layer over the spine; dk validates)."`
+
 	Fixes struct {
 		Add struct {
 			Data        string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
@@ -236,6 +244,7 @@ func main() {
 				"  ferret spine    --session PREFIX [--root DIR]\n"+
 				"  ferret segments --session PREFIX [--root DIR] [--format text|json]\n"+
 				"  ferret conformance [--spec FILE] [--format text|json]   (reads stdin if no --spec)\n"+
+				"  ferret adjudicate  --session PREFIX [--model ID] [--emit-prompt] [--format text|json]\n"+
 				"  ferret fixes add  --motif \"Edit!,Read\" --fix \"hookify read-before-edit\" [--note ...]\n"+
 				"  ferret fixes list [--format json]\n\n"+
 				"common: --data DIR (default ~/.ferret)  --format text|json  --limit N  --max-bytes N\n"+
@@ -271,6 +280,8 @@ func main() {
 		err = cmdSegments()
 	case "conformance":
 		err = cmdConformance()
+	case "adjudicate":
+		err = cmdAdjudicate()
 	case "fixes add":
 		err = cmdFixesAdd()
 	case "fixes list":
