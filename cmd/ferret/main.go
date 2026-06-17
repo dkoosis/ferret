@@ -40,6 +40,7 @@ var (
 const (
 	fmtJSON      = "json"
 	fmtMD        = "md"
+	fmtText      = "text"
 	keyLens      = "lens"
 	keyTotal     = "total"
 	keyTruncated = "truncated"
@@ -170,6 +171,12 @@ var CLI struct {
 		Root    string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
 	} `cmd:"" help:"Compact session spine: prompts + thinking + tool calls + result status/size."`
 
+	Segments struct {
+		Session string `help:"Session ID prefix (required)." required:"" name:"session"`
+		Root    string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
+		Format  string `help:"Output format: text|json." default:"text" name:"format"`
+	} `cmd:"" help:"Deterministic task-boundary candidates (1 per user prompt) + thinking-pivot hints."`
+
 	Fixes struct {
 		Add struct {
 			Data        string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
@@ -222,6 +229,7 @@ func main() {
 				"  ferret graph    [--lens tool] [--min-count 20] [--format text|json|mermaid|dot] [--loops]\n"+
 				"  ferret tokens   --session PREFIX [--lens tool]\n"+
 				"  ferret spine    --session PREFIX [--root DIR]\n"+
+				"  ferret segments --session PREFIX [--root DIR] [--format text|json]\n"+
 				"  ferret fixes add  --motif \"Edit!,Read\" --fix \"hookify read-before-edit\" [--note ...]\n"+
 				"  ferret fixes list [--format json]\n\n"+
 				"common: --data DIR (default ~/.ferret)  --format text|json  --limit N  --max-bytes N\n"+
@@ -253,6 +261,8 @@ func main() {
 		err = cmdTokens()
 	case "spine":
 		err = cmdSpine()
+	case "segments":
+		err = cmdSegments()
 	case "fixes add":
 		err = cmdFixesAdd()
 	case "fixes list":
