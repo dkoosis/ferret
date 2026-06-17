@@ -147,6 +147,63 @@ func TestAlignLocalizesSkippedGate(t *testing.T) {
 	}
 }
 
+// noiseObs is a buffering/flush call the analyst flagged as noise.
+func noiseObs(call int) ObsCall { return ObsCall{Call: call, Tool: "Bash", Noise: true} }
+
+// TestAlignDropsNoiseBeforeScoring is the load-bearing regression for ferret-iaa
+// (loto-ltof slice): noise interspersed between a step's real calls shatters the
+// step phase under sequential alignment — only the first consecutive run syncs,
+// so the rest become off-plan and fitness collapses. Dropping noise first must
+// let both "build" calls collapse into one phase and sync, scoring 1/1, with the
+// dropped count surfaced separately (not folded into off-plan).
+func TestAlignDropsNoiseBeforeScoring(t *testing.T) {
+	ref := []string{"build", "learn"}
+	ob := []ObsCall{obs(0, "build"), noiseObs(1), obs(2, "build"), obs(3, "learn")}
+
+	res := Align(ref, ob)
+
+	if res.Noise != 1 {
+		t.Errorf("noise=%d; want 1 dropped", res.Noise)
+	}
+	if res.LogMoves != 0 {
+		t.Errorf("logMoves=%d; want 0 — noise is not off-plan", res.LogMoves)
+	}
+	if res.Sync != 3 {
+		t.Errorf("sync=%d; want 3 (both build calls + learn, phases unshattered)", res.Sync)
+	}
+	// 2 logical calls collapse with the plan: worst = 2 ref + 3 logical = 5, cost 0.
+	if !approx(res.Fitness, 1) || !approx(res.Precision, 1) {
+		t.Errorf("fitness=%.4f precision=%.4f; want 1/1", res.Fitness, res.Precision)
+	}
+	if res.WorstCost != 2+3 {
+		t.Errorf("worstCost=%d; want 5 (reckoned in logical calls, not raw)", res.WorstCost)
+	}
+}
+
+// TestAlignNoiseDistinctFromOffPlan guards the class boundary: an off-plan call
+// (Step=="", Noise==false) is real extra work that lowers precision, while a
+// noise call is removed from the trace entirely. Same reference + same call
+// positions, only the flag differs, must produce different verdicts.
+func TestAlignNoiseDistinctFromOffPlan(t *testing.T) {
+	ref := []string{"a"}
+	offPlan := Align(ref, []ObsCall{obs(0, "a"), obs(1, "")})
+	asNoise := Align(ref, []ObsCall{obs(0, "a"), noiseObs(1)})
+
+	if offPlan.LogMoves != 1 || offPlan.Noise != 0 {
+		t.Errorf("off-plan: logMoves=%d noise=%d; want 1/0", offPlan.LogMoves, offPlan.Noise)
+	}
+	if asNoise.LogMoves != 0 || asNoise.Noise != 1 {
+		t.Errorf("noise: logMoves=%d noise=%d; want 0/1", asNoise.LogMoves, asNoise.Noise)
+	}
+	// off-plan call drags precision to 1/2; dropping it as noise restores 1/1.
+	if !approx(offPlan.Precision, 0.5) {
+		t.Errorf("off-plan precision=%.4f; want 0.5", offPlan.Precision)
+	}
+	if !approx(asNoise.Precision, 1) {
+		t.Errorf("noise precision=%.4f; want 1", asNoise.Precision)
+	}
+}
+
 func approx(a, b float64) bool {
 	const eps = 1e-9
 	d := a - b
