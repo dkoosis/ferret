@@ -110,7 +110,7 @@ type phase struct {
 // collapse folds consecutive same-step observed calls into phases. Empty-step
 // (off-plan) calls are kept distinct so their multiplicity is preserved.
 func collapse(observed []ObsCall) []phase {
-	var phases []phase
+	phases := make([]phase, 0)
 	for _, oc := range observed {
 		if n := len(phases); n > 0 && oc.Step != "" && phases[n-1].step == oc.Step {
 			phases[n-1].span++
@@ -239,7 +239,7 @@ func score(moves []Move, refLen, calls, noise int) Result {
 // the Result is self-contained (callers localize deviations from it alone).
 func backtrack(reference []string, phases []phase, back [][]MoveType) []Move {
 	i, j := len(reference), len(phases)
-	var rev []Move
+	rev := make([]Move, 0)
 	for i > 0 || j > 0 {
 		switch back[i][j] {
 		case MoveSync:

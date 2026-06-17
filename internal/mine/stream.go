@@ -121,7 +121,7 @@ func (c *Corpus) intern(intern map[string]uint32, tok string) uint32 {
 func (c *Corpus) collapse(intern map[string]uint32) {
 	plus := map[uint32]uint32{} // id → id of "tok+"
 	for si, st := range c.Streams {
-		out := st[:0]
+		out := make([]Tok, 0, len(st))
 		for i := 0; i < len(st); {
 			j := i + 1
 			for j < len(st) && st[j].ID == st[i].ID {

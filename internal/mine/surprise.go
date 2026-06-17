@@ -38,7 +38,7 @@ type SurpriseOpts struct {
 func ScoreSurprise(c *Corpus, opts SurpriseOpts) []StreamScore {
 	grams, total := trainGrams(c, opts.Order)
 
-	var out []StreamScore
+	out := make([]StreamScore, 0)
 	var ids []uint32
 	for si, st := range c.Streams {
 		if len(st) < opts.MinToks {
