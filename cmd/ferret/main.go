@@ -177,6 +177,11 @@ var CLI struct {
 		Format  string `help:"Output format: text|json." default:"text" name:"format"`
 	} `cmd:"" help:"Deterministic task-boundary candidates (1 per user prompt) + thinking-pivot hints."`
 
+	Conformance struct {
+		Spec   string `help:"JSON spec file (reference plan + observed labeled calls); '-' or empty = stdin." name:"spec"`
+		Format string `help:"Output format: text|json." default:"text" name:"format"`
+	} `cmd:"" help:"Score a task's calls against a reference plan: fitness/precision + alignment localizes the deviating call."`
+
 	Fixes struct {
 		Add struct {
 			Data        string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
@@ -230,6 +235,7 @@ func main() {
 				"  ferret tokens   --session PREFIX [--lens tool]\n"+
 				"  ferret spine    --session PREFIX [--root DIR]\n"+
 				"  ferret segments --session PREFIX [--root DIR] [--format text|json]\n"+
+				"  ferret conformance [--spec FILE] [--format text|json]   (reads stdin if no --spec)\n"+
 				"  ferret fixes add  --motif \"Edit!,Read\" --fix \"hookify read-before-edit\" [--note ...]\n"+
 				"  ferret fixes list [--format json]\n\n"+
 				"common: --data DIR (default ~/.ferret)  --format text|json  --limit N  --max-bytes N\n"+
@@ -263,6 +269,8 @@ func main() {
 		err = cmdSpine()
 	case "segments":
 		err = cmdSegments()
+	case "conformance":
+		err = cmdConformance()
 	case "fixes add":
 		err = cmdFixesAdd()
 	case "fixes list":
