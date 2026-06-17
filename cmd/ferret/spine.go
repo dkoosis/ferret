@@ -29,6 +29,8 @@ var (
 const (
 	spineTextCap = 4000 // max runes per prompt / thinking / assistant-text block
 	spineArgCap  = 200  // max runes per tool-call arg rendering
+
+	blockTypeText = "text" // transcript content-block type for plain text
 )
 
 // cmdSpine wires the kong CLI flags to spine(), resolving the default
@@ -117,7 +119,7 @@ func emitSpineLine(bw *bufio.Writer, line []byte, c *spineCounts) {
 		switch blk.Type {
 		case "thinking":
 			emitThinking(bw, blk, c)
-		case "text":
+		case blockTypeText:
 			emitText(bw, raw.Type, blk, c)
 		case "tool_use":
 			emitToolUse(bw, blk, c)

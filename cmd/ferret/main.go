@@ -40,6 +40,7 @@ var (
 const (
 	fmtJSON      = "json"
 	fmtMD        = "md"
+	fmtText      = "text"
 	keyLens      = "lens"
 	keyTotal     = "total"
 	keyTruncated = "truncated"

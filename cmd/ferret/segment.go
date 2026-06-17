@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/dkoosis/ferret/internal/transcript"
@@ -142,7 +143,7 @@ func (s *segmenter) feed(line []byte) {
 func promptText(blocks transcript.Blocks) string {
 	var parts []string
 	for i := range blocks {
-		if blocks[i].Type != "text" {
+		if blocks[i].Type != blockTypeText {
 			continue
 		}
 		if body := strings.TrimSpace(blocks[i].Text); body != "" {
@@ -237,7 +238,7 @@ func cmdSegments() error {
 	if strings.TrimSpace(cmd.Session) == "" {
 		return errSpineSessionRequired
 	}
-	if cmd.Format != "text" && cmd.Format != fmtJSON {
+	if cmd.Format != fmtText && cmd.Format != fmtJSON {
 		return fmt.Errorf("%w: %q (want text|json)", errBadFormat, cmd.Format)
 	}
 	root := cmd.Root
@@ -331,7 +332,7 @@ func callRange(seg segment) string {
 		return "none"
 	}
 	if seg.FirstCall == seg.LastCall {
-		return fmt.Sprintf("%d", seg.FirstCall)
+		return strconv.Itoa(seg.FirstCall)
 	}
 	return fmt.Sprintf("%d..%d", seg.FirstCall, seg.LastCall)
 }
