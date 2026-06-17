@@ -115,11 +115,11 @@ func TestSegmentsTextShape(t *testing.T) {
 	for _, want := range []string{
 		"segments session=s project=-Users-dev-proj",
 		"analyst-side, NOT ferret",
-		"[seg 1] calls=0..1  prompt: orient and assess the bead",
-		"[seg 2] calls=2  prompt: now implement the marker",
+		"[seg 1] calls=0..1 cost=50B out=4B  prompt: orient and assess the bead",
+		"[seg 2] calls=2 cost=20B out=0B  prompt: now implement the marker",
 		"[pivot] think#",
 		`cue="let me now"`,
-		"--- segments=2 calls=3 pivots=1",
+		"--- segments=2 calls=3 cost=70B out=4B pivots=1 conts=0",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("text output missing %q\n---\n%s", want, out)
@@ -168,6 +168,162 @@ func TestPromptTextIgnoresToolResults(t *testing.T) {
 	blocks = mustBlocks(t, `[{"type":"text","text":"  do  the   thing  "}]`)
 	if got := promptText(blocks); got != "do the thing" {
 		t.Errorf("promptText = %q, want collapsed %q", got, "do the thing")
+	}
+}
+
+// TestClassifyBoundary is the unit table for the non-boundary filter (ferret-ajm):
+// affirmations and control built-ins / system envelopes continue; real prompts and
+// namespaced work commands open a boundary.
+func TestClassifyBoundary(t *testing.T) {
+	cmd := func(name string) string {
+		return "<command-name>" + name + "</command-name> <command-message>x</command-message>"
+	}
+	cases := []struct {
+		name     string
+		prompt   string
+		wantSkip bool
+		wantKind string
+	}{
+		{"bare yes", "yes", true, "affirmation"},
+		{"affirm trailing punct", "Sure.", true, "affirmation"},
+		{"multiword affirm", "go ahead", true, "affirmation"},
+		{"yes with more text stays a boundary", "yes, but also rename X", false, ""},
+		{"real prompt", "implement the marker", false, ""},
+		{"control clear", cmd("/clear"), true, "control"},
+		{"control exit", cmd("/exit"), true, "control"},
+		{"namespaced work command is a boundary", cmd("/wrap:wrap"), false, ""},
+		{"namespaced lintbrush is a boundary", cmd("/lintbrush:clean"), false, ""},
+		{"unknown bare command is a boundary", cmd("/deploy"), false, ""},
+		{"local-command carrier", "<local-command-stdout>See ya!</local-command-stdout>", true, "carrier"},
+		{"task-notification carrier", "<task-notification> <task-id>abc</task-id> </task-notification>", true, "carrier"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			skip, kind, _ := classifyBoundary(c.prompt)
+			if skip != c.wantSkip || kind != c.wantKind {
+				t.Errorf("classifyBoundary(%q) = (%v, %q), want (%v, %q)",
+					c.prompt, skip, kind, c.wantSkip, c.wantKind)
+			}
+		})
+	}
+}
+
+// TestSegmentsFoldsNonBoundaries is the integration contract: a bare "yes" between
+// two work prompts does NOT open a segment — it folds into the live task as a
+// continuation, and the calls that follow it attribute to that same task. A control
+// built-in folds in too; an unknown command opens a boundary.
+func TestSegmentsFoldsNonBoundaries(t *testing.T) {
+	lines := []string{
+		`{"type":"user","sessionId":"s","message":{"role":"user","content":"design the signal"}}`,
+		`{"type":"assistant","sessionId":"s","message":{"role":"assistant","content":[` +
+			`{"type":"tool_use","id":"t0","name":"Read","input":{"file_path":"a"}}]}}`,
+		`{"type":"user","sessionId":"s","message":{"role":"user","content":"yes"}}`,
+		`{"type":"assistant","sessionId":"s","message":{"role":"assistant","content":[` +
+			`{"type":"tool_use","id":"t1","name":"Write","input":{"file_path":"b"}}]}}`,
+		`{"type":"user","sessionId":"s","message":{"role":"user","content":"push it"}}`,
+		`{"type":"assistant","sessionId":"s","message":{"role":"assistant","content":[` +
+			`{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"git push"}}]}}`,
+		`{"type":"user","sessionId":"s","message":{"role":"user","content":[` +
+			`{"type":"text","text":"<command-name>/clear</command-name>"}]}}`,
+	}
+	out := runSeg(t, lines, fmtJSON)
+	var res segResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	if len(res.Segments) != 2 {
+		t.Fatalf("want 2 boundaries (yes + /clear folded), got %d: %+v", len(res.Segments), res.Segments)
+	}
+	// seg1 "design the signal" owns the Read AND the post-"yes" Write (calls 0..1).
+	if res.Segments[0].FirstCall != 0 || res.Segments[0].LastCall != 1 {
+		t.Errorf("seg1 range = %d..%d, want 0..1 (yes-continuation calls attribute here)",
+			res.Segments[0].FirstCall, res.Segments[0].LastCall)
+	}
+	if len(res.Segments[0].Conts) != 1 || res.Segments[0].Conts[0].Kind != "affirmation" {
+		t.Errorf("seg1 conts = %+v, want one affirmation", res.Segments[0].Conts)
+	}
+	// /clear folds into seg2 "push it"; seg2 owns the git-push call.
+	if res.Segments[1].Prompt != "push it" || res.Segments[1].FirstCall != 2 {
+		t.Errorf("seg2 = %+v, want prompt 'push it' owning call 2", res.Segments[1])
+	}
+	if len(res.Segments[1].Conts) != 1 || res.Segments[1].Conts[0].Kind != "control" {
+		t.Errorf("seg2 conts = %+v, want one control", res.Segments[1].Conts)
+	}
+	if res.Conts != 2 {
+		t.Errorf("total conts = %d, want 2", res.Conts)
+	}
+}
+
+// TestSegmentsDropsLeadingNonBoundary covers a non-boundary turn before any real
+// segment: it is counted but attaches nowhere (no task to continue), and the first
+// real prompt still becomes seg 1.
+func TestSegmentsDropsLeadingNonBoundary(t *testing.T) {
+	lines := []string{
+		`{"type":"user","sessionId":"s","message":{"role":"user","content":[` +
+			`{"type":"text","text":"<command-name>/clear</command-name>"}]}}`,
+		`{"type":"user","sessionId":"s","message":{"role":"user","content":"the real prompt"}}`,
+		`{"type":"assistant","sessionId":"s","message":{"role":"assistant","content":[` +
+			`{"type":"tool_use","id":"t0","name":"Read","input":{"file_path":"x"}}]}}`,
+	}
+	out := runSeg(t, lines, fmtJSON)
+	var res segResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	if len(res.Segments) != 1 || res.Segments[0].Index != 1 {
+		t.Fatalf("want a single seg 1 (leading /clear dropped), got %+v", res.Segments)
+	}
+	if len(res.Segments[0].Conts) != 0 {
+		t.Errorf("leading non-boundary must not attach, got %+v", res.Segments[0].Conts)
+	}
+	if res.Conts != 1 {
+		t.Errorf("conts tally = %d, want 1 (counted though dropped)", res.Conts)
+	}
+}
+
+// TestSegmentsPerTaskCost is the step-3 contract (ferret-567): each task carries
+// its input-byte spend and the output bytes its calls pulled in, with results
+// attributed to the OWNING task by tool_use id even when the result lands on a
+// later line — and a result for an unowned id counts as orphan output.
+func TestSegmentsPerTaskCost(t *testing.T) {
+	lines := []string{
+		`{"type":"user","sessionId":"s","message":{"role":"user","content":"task one"}}`,
+		`{"type":"assistant","sessionId":"s","message":{"role":"assistant","content":[` +
+			`{"type":"tool_use","id":"u1","name":"Bash","input":{"command":"x"}}]}}`,
+		// Result for u1 arrives AFTER the next prompt opens task two — must still
+		// charge task one.
+		`{"type":"user","sessionId":"s","message":{"role":"user","content":"task two"}}`,
+		`{"type":"user","sessionId":"s","message":{"role":"user","content":[` +
+			`{"type":"tool_result","tool_use_id":"u1","content":"0123456789"}]}}`,
+		`{"type":"assistant","sessionId":"s","message":{"role":"assistant","content":[` +
+			`{"type":"tool_use","id":"u2","name":"Read","input":{"file_path":"y"}}]}}`,
+		`{"type":"user","sessionId":"s","message":{"role":"user","content":[` +
+			`{"type":"tool_result","tool_use_id":"u2","content":"ABCDE"},` +
+			`{"type":"tool_result","tool_use_id":"ghost","content":"orphaned"}]}}`,
+	}
+	out := runSeg(t, lines, fmtJSON)
+	var res segResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	if len(res.Segments) != 2 {
+		t.Fatalf("want 2 tasks, got %d", len(res.Segments))
+	}
+	// task one: input = len(`{"command":"x"}`)=15; output = len(`"0123456789"`)=12.
+	if res.Segments[0].InBytes != 15 || res.Segments[0].OutBytes != 12 {
+		t.Errorf("task one cost = in %d/out %d, want 15/12 (result attributed across the boundary)",
+			res.Segments[0].InBytes, res.Segments[0].OutBytes)
+	}
+	// task two: input = len(`{"file_path":"y"}`)=17; output = len(`"ABCDE"`)=7.
+	if res.Segments[1].InBytes != 17 || res.Segments[1].OutBytes != 7 {
+		t.Errorf("task two cost = in %d/out %d, want 17/7", res.Segments[1].InBytes, res.Segments[1].OutBytes)
+	}
+	if res.TotalIn != 32 || res.TotalOut != 19 {
+		t.Errorf("totals = in %d/out %d, want 32/19", res.TotalIn, res.TotalOut)
+	}
+	// the "ghost" result matched no owned call → orphan output = len(`"orphaned"`)=10.
+	if res.OutOrphan != 10 {
+		t.Errorf("outOrphan = %d, want 10", res.OutOrphan)
 	}
 }
 
