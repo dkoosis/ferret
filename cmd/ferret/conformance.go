@@ -101,6 +101,7 @@ func writeConformanceJSON(w io.Writer, spec conformSpec, res conform.Result) err
 		"sync":        res.Sync,
 		"skipped":     res.ModelMoves,
 		"offPlan":     res.LogMoves,
+		"noise":       res.Noise,
 		"flowerModel": flowerModel(res),
 		"moves":       res.Moves,
 	})
@@ -127,7 +128,12 @@ func writeConformanceText(w io.Writer, spec conformSpec, res conform.Result) err
 	}
 	fmt.Fprintln(bw)
 	fmt.Fprintf(bw, "reference (%d steps): %s\n", len(spec.Reference), strings.Join(spec.Reference, " → "))
-	fmt.Fprintf(bw, "observed: %d calls (%d on-plan)\n", len(spec.Observed), res.Sync)
+	if res.Noise > 0 {
+		fmt.Fprintf(bw, "observed: %d calls (%d logical scored, %d noise dropped) — %d on-plan\n",
+			len(spec.Observed), len(spec.Observed)-res.Noise, res.Noise, res.Sync)
+	} else {
+		fmt.Fprintf(bw, "observed: %d calls (%d on-plan)\n", len(spec.Observed), res.Sync)
+	}
 	fmt.Fprintf(bw, "fitness=%.2f precision=%.2f  cost=%d/worst=%d\n",
 		res.Fitness, res.Precision, res.Cost, res.WorstCost)
 
@@ -152,15 +158,18 @@ func writeConformanceText(w io.Writer, spec conformSpec, res conform.Result) err
 	return bw.Flush()
 }
 
-// obsLabel renders a move's observed phase as "call N Tool" (or "calls N×K" when
-// the phase spans K>1 calls), tolerating a nil call.
+// obsLabel renders a move's observed phase as "call N Tool" (or "call N (K
+// calls)" when the phase spans K>1 calls), tolerating a nil call. The phase is
+// anchored at its first call N plus a count, NOT a "N–M" range: dropping noise
+// can leave a phase's calls non-contiguous in the original index space, so a
+// range would falsely imply the calls run unbroken.
 func obsLabel(oc *conform.ObsCall, span int) string {
 	if oc == nil {
 		return ""
 	}
 	head := fmt.Sprintf("call %d", oc.Call)
 	if span > 1 {
-		head = fmt.Sprintf("calls %d–%d", oc.Call, oc.Call+span-1)
+		head = fmt.Sprintf("call %d (%d calls)", oc.Call, span)
 	}
 	if oc.Tool == "" {
 		return head

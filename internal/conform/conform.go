@@ -43,10 +43,23 @@ const (
 // ObsCall is one observed tool call in the task span. Call is its index in the
 // task (from the spine/segments scaffold), Tool its name, and Step the plan
 // step the analyst assigned — empty means off-plan (it can never sync).
+//
+// Noise marks a pure tooling artifact — a buffering/flush/settle call that did
+// no task work (e.g. the 76 standalone "echo flush" agent_shell calls in the
+// loto-ltof slice). Noise is dropped before scoring, not counted as off-plan:
+// interspersed noise SHATTERS step phases under sequential alignment (only the
+// first consecutive run of a step's real calls syncs), so a raw trace scored
+// fitness 0.07 where the de-noised logical trace scored 0.66. Deciding WHICH
+// calls are noise is a semantic judgment, so the analyst sets the flag — same
+// split as Step labeling; ferret only drops, counts, and reports it. Noise is a
+// separate class from off-plan: off-plan (Step=="", Noise==false) is real extra
+// work that lowers precision ("invoked != served"); noise is non-work removed
+// from the trace entirely and surfaced as its own friction stat.
 type ObsCall struct {
-	Call int    `json:"call"`
-	Tool string `json:"tool"`
-	Step string `json:"step,omitempty"`
+	Call  int    `json:"call"`
+	Tool  string `json:"tool"`
+	Step  string `json:"step,omitempty"`
+	Noise bool   `json:"noise,omitempty"`
 }
 
 // Move is one step of the alignment. Step is set for sync/model moves (the
@@ -73,10 +86,14 @@ type Result struct {
 	// technically replay but most weren't anticipated by the plan.
 	Precision  float64 `json:"precision"`
 	Cost       int     `json:"cost"`       // model moves + off-plan calls
-	WorstCost  int     `json:"worstCost"`  // |reference| + |observed calls|
+	WorstCost  int     `json:"worstCost"`  // |reference| + |logical calls|
 	Sync       int     `json:"sync"`       // calls that served a planned step
 	ModelMoves int     `json:"modelMoves"` // skipped planned steps
 	LogMoves   int     `json:"logMoves"`   // off-plan calls
+	// Noise is the count of buffering/flush calls dropped before scoring. Kept
+	// as a separate stat (not folded into LogMoves) so the tooling artifact is
+	// reported, never silently deleted — it is itself a descriptive finding.
+	Noise int `json:"noise"`
 }
 
 // phase is a run of consecutive observed calls sharing one step label — a plan
@@ -119,11 +136,33 @@ func collapse(observed []ObsCall) []phase {
 // Fitness and precision are reported in CALLS, not phases: a log move over an
 // off-plan phase costs its full span (every wasted invocation counts), and
 // precision is the share of all observed calls that served a planned step.
+//
+// Noise calls are dropped before alignment so they cannot shatter step phases;
+// the count is carried through to Result and reported separately. Scoring runs
+// on the de-noised logical trace, so fitness/precision/worstCost all reckon in
+// logical calls, not the raw observed length.
 func Align(reference []string, observed []ObsCall) Result {
-	phases := collapse(observed)
+	logical, noise := denoise(observed)
+	phases := collapse(logical)
 	back := alignTable(reference, phases)
 	moves := backtrack(reference, phases, back)
-	return score(moves, len(reference), len(observed))
+	return score(moves, len(reference), len(logical), noise)
+}
+
+// denoise splits the observed trace into the logical trace (real calls, scored)
+// and the count of dropped noise calls. Order is preserved; a noise call is
+// simply skipped, so it never collapses into or breaks a step phase. The
+// decision of what is noise is the analyst's (ObsCall.Noise) — denoise only
+// applies it deterministically.
+func denoise(observed []ObsCall) (logical []ObsCall, noise int) {
+	for _, oc := range observed {
+		if oc.Noise {
+			noise++
+			continue
+		}
+		logical = append(logical, oc)
+	}
+	return logical, noise
 }
 
 // alignTable fills the DP back-pointer table: back[i][j] is the cheapest move
@@ -171,8 +210,8 @@ func bestMove(cost [][]int, refStep string, ph phase, i, j int) (int, MoveType) 
 // score tallies the alignment into a Result. Fitness and precision are reported
 // in CALLS: a log move costs its full span, and precision is the share of all
 // observed calls that served a planned step.
-func score(moves []Move, refLen, calls int) Result {
-	res := Result{Moves: moves, WorstCost: refLen + calls}
+func score(moves []Move, refLen, calls, noise int) Result {
+	res := Result{Moves: moves, WorstCost: refLen + calls, Noise: noise}
 	for _, mv := range moves {
 		switch mv.Type {
 		case MoveSync:

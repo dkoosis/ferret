@@ -92,6 +92,35 @@ func TestWriteConformanceTextFlowerWarning(t *testing.T) {
 	}
 }
 
+func TestWriteConformanceTextReportsDroppedNoise(t *testing.T) {
+	// Noise interspersed in a step's calls must be dropped + reported, not folded
+	// into off-plan: both "build" calls sync once de-noised.
+	spec := conformSpec{
+		Task:      "build then learn",
+		Reference: []string{"build", "learn"},
+		Observed: []conform.ObsCall{
+			{Call: 0, Tool: "Bash", Step: "build"},
+			{Call: 1, Tool: "Bash", Noise: true},
+			{Call: 2, Tool: "Bash", Step: "build"},
+			{Call: 3, Tool: "Bash", Step: "learn"},
+		},
+	}
+	res := conform.Align(spec.Reference, spec.Observed)
+	var buf bytes.Buffer
+	if err := writeConformanceText(&buf, spec, res); err != nil {
+		t.Fatalf("writeConformanceText: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"observed: 4 calls (3 logical scored, 1 noise dropped) — 3 on-plan",
+		"deviations: 0 skipped step(s), 0 off-plan call(s)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("text output missing %q\n---\n%s", want, out)
+		}
+	}
+}
+
 func TestWriteConformanceJSONShape(t *testing.T) {
 	spec := conformSpec{
 		Reference: []string{"a", "b"},
@@ -106,7 +135,7 @@ func TestWriteConformanceJSONShape(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 		t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())
 	}
-	for _, key := range []string{"fitness", "precision", "skipped", "offPlan", "flowerModel", "moves"} {
+	for _, key := range []string{"fitness", "precision", "skipped", "offPlan", "noise", "flowerModel", "moves"} {
 		if _, ok := got[key]; !ok {
 			t.Errorf("JSON missing key %q", key)
 		}
