@@ -36,8 +36,14 @@ func BuildFollows(c *Corpus) *Follows {
 	cycles := map[[2]uint32]int{}
 	for _, st := range c.Streams {
 		for i := 1; i < len(st); i++ {
+			// A within-call adjacency (segments of one compound bash call,
+			// sharing a Seq) is not a cross-call transition: counting it would
+			// read `git add && git commit && git push` as a multi-step routine.
+			if sameCall(st[i-1], st[i]) {
+				continue
+			}
 			edges[[2]uint32{st[i-1].ID, st[i].ID}]++
-			if i >= 2 && st[i-2].ID == st[i].ID && st[i-1].ID != st[i].ID {
+			if i >= 2 && st[i-2].ID == st[i].ID && st[i-1].ID != st[i].ID && !sameCall(st[i-2], st[i-1]) {
 				// undirected key: A→B→A and B→A→B are the same bounce
 				cycles[[2]uint32{min(st[i].ID, st[i-1].ID), max(st[i].ID, st[i-1].ID)}]++
 			}

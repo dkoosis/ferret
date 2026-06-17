@@ -38,6 +38,12 @@ func CountGrams(c *Corpus, minN, maxN int) map[string]*Gram {
 func countStream(grams map[string]*Gram, st []Tok, si, n int) {
 	var key []byte
 	for i := 0; i+n <= len(st); i++ {
+		// A window confined to one compound call (all segments sharing a Seq)
+		// is a single atomic invocation, not a recurring cross-call routine —
+		// counting it inflates burn (ferret-07s).
+		if !spansMultipleCalls(st[i : i+n]) {
+			continue
+		}
 		key = key[:0]
 		for j := i; j < i+n; j++ {
 			key = binary.LittleEndian.AppendUint32(key, st[j].ID)
