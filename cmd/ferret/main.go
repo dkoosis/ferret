@@ -172,11 +172,12 @@ var CLI struct {
 
 	Fixes struct {
 		Add struct {
-			Data  string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
-			Lens  string `help:"Token lens used to capture the baseline burn (match your scan)." default:"tool" name:"lens"`
-			Motif string `help:"Comma-joined motif tokens — the report's stable join key, e.g. \"Edit!,Read\"." required:"" name:"motif"`
-			Fix   string `help:"The fix artifact, e.g. \"hookify read-before-edit\"." required:"" name:"fix"`
-			Note  string `help:"Optional free-text note." name:"note"`
+			Data        string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
+			Lens        string `help:"Token lens used to capture the baseline burn (match your scan)." default:"tool" name:"lens"`
+			Motif       string `help:"Comma-joined motif tokens — the report's stable join key, e.g. \"Edit!,Read\"." required:"" name:"motif"`
+			Fix         string `help:"The fix artifact, or the reason for a wontfix/watch verdict." required:"" name:"fix"`
+			Note        string `help:"Optional free-text note." name:"note"`
+			Disposition string `help:"Verdict: fix (capture baseline+delta) | wontfix | watch (suppress motif from report with reason, no delta)." default:"fix" enum:"fix,wontfix,watch" name:"disposition"`
 		} `cmd:"" help:"Record motif→fix, capturing the motif's current burn as the baseline."`
 		List struct {
 			Data   string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
@@ -920,6 +921,24 @@ func cmdReport() error {
 		fixIdx = fixes.Index(entries)
 	}
 
+	// A wontfix/watch verdict suppresses its motif from the actionable list: the
+	// motif was adjudicated and deliberately not fixed, so re-surfacing it as a
+	// fresh candidate every scan would re-litigate a closed call. They are pulled
+	// out here (and shown separately with their reason) so the loop's memory
+	// holds across scans. Only meaningful under --since-fixes (nil index = off).
+	var suppressed []*mine.Finding
+	if fixIdx != nil {
+		keep := findings[:0:0]
+		for _, f := range findings {
+			if e, ok := fixIdx[fixes.MotifKey(corpus.Tokens(f.IDs))]; ok && e.Suppressed() {
+				suppressed = append(suppressed, f)
+				continue
+			}
+			keep = append(keep, f)
+		}
+		findings = keep
+	}
+
 	if c.format == fmtJSON {
 		type jf struct {
 			Motif        []string `json:"motif"`
@@ -952,10 +971,14 @@ func cmdReport() error {
 			}
 			rows = append(rows, row)
 		}
-		return out.JSON(os.Stdout, map[string]any{
+		payload := map[string]any{
 			keyLens: l.Name(), "findings": rows,
 			keyTotal: len(findings), keyTruncated: len(rows) < len(findings) || capped,
-		})
+		}
+		if sup := suppressedRows(fixIdx, corpus, suppressed); len(sup) > 0 {
+			payload["suppressed"] = sup
+		}
+		return out.JSON(os.Stdout, payload)
 	}
 
 	// --format md renders the human cost report: the same findings projected into
@@ -1002,7 +1025,47 @@ func cmdReport() error {
 			break
 		}
 	}
+	if len(suppressed) > 0 {
+		sink.Head("⊘ suppressed=%d (adjudicated wontfix/watch — not actionable, kept for memory)", len(suppressed))
+		for _, f := range suppressed {
+			e := fixIdx[fixes.MotifKey(corpus.Tokens(f.IDs))]
+			if !sink.Row("⊘ %-8s %s  [%s]", e.Disp(),
+				strings.Join(corpus.Tokens(f.IDs), " ⇝ "), suppressReason(e)) {
+				break
+			}
+		}
+	}
 	return nil
+}
+
+// suppressReason renders a wontfix/watch entry's recorded justification: the Fix
+// field (which holds the reason for a non-fix verdict) plus any Note.
+func suppressReason(e fixes.Entry) string {
+	if e.Note == "" {
+		return e.Fix
+	}
+	return e.Fix + " — " + e.Note
+}
+
+// suppressedRows projects the suppressed findings into JSON rows carrying the
+// motif, its verdict, and the recorded reason — the actionable list omits them,
+// but the report still reports what was adjudicated and why.
+func suppressedRows(idx map[string]fixes.Entry, corpus *mine.Corpus, suppressed []*mine.Finding) []map[string]any {
+	if len(suppressed) == 0 {
+		return nil
+	}
+	rows := make([]map[string]any, 0, len(suppressed))
+	for _, f := range suppressed {
+		toks := corpus.Tokens(f.IDs)
+		e := idx[fixes.MotifKey(toks)]
+		rows = append(rows, map[string]any{
+			"motif":       toks,
+			"disposition": e.Disp(),
+			"reason":      suppressReason(e),
+			"fixedAt":     e.AddedAt.Format("2006-01-02"),
+		})
+	}
+	return rows
 }
 
 // mineFindings runs the shared seqs→rank→cap→project pipeline that both the
@@ -1074,6 +1137,21 @@ func cmdFixesAdd() error {
 		return errFixMotifRequired
 	}
 
+	disp := cmd.Disposition
+	e := fixes.Entry{Motif: motif, Fix: cmd.Fix, Note: cmd.Note, AddedAt: time.Now(), Disposition: disp}
+
+	// Only a fix captures a baseline: a wontfix/watch verdict suppresses the
+	// motif from the report rather than measuring a delta, so mining its current
+	// burn would be wasted work (and a misleading non-zero baseline on a row that
+	// never computes a delta).
+	if e.Suppressed() {
+		if err := fixes.Append(fixes.Path(data), e); err != nil {
+			return err
+		}
+		fmt.Printf("recorded %s: %s — %s (suppressed from report, no baseline)\n", disp, motif, cmd.Fix)
+		return nil
+	}
+
 	c := &common{data: data, format: "text"}
 	if err := c.ensureData(); err != nil {
 		return err
@@ -1086,23 +1164,21 @@ func cmdFixesAdd() error {
 	// nil surprise index: the baseline only needs each motif's burn (surprise-
 	// independent), so the routine/friction split is irrelevant here.
 	findings, _ := mineFindings(corpus, reportMinSupport, reportMaxGap, reportMaxLen, reportOrder, reportTop, nil, 0)
-	baseline := 0
 	for _, f := range findings {
 		if fixes.MotifKey(corpus.Tokens(f.IDs)) == motif {
-			baseline = f.Burn
+			e.BaselineBurn = f.Burn
 			break
 		}
 	}
 
-	e := fixes.Entry{Motif: motif, Fix: cmd.Fix, Note: cmd.Note, AddedAt: time.Now(), BaselineBurn: baseline}
 	if err := fixes.Append(fixes.Path(data), e); err != nil {
 		return err
 	}
-	if baseline == 0 {
+	if e.BaselineBurn == 0 {
 		fmt.Fprintf(os.Stderr,
 			"ferret: motif %q is not a current finding (lens=%s) — baseline burn recorded as 0\n", motif, cmd.Lens)
 	}
-	fmt.Printf("recorded fix: %s → %s (baseline burn %d toks)\n", motif, cmd.Fix, baseline)
+	fmt.Printf("recorded fix: %s → %s (baseline burn %d toks)\n", motif, cmd.Fix, e.BaselineBurn)
 	return nil
 }
 
@@ -1133,8 +1209,8 @@ func cmdFixesList() error {
 		if e.Note != "" {
 			note = "  — " + e.Note
 		}
-		sink.Row("%s  burn@fix=%-8d  %s → %s%s",
-			e.AddedAt.Format("2006-01-02"), e.BaselineBurn, e.Motif, e.Fix, note)
+		sink.Row("%s  %-8s burn@fix=%-8d  %s → %s%s",
+			e.AddedAt.Format("2006-01-02"), e.Disp(), e.BaselineBurn, e.Motif, e.Fix, note)
 	}
 	return nil
 }
