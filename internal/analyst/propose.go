@@ -2,7 +2,6 @@ package analyst
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 )
 
@@ -101,24 +100,15 @@ func BuildProposePrompt(bundle, spine string) (system, user string) {
 	return proposeSystemPrompt, b.String()
 }
 
-// ParseProposals extracts the Proposals array from a model response, tolerating
-// ```json fences and surrounding prose (a guardrail if the model ignores "JSON
-// only"). Mirrors ParseFindings. Exported so parsing is unit-testable off the
-// network.
+// ParseProposals extracts the Proposals array from a model response. Mirrors
+// ParseFindings (shared decodeFirstObject: one-object decode tolerant of fences
+// and trailing prose with a stray '}'). Exported so parsing is unit-testable off
+// the network.
 func ParseProposals(resp string) ([]Proposal, error) {
-	s := strings.TrimSpace(resp)
-	s = strings.TrimPrefix(s, "```json")
-	s = strings.TrimPrefix(s, "```")
-	s = strings.TrimSuffix(s, "```")
-	start := strings.Index(s, "{")
-	end := strings.LastIndex(s, "}")
-	if start < 0 || end < start {
-		return nil, errNoJSON
-	}
 	var env struct {
 		Proposals []Proposal `json:"proposals"`
 	}
-	if err := json.Unmarshal([]byte(s[start:end+1]), &env); err != nil {
+	if err := decodeFirstObject(resp, &env); err != nil {
 		return nil, err
 	}
 	return env.Proposals, nil

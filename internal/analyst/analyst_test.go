@@ -42,6 +42,14 @@ func TestParseFindings(t *testing.T) {
 			want: 0,
 		},
 		{
+			// ferret-001: valid JSON then trailing prose containing a stray '}'.
+			// The old first-'{'…last-'}' span grabbed the brace in "`gofmt {}`",
+			// over-captured, and failed the whole parse — discarding a paid call.
+			name: "trailing prose with stray brace",
+			resp: "{\"findings\":[{\"task\":\"t\",\"fit\":\"served\"}]}\nNote: run `gofmt {}` to format.",
+			want: 1,
+		},
+		{
 			name:    "no json",
 			resp:    "I could not find any tool calls.",
 			wantErr: true,

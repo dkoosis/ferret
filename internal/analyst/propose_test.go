@@ -48,6 +48,12 @@ func TestParseProposals(t *testing.T) {
 			want: 0,
 		},
 		{
+			// ferret-001: valid JSON then trailing prose with a stray '}'.
+			name: "trailing prose with stray brace",
+			resp: "{\"proposals\":[{\"task\":1,\"kind\":\"automate\"}]}\nNote: try `make {}` next.",
+			want: 1,
+		},
+		{
 			name:    "no json",
 			resp:    "I could not find any candidates.",
 			wantErr: true,

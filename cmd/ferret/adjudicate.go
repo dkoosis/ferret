@@ -7,10 +7,19 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 
 	"github.com/dkoosis/ferret/internal/analyst"
 	"github.com/dkoosis/ferret/internal/out"
 )
+
+// analystContext derives a cancellable context from a SIGINT handler so a wedged
+// analyst call cancels cooperatively on the first Ctrl-C (the SDK threads ctx
+// down to the HTTP request) rather than requiring a hard kill (ferret-c71). The
+// caller defers stop() to restore default signal handling.
+func analystContext() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), os.Interrupt)
+}
 
 var errAdjSessionRequired = errors.New("adjudicate: --session PREFIX required")
 
@@ -67,11 +76,13 @@ func cmdAdjudicate() error {
 		return nil
 	}
 
-	cfg := analyst.Config{Model: cmd.Model}
+	cfg := analyst.Config{Model: cmd.Model, Timeout: cmd.Timeout}
 	if !cfg.HasAPIKey() {
 		return analyst.ErrNoAPIKey
 	}
-	res, err := analyst.Run(context.Background(), cfg, src.Session, buf.String())
+	ctx, stop := analystContext()
+	defer stop()
+	res, err := analyst.Run(ctx, cfg, src.Session, buf.String())
 	if err != nil {
 		return err
 	}
@@ -137,11 +148,13 @@ func runPropose(root string) error {
 		return nil
 	}
 
-	cfg := analyst.Config{Model: cmd.Model}
+	cfg := analyst.Config{Model: cmd.Model, Timeout: cmd.Timeout}
 	if !cfg.HasAPIKey() {
 		return analyst.ErrNoAPIKey
 	}
-	res, err := analyst.RunPropose(context.Background(), cfg, src.Session, bundle.String(), spineBuf.String())
+	ctx, stop := analystContext()
+	defer stop()
+	res, err := analyst.RunPropose(ctx, cfg, src.Session, bundle.String(), spineBuf.String())
 	if err != nil {
 		return err
 	}

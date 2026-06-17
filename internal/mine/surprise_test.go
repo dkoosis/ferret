@@ -1,6 +1,39 @@
 package mine
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
+
+// TestSurpriseFiniteOnDegenerateInput guards ferret-v42: an empty corpus
+// (total==0 → 0/0=NaN) or a non-positive Order (model untrained → count/0=+Inf)
+// fed a NaN/Inf through -log2 into the mean and FrictionCut, where it silently
+// mislabeled the routine/friction split (every comparison with NaN is false).
+// scoreIDs must floor to a tiny positive score so Bits stays finite.
+func TestSurpriseFiniteOnDegenerateInput(t *testing.T) {
+	cases := []struct {
+		name  string
+		corp  *Corpus
+		order int
+	}{
+		{"empty-corpus", corpusFrom(nil), 3},
+		{"order-zero", corpusFrom([][]string{{"a", "b", "c", "a", "b", "c"}}), 0},
+		{"order-negative", corpusFrom([][]string{{"a", "b", "c", "a", "b", "c"}}), -1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			scores := ScoreSurprise(tc.corp, SurpriseOpts{Order: tc.order, MinToks: 1})
+			for _, s := range scores {
+				if math.IsNaN(s.Bits) || math.IsInf(s.Bits, 0) {
+					t.Errorf("stream %q Bits = %v, want finite", s.Stream, s.Bits)
+				}
+			}
+			if cut := FrictionCut(scores); math.IsNaN(cut) || math.IsInf(cut, 0) {
+				t.Errorf("FrictionCut = %v, want finite", cut)
+			}
+		})
+	}
+}
 
 func TestSurpriseRanksRoutineBelowThrash(t *testing.T) {
 	routine := make([]string, 0, 30)

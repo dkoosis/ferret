@@ -14,11 +14,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
+
+// stderr is the diagnostic-log seam (mirrors the events codec): the salvaged
+// corrupt-trailing-line warning logs here so a test can capture it with a plain
+// buffer instead of hijacking the process-global os.Stderr.
+var stderr io.Writer = os.Stderr
 
 // FileName is the ledger's basename under the ferret data dir.
 const FileName = "fixes.jsonl"
@@ -71,6 +77,13 @@ type Entry struct {
 	AddedAt      time.Time `json:"addedAt"`
 	BaselineBurn int       `json:"baselineBurn"`
 	Disposition  string    `json:"disposition,omitempty"`
+	// Lens is the token lens the baseline was captured under. Lens transforms
+	// (mark-fail appends '!', run-collapse merges runs) change the token strings,
+	// hence the join key — a fix recorded under one lens silently misses a report
+	// run under another. Recording it lets report --since-fixes WARN on that
+	// divergence instead of failing quietly. omitempty + a tolerant reader keep
+	// rows written before the field existed working.
+	Lens string `json:"lens,omitempty"`
 }
 
 // Disp returns the entry's verdict, defaulting a missing/empty Disposition to
@@ -101,12 +114,46 @@ func Path(dataDir string) string { return filepath.Join(dataDir, FileName) }
 // MotifKey is the canonical join key for a motif's token sequence. It is the
 // single place the motif→string mapping is defined, so the writer (fixes add)
 // and the reader (report --since-fixes) cannot drift.
-func MotifKey(tokens []string) string { return strings.Join(tokens, ",") }
+//
+// A bare comma-join collides for comma-bearing tokens: ["a,b","c"] and
+// ["a","b,c"] both render "a,b,c", so the ledger's last-wins index silently
+// overwrites one fix with the other. We escape '\' and ',' within each token
+// before joining so the mapping is injective. Tokens with no comma (every real
+// tool-name lens token) escape to themselves, so the key is byte-identical to
+// the old format — no ledger migration.
+func MotifKey(tokens []string) string {
+	esc := make([]string, len(tokens))
+	for i, t := range tokens {
+		esc[i] = strings.ReplaceAll(strings.ReplaceAll(t, `\`, `\\`), ",", `\,`)
+	}
+	return strings.Join(esc, ",")
+}
+
+// ParseMotif splits a user-supplied --motif string ("Edit!, Read") into its
+// token sequence, trimming interior whitespace around each comma. The writer
+// runs it before MotifKey so a spaced --motif produces the SAME key the report
+// computes from the corpus tokens — otherwise "Edit!, Read" stores key
+// "Edit!, Read" while the report builds "Edit!,Read" and they never join.
+func ParseMotif(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		out = append(out, strings.TrimSpace(p))
+	}
+	return out
+}
 
 // Load reads every ledger entry in append order. A missing ledger is an empty
 // ledger, not an error, so callers can join unconditionally before any fix has
-// been recorded. A malformed line IS an error: silently treating a corrupt
-// ledger as "no fixes" would erase the loop's memory without warning.
+// been recorded.
+//
+// A single corrupt TRAILING line is salvaged with a stderr warning — the
+// signature of an append torn by a crash or a short write (the rare FUSE/network
+// case Append cannot fully prevent). Every entry ahead of it still loads, so one
+// torn append does not brick all future ledger reads. This mirrors the events
+// codec's truncated-trailing-record tolerance. A corrupt line with valid entries
+// AFTER it is genuine mid-ledger corruption and stays a hard error: silently
+// treating it as "no fixes" would erase the loop's memory without warning.
 func Load(path string) ([]Entry, error) {
 	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -117,22 +164,29 @@ func Load(path string) ([]Entry, error) {
 	}
 	defer f.Close()
 
-	var out []Entry
+	var lines []string
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
+		if line := strings.TrimSpace(sc.Text()); line != "" {
+			lines = append(lines, line)
 		}
-		var e Entry
-		if err := json.Unmarshal([]byte(line), &e); err != nil {
-			return nil, fmt.Errorf("fixes: corrupt ledger line in %s: %w", path, err)
-		}
-		out = append(out, e)
 	}
 	if err := sc.Err(); err != nil {
 		return nil, err
+	}
+
+	out := make([]Entry, 0, len(lines))
+	for i, line := range lines {
+		var e Entry
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			if i == len(lines)-1 {
+				fmt.Fprintf(stderr, "fixes: %s: corrupt trailing ledger line dropped (1); re-record the fix to repair\n", path)
+				break
+			}
+			return nil, fmt.Errorf("fixes: corrupt ledger line in %s: %w", path, err)
+		}
+		out = append(out, e)
 	}
 	return out, nil
 }

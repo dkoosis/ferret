@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -32,6 +33,15 @@ const maxTokens = 8000
 type Config struct {
 	Model  string // model ID; empty → DefaultModel
 	APIKey string // explicit key; empty → ANTHROPIC_API_KEY from the environment
+	// Timeout is an operator deadline bounding the WHOLE call (across the SDK's
+	// internal retries), applied via context.WithTimeout. The SDK already caps
+	// each attempt (~10min for MaxTokens=8000) and retries ~3×, so a wedged or
+	// throttled API can otherwise busy the CLI ~30min with no operator-settable
+	// ceiling (ferret-c71). 0 = no extra deadline (SDK defaults stand).
+	Timeout time.Duration
+	// HTTPClient is a test seam: inject a stub transport (a hanging or erroring
+	// Do) to exercise the deadline path without a live API. nil = SDK default.
+	HTTPClient option.HTTPClient
 }
 
 // ErrNoAPIKey signals the run cannot proceed because no credential is set. The
@@ -77,9 +87,19 @@ func complete(ctx context.Context, cfg Config, system, user string) (model, text
 	if !cfg.HasAPIKey() {
 		return "", "", ErrNoAPIKey
 	}
+	// Operator deadline: bound the whole call (all retries) so a wedged/throttled
+	// API can't busy the CLI for ~30min with no settable ceiling (ferret-c71).
+	if cfg.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, cfg.Timeout)
+		defer cancel()
+	}
 	var opts []option.RequestOption
 	if cfg.APIKey != "" {
 		opts = append(opts, option.WithAPIKey(cfg.APIKey))
+	}
+	if cfg.HTTPClient != nil {
+		opts = append(opts, option.WithHTTPClient(cfg.HTTPClient))
 	}
 	client := anthropic.NewClient(opts...)
 

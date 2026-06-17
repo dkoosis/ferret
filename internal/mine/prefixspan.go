@@ -45,6 +45,16 @@ type projection struct {
 //
 // Returns patterns plus whether MaxPatterns truncated the output.
 func MineSeqs(c *Corpus, opts SeqOpts) ([]*SeqPattern, bool) {
+	// Floor the support to 1: MinSupport<=0 makes EVERY token a frequent root and
+	// every extension clear the growth floor, so the projected-database recursion
+	// explodes combinatorially (the MaxPatterns cap bounds only emission, not the
+	// descent) → OOM/hang on a real corpus (ferret-g2o). The command boundary
+	// rejects it with a clear error; this is the library's own safety net for any
+	// other caller. MaxGap/MaxLen below 1 are self-limiting (no extension clears),
+	// so they need no floor here.
+	if opts.MinSupport < 1 {
+		opts.MinSupport = 1
+	}
 	m := &seqMiner{c: c, opts: opts}
 
 	occ := itemProjections(c)
