@@ -99,7 +99,8 @@ func rankCandidates(res segResult) candResult {
 		Agent:     res.Agent,
 		OutOrphan: res.OutOrphan,
 	}
-	for _, seg := range res.Segments {
+	for i := range res.Segments {
+		seg := &res.Segments[i]
 		if seg.Index == 0 {
 			continue // preamble
 		}
@@ -111,7 +112,7 @@ func rankCandidates(res segResult) candResult {
 		out.Candidates = append(out.Candidates, candidate{
 			Task:      seg.Index,
 			Intent:    truncateRunes(seg.Prompt, candIntentCap),
-			Calls:     segCallCount(seg),
+			Calls:     segCallCount(*seg),
 			InBytes:   seg.InBytes,
 			OutBytes:  seg.OutBytes,
 			Cost:      cost,
@@ -159,6 +160,11 @@ func cmdCandidates() error {
 			return err
 		}
 		root = r
+	}
+	// No --session → corpus-recurrence mode (Phase 2, kuv.12): rank task-shapes
+	// that recur across many sessions. --session → Phase 1 per-session ranking.
+	if cmd.Session == "" {
+		return corpusCandidates(os.Stdout, root, cmd.Format, cmd.Top, cmd.MinSessions)
 	}
 	return candidates(os.Stdout, root, cmd.Session, cmd.Format, cmd.Top)
 }

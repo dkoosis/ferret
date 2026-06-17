@@ -178,11 +178,12 @@ var CLI struct {
 	} `cmd:"" help:"Deterministic task-boundary candidates (1 per user prompt) + thinking-pivot hints."`
 
 	Candidates struct {
-		Session string `help:"Session ID prefix (required)." required:"" name:"session"`
-		Root    string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
-		Format  string `help:"Output format: text|json." default:"text" name:"format"`
-		Top     int    `help:"Max candidate tasks (0 = all)." default:"10" name:"top"`
-	} `cmd:"" help:"Rank a session's tasks as cost-leak candidates (cost × out-weight × thrash) for the analyst proposal loop."`
+		Session     string `help:"Session ID prefix. Omit for corpus-recurrence mode (rank task-shapes across all sessions)." name:"session"`
+		Root        string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
+		Format      string `help:"Output format: text|json." default:"text" name:"format"`
+		Top         int    `help:"Max candidate tasks/shapes (0 = all)." default:"10" name:"top"`
+		MinSessions int    `help:"Corpus mode: min distinct sessions a shape must recur in." default:"2" name:"min-sessions"`
+	} `cmd:"" help:"Rank a session's tasks (--session), or recurring task-shapes across the whole corpus (no --session), as cost-leak candidates for the analyst proposal loop."`
 
 	Conformance struct {
 		Spec   string `help:"JSON spec file (reference plan + observed labeled calls); '-' or empty = stdin." name:"spec"`
@@ -195,7 +196,9 @@ var CLI struct {
 		Model      string `help:"Claude model ID (default: claude-sonnet-4-6; use claude-opus-4-8 for calibration)." name:"model"`
 		Format     string `help:"Output format: text|json." default:"text" name:"format"`
 		EmitPrompt bool   `help:"Assemble + print the prompt without calling the model (no API key needed)." name:"emit-prompt"`
-	} `cmd:"" help:"LLM analyst: flag tool-for-intent mismatches in a session (precision layer over the spine; dk validates)."`
+		Propose    bool   `help:"Propose mode: feed the cost-leak candidates + spine and return one fix per task (automate/de-context) instead of mismatch verdicts." name:"propose"`
+		Top        int    `help:"Propose mode: max candidate tasks fed to the analyst (0 = all)." default:"10" name:"top"`
+	} `cmd:"" help:"LLM analyst: flag tool-for-intent mismatches in a session, or --propose cost-cutting fixes over the candidates (precision layer; dk validates)."`
 
 	Fixes struct {
 		Add struct {
@@ -250,9 +253,9 @@ func main() {
 				"  ferret tokens   --session PREFIX [--lens tool]\n"+
 				"  ferret spine    --session PREFIX [--root DIR]\n"+
 				"  ferret segments --session PREFIX [--root DIR] [--format text|json]\n"+
-				"  ferret candidates --session PREFIX [--root DIR] [--top 10] [--format text|json]\n"+
+				"  ferret candidates [--session PREFIX | (corpus) --min-sessions 2] [--root DIR] [--top 10] [--format text|json]\n"+
 				"  ferret conformance [--spec FILE] [--format text|json]   (reads stdin if no --spec)\n"+
-				"  ferret adjudicate  --session PREFIX [--model ID] [--emit-prompt] [--format text|json]\n"+
+				"  ferret adjudicate  --session PREFIX [--model ID] [--emit-prompt] [--propose] [--top 10] [--format text|json]\n"+
 				"  ferret fixes add  --motif \"Edit!,Read\" --fix \"hookify read-before-edit\" [--note ...]\n"+
 				"  ferret fixes list [--format json]\n\n"+
 				"common: --data DIR (default ~/.ferret)  --format text|json  --limit N  --max-bytes N\n"+

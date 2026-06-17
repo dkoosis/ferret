@@ -57,8 +57,25 @@ func (c Config) model() string {
 // token budget to tune), and parses the findings. The raw chain of thought is
 // not needed, so thinking display stays at the default.
 func Run(ctx context.Context, cfg Config, session, spine string) (Result, error) {
+	system, user := BuildPrompt(spine)
+	model, text, err := complete(ctx, cfg, system, user)
+	if err != nil {
+		return Result{}, err
+	}
+	findings, err := ParseFindings(text)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Session: session, Model: model, Findings: findings}, nil
+}
+
+// complete sends one (system, user) turn to Claude with adaptive thinking and
+// returns the responding model id and the concatenated text content. The shared
+// transport for both analyst modes (adjudicate, propose) — the modes differ only
+// in prompt assembly and response parsing, not in how the model is called.
+func complete(ctx context.Context, cfg Config, system, user string) (model, text string, err error) {
 	if !cfg.HasAPIKey() {
-		return Result{}, ErrNoAPIKey
+		return "", "", ErrNoAPIKey
 	}
 	var opts []option.RequestOption
 	if cfg.APIKey != "" {
@@ -66,7 +83,6 @@ func Run(ctx context.Context, cfg Config, session, spine string) (Result, error)
 	}
 	client := anthropic.NewClient(opts...)
 
-	system, user := BuildPrompt(spine)
 	adaptive := anthropic.ThinkingConfigAdaptiveParam{}
 	resp, err := client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     cfg.model(),
@@ -78,19 +94,15 @@ func Run(ctx context.Context, cfg Config, session, spine string) (Result, error)
 		},
 	})
 	if err != nil {
-		return Result{}, fmt.Errorf("analyst: messages call failed: %w", err)
+		return "", "", fmt.Errorf("analyst: messages call failed: %w", err)
 	}
 
 	// Thinking blocks precede the text block; collect the text content.
-	var text strings.Builder
+	var b strings.Builder
 	for i := range resp.Content {
 		if tb, ok := resp.Content[i].AsAny().(anthropic.TextBlock); ok {
-			text.WriteString(tb.Text)
+			b.WriteString(tb.Text)
 		}
 	}
-	findings, err := ParseFindings(text.String())
-	if err != nil {
-		return Result{}, err
-	}
-	return Result{Session: session, Model: resp.Model, Findings: findings}, nil
+	return resp.Model, b.String(), nil
 }

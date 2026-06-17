@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/dkoosis/ferret/internal/shellnorm"
 	"github.com/dkoosis/ferret/internal/transcript"
 )
 
@@ -67,6 +68,7 @@ type segment struct {
 	LastCall  int        `json:"lastCall"`
 	InBytes   int        `json:"inBytes,omitempty"`  // tool_use input bytes the task spent
 	OutBytes  int        `json:"outBytes,omitempty"` // tool_result output bytes the task's calls pulled in — the de-context payoff
+	Shape     []string   `json:"shape,omitempty"`    // ordered tool-shape tokens of the calls this task owns — the cross-session recurrence key (kuv.12)
 	Pivots    []segPivot `json:"pivots,omitempty"`
 	Conts     []segCont  `json:"conts,omitempty"`
 }
@@ -237,7 +239,7 @@ func (s *segmenter) feed(line []byte) {
 		blk := &raw.Message.Content[i]
 		switch blk.Type {
 		case "tool_use":
-			s.addCall(blk.ID, len(blk.Input))
+			s.addCall(blk.ID, len(blk.Input), callShapeTokens(blk))
 		case "thinking":
 			s.scanThinking(blk)
 		}
@@ -261,6 +263,50 @@ func (s *segmenter) scanResults(blocks transcript.Blocks) {
 		}
 		s.outOrphan += n
 	}
+}
+
+// callShapeTokens derives a task-shape token sequence for one tool_use block —
+// the deterministic recurrence key the corpus half (kuv.12) clusters on. It
+// mirrors the event builder/tool-lens vocabulary so a shape reads in the same
+// terms as the rest of ferret: a built-in tool is its name (Read, Edit), an MCP
+// call compresses to mcp:server.tool, and a Bash call expands to one "sh:<verb>"
+// token per shell statement (so a compound `git add && git commit` contributes
+// both verbs). A Bash with no parseable command degrades to a single "sh".
+func callShapeTokens(blk *transcript.Block) []string {
+	name := blk.Name
+	if name == "" {
+		return nil
+	}
+	if name != "Bash" {
+		if strings.HasPrefix(name, "mcp__") {
+			return []string{shapeMCP(name)}
+		}
+		return []string{name}
+	}
+	var input struct {
+		Command string `json:"command"`
+	}
+	_ = json.Unmarshal(blk.Input, &input)
+	segs, _ := shellnorm.Split(input.Command)
+	if len(segs) == 0 {
+		return []string{"sh"}
+	}
+	toks := make([]string, 0, len(segs))
+	for _, seg := range segs {
+		toks = append(toks, "sh:"+seg.Cmd)
+	}
+	return toks
+}
+
+// shapeMCP compresses an mcp__server__tool action name to mcp:server.tool — the
+// same short form the tool lens uses, kept local so the cmd package does not
+// reach into internal/lens internals.
+func shapeMCP(name string) string {
+	parts := strings.SplitN(strings.TrimPrefix(name, "mcp__"), "__", 2)
+	if len(parts) == 2 {
+		return "mcp:" + parts[0] + "." + parts[1]
+	}
+	return "mcp:" + parts[0]
 }
 
 // promptText extracts the genuine user-prompt text from a content block list:
@@ -309,7 +355,7 @@ func (s *segmenter) addContinuation(kind, label string) {
 // back here. Calls that precede the first prompt open a synthetic preamble segment
 // (empty prompt) so no call is silently dropped — a transcript can begin with
 // sidechain/tool activity.
-func (s *segmenter) addCall(id string, inBytes int) {
+func (s *segmenter) addCall(id string, inBytes int, shape []string) {
 	if !s.started {
 		s.segs = append(s.segs, segment{Index: 0, Prompt: "", FirstCall: -1, LastCall: -1})
 		s.started = true
@@ -322,6 +368,7 @@ func (s *segmenter) addCall(id string, inBytes int) {
 	}
 	cur.LastCall = s.callIndex
 	cur.InBytes += inBytes
+	cur.Shape = append(cur.Shape, shape...)
 	if id != "" {
 		if s.callOwner == nil {
 			s.callOwner = map[string]int{}
@@ -428,6 +475,14 @@ func segmentSession(root, session string) (segResult, error) {
 			session, distinct, src.Session)
 	}
 
+	return segmentSource(src)
+}
+
+// segmentSource streams one resolved transcript through the deterministic
+// segmenter. It is the per-source seam the corpus half (kuv.12) iterates over,
+// so a single session and a whole-corpus walk segment each transcript by exactly
+// the same rules.
+func segmentSource(src transcript.Source) (segResult, error) {
 	var sm segmenter
 	if err := transcript.ReadLines(src.Path, func(line []byte) error {
 		sm.feed(line)
@@ -474,12 +529,13 @@ func writeSegmentsText(w io.Writer, res segResult) error {
 			"built-ins/system envelopes fold in as [cont]) + pivot hints. Semantic merge "+
 			"of interleaved sub-goals + per-task intent = analyst-side, NOT ferret.")
 
-	for _, seg := range res.Segments {
+	for i := range res.Segments {
+		seg := &res.Segments[i]
 		label := fmt.Sprintf("seg %d", seg.Index)
 		if seg.Index == 0 {
 			label = "preamble"
 		}
-		fmt.Fprintf(bw, "[%s] calls=%s", label, callRange(seg))
+		fmt.Fprintf(bw, "[%s] calls=%s", label, callRange(*seg))
 		if seg.InBytes+seg.OutBytes > 0 {
 			fmt.Fprintf(bw, " cost=%s out=%s", humanBytes(seg.InBytes+seg.OutBytes), humanBytes(seg.OutBytes))
 		}
@@ -524,8 +580,8 @@ func callRange(seg segment) string {
 // preamble) — the number of deterministic boundary candidates.
 func boundaryCount(res segResult) int {
 	n := 0
-	for _, seg := range res.Segments {
-		if seg.Index > 0 {
+	for i := range res.Segments {
+		if res.Segments[i].Index > 0 {
 			n++
 		}
 	}
