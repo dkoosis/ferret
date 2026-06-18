@@ -116,7 +116,16 @@ func TagMove(turn string) (Move, string) {
 		return MoveNeutral, ""
 	}
 	target := t
-	if len([]rune(t)) > signalShortRunes {
+	// Count runes with a short-circuit so a huge pasted turn isn't fully
+	// rune-sliced just to test its length.
+	runeCount := 0
+	for range t {
+		runeCount++
+		if runeCount > signalShortRunes {
+			break
+		}
+	}
+	if runeCount > signalShortRunes {
 		target = leadWindow(t, signalLeadRunes) // long turn: judge only the lead
 	}
 	if cue, ok := firstMatch(target, repairCues); ok {
@@ -131,11 +140,14 @@ func TagMove(turn string) (Move, string) {
 // leadWindow returns the first n runes of s — the slice a long turn's move is
 // judged against, so a cue buried deep in pasted content can't earn a label.
 func leadWindow(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
+	count := 0
+	for i := range s {
+		if count == n {
+			return s[:i]
+		}
+		count++
 	}
-	return string(r[:n])
+	return s
 }
 
 // firstMatch returns the matched substring of the first pattern that fires, so

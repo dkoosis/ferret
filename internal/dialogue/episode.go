@@ -56,11 +56,14 @@ func Classify(moves []Move) Outcome {
 	switch {
 	case accepts == 0 && repairs == 0:
 		return OutcomeUnknown
-	case last == MoveAccept && repairs <= repairHeavyCut:
-		return OutcomeSuccess
-	case accepts > 0:
+	case last == MoveAccept:
+		// closed on acceptance: success unless the friction count is high
+		if repairs <= repairHeavyCut {
+			return OutcomeSuccess
+		}
 		return OutcomeRepairHeavy
 	default:
+		// did not close on acceptance (trailing repair or topic switch)
 		return OutcomeAbandoned
 	}
 }

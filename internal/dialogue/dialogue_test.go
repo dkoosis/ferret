@@ -76,6 +76,7 @@ func TestClassify(t *testing.T) {
 		{"one repair then accept", []Move{MoveNeutral, MoveRepair, MoveAccept}, OutcomeSuccess},
 		{"repair heavy but lands", []Move{MoveRepair, MoveRepair, MoveRepair, MoveAccept}, OutcomeRepairHeavy},
 		{"abandoned on repair", []Move{MoveNeutral, MoveRepair}, OutcomeAbandoned},
+		{"accept then trailing repair", []Move{MoveRepair, MoveAccept, MoveRepair}, OutcomeAbandoned},
 		{"no signal", []Move{MoveNeutral, MoveNeutral}, OutcomeUnknown},
 		{"empty", nil, OutcomeUnknown},
 	}
