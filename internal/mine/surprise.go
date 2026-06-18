@@ -148,6 +148,20 @@ func scoreIDs(ids []uint32, i int, grams map[string]int, total, order int) float
 		}
 		alpha *= 0.4
 	}
-	// unigram floor: the token is in the vocab, so its count is ≥ 1
-	return alpha * float64(grams[pack(i, i)]) / float64(total)
+	// unigram floor: normally the token is in the vocab so its count is ≥1 and
+	// total ≥1. Guard the degenerate inputs the command boundary also rejects
+	// (ferret-v42): an empty corpus (total==0 → 0/0=NaN) or order<1 leaving the
+	// model untrained (count==0 → n/0=+Inf). A NaN/Inf flows through -log2 into
+	// the mean and FrictionCut, where it silently mislabels the routine/friction
+	// split (every comparison with NaN is false). Return a tiny positive score so
+	// -log2 stays finite — a maximally-surprising token, the honest reading.
+	num := grams[pack(i, i)]
+	if num <= 0 || total <= 0 {
+		return surpriseFloor
+	}
+	return alpha * float64(num) / float64(total)
 }
+
+// surpriseFloor is the smallest score scoreIDs returns, so -log2 of it is a
+// large-but-FINITE surprisal (~40 bits) rather than +Inf/NaN on degenerate input.
+const surpriseFloor = 1e-12

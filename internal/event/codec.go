@@ -74,13 +74,17 @@ type Writer struct {
 }
 
 func NewWriter(path string) (*Writer, error) {
-	tmp := path + ".tmp"
-	f, err := os.Create(tmp)
+	// Per-process UNIQUE temp (random infix), not a fixed path+".tmp": two
+	// ingests racing on the same data dir would both os.Create the same fixed
+	// tmp and interleave NDJSON into one shredded file, and the last rename would
+	// publish the mix (ferret-0vz). With a unique tmp each run writes its own and
+	// the atomic rename publishes exactly one run's events. Matches gen-corpus.
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return nil, err
 	}
 	buf := bufio.NewWriterSize(f, 1<<20)
-	return &Writer{f: f, buf: buf, enc: json.NewEncoder(buf), tmp: tmp, path: path}, nil
+	return &Writer{f: f, buf: buf, enc: json.NewEncoder(buf), tmp: f.Name(), path: path}, nil
 }
 
 func (w *Writer) Write(ev *Event) error { return w.enc.Encode(ev) }

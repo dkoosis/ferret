@@ -98,9 +98,7 @@ func TestWriterHappyPathRenames(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("final artifact missing at path: %v", err)
 	}
-	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
-		t.Errorf("expected no dangling .tmp, stat err=%v", err)
-	}
+	assertNoDanglingTmp(t, path)
 
 	// The landed artifact must be readable back.
 	var n int
@@ -170,8 +168,20 @@ func TestWriterFailLeavesPriorIntact(t *testing.T) {
 	}
 
 	// No dangling .tmp.
-	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
-		t.Errorf("expected .tmp cleaned up after failed run, stat err=%v", err)
+	assertNoDanglingTmp(t, path)
+}
+
+// assertNoDanglingTmp fails if any per-process temp sibling (events.jsonl.*.tmp,
+// the unique pattern NewWriter now creates for ferret-0vz) survives a finished
+// run — the artifact should be published by rename and the tmp removed.
+func assertNoDanglingTmp(t *testing.T, path string) {
+	t.Helper()
+	matches, err := filepath.Glob(path + ".*.tmp")
+	if err != nil {
+		t.Fatalf("glob tmp siblings: %v", err)
+	}
+	if len(matches) > 0 {
+		t.Errorf("expected no dangling .tmp, found %v", matches)
 	}
 }
 

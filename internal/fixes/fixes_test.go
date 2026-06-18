@@ -3,6 +3,7 @@ package fixes
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -65,16 +66,47 @@ func TestLoadMissingLedgerIsEmpty(t *testing.T) {
 	}
 }
 
-// TestLoadCorruptLineErrors: a malformed ledger line is a hard error, not a
-// silent skip — a corrupt ledger that joined as "no fixes" would erase the
-// loop's memory without warning.
-func TestLoadCorruptLineErrors(t *testing.T) {
+// TestLoadCorruptMidLineErrors: a malformed line with valid entries AFTER it is
+// genuine mid-ledger corruption — a hard error, not a silent skip. A corrupt
+// ledger that joined as "no fixes" would erase the loop's memory without warning.
+func TestLoadCorruptMidLineErrors(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "fixes.jsonl")
-	if err := os.WriteFile(path, []byte("{not json}\n"), 0o644); err != nil {
+	body := `{"motif":"a","fix":"x","addedAt":"2026-06-12T09:00:00Z","baselineBurn":1}
+{not json}
+{"motif":"b","fix":"y","addedAt":"2026-06-12T10:00:00Z","baselineBurn":2}
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Load(path); err == nil {
-		t.Error("corrupt ledger line must surface an error, not parse as empty")
+		t.Error("corrupt mid-ledger line must surface an error, not parse as partial")
+	}
+}
+
+// TestLoadSalvagesCorruptTrailingLine: a single corrupt TRAILING line (a torn
+// append) is dropped with a stderr warning while every prior entry still loads —
+// one bad append must not brick all future ledger reads (ferret-020).
+func TestLoadSalvagesCorruptTrailingLine(t *testing.T) {
+	var buf strings.Builder
+	old := stderr
+	stderr = &buf
+	t.Cleanup(func() { stderr = old })
+
+	path := filepath.Join(t.TempDir(), "fixes.jsonl")
+	body := `{"motif":"a","fix":"x","addedAt":"2026-06-12T09:00:00Z","baselineBurn":1}
+{"motif":"b","fix":"y","addedAt":` // truncated mid-record, no newline
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load salvageable ledger: %v", err)
+	}
+	if len(got) != 1 || got[0].Motif != "a" {
+		t.Errorf("expected the one prior entry to survive, got %+v", got)
+	}
+	if !strings.Contains(buf.String(), "corrupt trailing ledger line dropped") {
+		t.Errorf("expected a salvage warning on stderr, got %q", buf.String())
 	}
 }
 
@@ -86,6 +118,31 @@ func TestMotifKey(t *testing.T) {
 	}
 	if got := MotifKey(nil); got != "" {
 		t.Errorf("MotifKey(nil) = %q, want empty", got)
+	}
+}
+
+// TestMotifKeyCollisionFree guards ferret-0vz/s3z: a bare comma-join made
+// ["a,b","c"] and ["a","b,c"] both render "a,b,c", so the ledger's last-wins
+// index silently overwrote one fix with the other. Escaping commas within tokens
+// makes the mapping injective.
+func TestMotifKeyCollisionFree(t *testing.T) {
+	if a, b := MotifKey([]string{"a,b", "c"}), MotifKey([]string{"a", "b,c"}); a == b {
+		t.Errorf("MotifKey collided: both = %q for distinct token sequences", a)
+	}
+}
+
+// TestParseMotifRoundTrip guards ferret-s3z path (a): a spaced --motif must
+// produce the SAME key the report computes from the corpus tokens. The writer
+// runs ParseMotif then MotifKey; the reader runs MotifKey over the corpus tokens
+// — both must land on the identical key or the join silently misses.
+func TestParseMotifRoundTrip(t *testing.T) {
+	writeKey := MotifKey(ParseMotif("Edit!, Read")) // user typed a space after the comma
+	readKey := MotifKey([]string{"Edit!", "Read"})  // report builds this from the corpus
+	if writeKey != readKey {
+		t.Errorf("spaced --motif key %q != report key %q — the join would miss", writeKey, readKey)
+	}
+	if readKey != "Edit!,Read" {
+		t.Errorf("canonical key = %q, want %q", readKey, "Edit!,Read")
 	}
 }
 

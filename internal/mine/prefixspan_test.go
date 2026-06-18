@@ -78,6 +78,42 @@ func TestSeqsSubThresholdExtensionDoesNotSuppress(t *testing.T) {
 	}
 }
 
+// TestSeqsFloorsNonPositiveSupport guards ferret-g2o: MinSupport<=0 made every
+// token a frequent root and every extension clear the floor, exploding the
+// projected-database recursion (the MaxPatterns cap bounds emission, not the
+// descent) → OOM/hang. MineSeqs must floor MinSupport to 1, so MinSupport=0
+// returns the SAME bounded result as MinSupport=1 — and returns at all.
+func TestSeqsFloorsNonPositiveSupport(t *testing.T) {
+	streams := [][]string{
+		{"a", "b", "c", "d"},
+		{"a", "b", "c", "e"},
+		{"a", "b", "x", "d"},
+	}
+	opts := SeqOpts{MaxGap: 3, MaxLen: 5, MaxPatterns: 10000}
+
+	optsZero := opts
+	optsZero.MinSupport = 0
+	gotZero, _ := mineSeqs(t, streams, optsZero)
+
+	optsOne := opts
+	optsOne.MinSupport = 1
+	gotOne, _ := mineSeqs(t, streams, optsOne)
+
+	if len(gotZero) != len(gotOne) {
+		t.Errorf("MinSupport=0 (%d patterns) must equal MinSupport=1 (%d) — floor not applied",
+			len(gotZero), len(gotOne))
+	}
+	if len(gotZero) == 0 {
+		t.Error("floored mine returned no patterns; expected the same bounded set as MinSupport=1")
+	}
+	// Negative support must also floor, not panic or run away.
+	optsNeg := opts
+	optsNeg.MinSupport = -5
+	if gotNeg, _ := mineSeqs(t, streams, optsNeg); len(gotNeg) != len(gotOne) {
+		t.Errorf("MinSupport=-5 (%d) must floor to the MinSupport=1 result (%d)", len(gotNeg), len(gotOne))
+	}
+}
+
 func TestSeqsPatternCap(t *testing.T) {
 	// many distinct frequent pairs with a cap of 1 → truncated must be true
 	got, capped := mineSeqs(t, [][]string{

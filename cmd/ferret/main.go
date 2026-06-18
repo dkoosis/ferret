@@ -33,7 +33,28 @@ var (
 	errBadBy           = errors.New("bad --by (want corpus|project|session)")
 	errMaxBytesJSON    = errors.New("--max-bytes is not supported with --format json (use --limit)")
 	errMaxBytesMD      = errors.New("--max-bytes is not supported with --format md (whole-document output; use --limit)")
+	errMinSupport      = errors.New("--min-support must be ≥ 1 (0 or negative grows the pattern lattice unbounded)")
+	errMaxGap          = errors.New("--max-gap must be ≥ 1")
+	errMaxLen          = errors.New("--max-len must be ≥ 1")
+	errOrder           = errors.New("--order must be ≥ 1")
 )
+
+// validateSeqParams rejects the PrefixSpan bounds that would otherwise blow up
+// the search (ferret-g2o): a non-positive --min-support makes every token a
+// frequent root, and --max-gap/--max-len below 1 are degenerate. Checked at the
+// command boundary — like --format/--n/--by — so a typo errors loudly instead of
+// pinning a core and growing memory until OOM.
+func validateSeqParams(minSupport, maxGap, maxLen int) error {
+	switch {
+	case minSupport < 1:
+		return errMinSupport
+	case maxGap < 1:
+		return errMaxGap
+	case maxLen < 1:
+		return errMaxLen
+	}
+	return nil
+}
 
 // shared JSON response keys — every truncating JSON response carries
 // keyTotal + keyTruncated (the AX truncation contract)
@@ -177,18 +198,29 @@ var CLI struct {
 		Format  string `help:"Output format: text|json." default:"text" name:"format"`
 	} `cmd:"" help:"Deterministic task-boundary candidates (1 per user prompt) + thinking-pivot hints."`
 
+	Candidates struct {
+		Session     string `help:"Session ID prefix. Omit for corpus-recurrence mode (rank task-shapes across all sessions)." name:"session"`
+		Root        string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
+		Format      string `help:"Output format: text|json." default:"text" name:"format"`
+		Top         int    `help:"Max candidate tasks/shapes (0 = all)." default:"10" name:"top"`
+		MinSessions int    `help:"Corpus mode: min distinct sessions a shape must recur in." default:"2" name:"min-sessions"`
+	} `cmd:"" help:"Rank a session's tasks (--session), or recurring task-shapes across the whole corpus (no --session), as cost-leak candidates for the analyst proposal loop."`
+
 	Conformance struct {
 		Spec   string `help:"JSON spec file (reference plan + observed labeled calls); '-' or empty = stdin." name:"spec"`
 		Format string `help:"Output format: text|json." default:"text" name:"format"`
 	} `cmd:"" help:"Score a task's calls against a reference plan: fitness/precision + alignment localizes the deviating call."`
 
 	Adjudicate struct {
-		Session    string `help:"Session ID prefix (required)." required:"" name:"session"`
-		Root       string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
-		Model      string `help:"Claude model ID (default: claude-sonnet-4-6; use claude-opus-4-8 for calibration)." name:"model"`
-		Format     string `help:"Output format: text|json." default:"text" name:"format"`
-		EmitPrompt bool   `help:"Assemble + print the prompt without calling the model (no API key needed)." name:"emit-prompt"`
-	} `cmd:"" help:"LLM analyst: flag tool-for-intent mismatches in a session (precision layer over the spine; dk validates)."`
+		Session    string        `help:"Session ID prefix (required)." required:"" name:"session"`
+		Root       string        `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
+		Model      string        `help:"Claude model ID (default: claude-sonnet-4-6; use claude-opus-4-8 for calibration)." name:"model"`
+		Format     string        `help:"Output format: text|json." default:"text" name:"format"`
+		EmitPrompt bool          `help:"Assemble + print the prompt without calling the model (no API key needed)." name:"emit-prompt"`
+		Propose    bool          `help:"Propose mode: feed the cost-leak candidates + spine and return one fix per task (automate/de-context) instead of mismatch verdicts." name:"propose"`
+		Top        int           `help:"Propose mode: max candidate tasks fed to the analyst (0 = all)." default:"10" name:"top"`
+		Timeout    time.Duration `help:"Operator deadline for the analyst call across all retries (0 = SDK defaults)." default:"5m" name:"timeout"`
+	} `cmd:"" help:"LLM analyst: flag tool-for-intent mismatches in a session, or --propose cost-cutting fixes over the candidates (precision layer; dk validates)."`
 
 	Fixes struct {
 		Add struct {
@@ -243,8 +275,9 @@ func main() {
 				"  ferret tokens   --session PREFIX [--lens tool]\n"+
 				"  ferret spine    --session PREFIX [--root DIR]\n"+
 				"  ferret segments --session PREFIX [--root DIR] [--format text|json]\n"+
+				"  ferret candidates [--session PREFIX | (corpus) --min-sessions 2] [--root DIR] [--top 10] [--format text|json]\n"+
 				"  ferret conformance [--spec FILE] [--format text|json]   (reads stdin if no --spec)\n"+
-				"  ferret adjudicate  --session PREFIX [--model ID] [--emit-prompt] [--format text|json]\n"+
+				"  ferret adjudicate  --session PREFIX [--model ID] [--emit-prompt] [--propose] [--top 10] [--format text|json]\n"+
 				"  ferret fixes add  --motif \"Edit!,Read\" --fix \"hookify read-before-edit\" [--note ...]\n"+
 				"  ferret fixes list [--format json]\n\n"+
 				"common: --data DIR (default ~/.ferret)  --format text|json  --limit N  --max-bytes N\n"+
@@ -278,6 +311,8 @@ func main() {
 		err = cmdSpine()
 	case "segments":
 		err = cmdSegments()
+	case "candidates":
+		err = cmdCandidates()
 	case "conformance":
 		err = cmdConformance()
 	case "adjudicate":
@@ -519,6 +554,14 @@ func ingest(dataDir, root, project string, dryRun bool) error {
 		if err := os.MkdirAll(dataDir, 0o755); err != nil {
 			return err
 		}
+		// Serialize concurrent ingests on the same data dir (ferret-0vz): without
+		// this, two ferret processes both triggered by ensureData would write the
+		// artifact at once.
+		release, lerr := lockData(dataDir)
+		if lerr != nil {
+			return lerr
+		}
+		defer release()
 		w, err = newEventWriter(filepath.Join(dataDir, "events.jsonl"))
 		if err != nil {
 			return err
@@ -542,11 +585,19 @@ func ingest(dataDir, root, project string, dryRun bool) error {
 		}
 	}
 	if w != nil {
-		cerr := w.Close()
-		if err := errors.Join(emitErr, cerr); err != nil {
-			// Partial run: refuse to write a manifest. The atomic Writer never
-			// seals events.jsonl, so no later mine runs on silently-truncated data.
-			return err
+		if emitErr != nil {
+			// Mid-write failure: ABORT (close-without-rename) rather than Close.
+			// Close would flush the bytes written so far, fsync, and rename the
+			// TRUNCATED tmp onto events.jsonl — publishing a partial corpus whose
+			// only safety net is the suppressed manifest (ferret-0m7). Abort drops
+			// the tmp so no partial artifact ever lands.
+			w.Abort()
+			return emitErr
+		}
+		if cerr := w.Close(); cerr != nil {
+			// Close failed: the atomic Writer never sealed events.jsonl, so no
+			// later mine runs on silently-truncated data.
+			return cerr
 		}
 		m := &event.Manifest{CreatedAt: time.Now(), Root: root, Stats: b.Stats}
 		if err := event.WriteManifest(filepath.Join(dataDir, "manifest.json"), m); err != nil {
@@ -723,6 +774,9 @@ func cmdSeqs() error {
 	if err := c.validate("text", fmtJSON); err != nil {
 		return err
 	}
+	if err := validateSeqParams(cmd.MinSupport, cmd.MaxGap, cmd.MaxLen); err != nil {
+		return err
+	}
 	if err := c.ensureData(); err != nil {
 		return err
 	}
@@ -783,6 +837,12 @@ func cmdRank() error {
 	lo := fromLensFlags(cmd.LensFlags)
 	if err := c.validate("text", fmtJSON); err != nil {
 		return err
+	}
+	if err := validateSeqParams(cmd.MinSupport, cmd.MaxGap, cmd.MaxLen); err != nil {
+		return err
+	}
+	if cmd.Order < 1 {
+		return errOrder
 	}
 	if err := c.ensureData(); err != nil {
 		return err
@@ -901,6 +961,12 @@ func cmdReport() error {
 	default:
 		return fmt.Errorf("%w: %q", errBadKind, cmd.Kind)
 	}
+	if err := validateSeqParams(cmd.MinSupport, cmd.MaxGap, cmd.MaxLen); err != nil {
+		return err
+	}
+	if cmd.Order < 1 {
+		return errOrder
+	}
 	if err := c.ensureData(); err != nil {
 		return err
 	}
@@ -966,6 +1032,7 @@ func cmdReport() error {
 			keep = append(keep, f)
 		}
 		findings = keep
+		warnLensDivergence(fixIdx, corpus, findings, suppressed, l.Name())
 	}
 
 	if c.format == fmtJSON {
@@ -1161,13 +1228,17 @@ func cmdFixesAdd() error {
 	if err != nil {
 		return err
 	}
-	motif := strings.TrimSpace(cmd.Motif)
-	if motif == "" {
+	if strings.TrimSpace(cmd.Motif) == "" {
 		return errFixMotifRequired
 	}
+	// Canonicalize the user's --motif through the SAME key path the report uses
+	// (split on comma, trim each token, escape, rejoin) so a spaced or
+	// comma-bearing motif stores the exact key the report later computes from the
+	// corpus tokens — the join cannot drift between write and read.
+	motif := fixes.MotifKey(fixes.ParseMotif(cmd.Motif))
 
 	disp := cmd.Disposition
-	e := fixes.Entry{Motif: motif, Fix: cmd.Fix, Note: cmd.Note, AddedAt: time.Now(), Disposition: disp}
+	e := fixes.Entry{Motif: motif, Fix: cmd.Fix, Note: cmd.Note, AddedAt: time.Now(), Disposition: disp, Lens: cmd.Lens}
 
 	// Only a fix captures a baseline: a wontfix/watch verdict suppresses the
 	// motif from the report rather than measuring a delta, so mining its current
@@ -1244,6 +1315,42 @@ func cmdFixesList() error {
 	return nil
 }
 
+// warnLensDivergence flags fix-ledger entries that matched no finding this run
+// AND were recorded under a different lens than the report is using. Lens
+// transforms change the token strings (mark-fail appends '!', collapse merges
+// runs), so the join key shifts and the fix silently fails to annotate — the
+// exact re-litigation the ledger exists to prevent. A single stderr line points
+// the operator at the lens mismatch rather than leaving the miss invisible.
+func warnLensDivergence(idx map[string]fixes.Entry, corpus *mine.Corpus, kept, suppressed []*mine.Finding, lensName string) {
+	matched := make(map[string]bool, len(kept)+len(suppressed))
+	for _, f := range kept {
+		matched[fixes.MotifKey(corpus.Tokens(f.IDs))] = true
+	}
+	for _, f := range suppressed {
+		matched[fixes.MotifKey(corpus.Tokens(f.IDs))] = true
+	}
+	n := 0
+	for key, e := range idx {
+		if !matched[key] && e.Lens != "" && e.Lens != lensName {
+			n++
+		}
+	}
+	if n > 0 {
+		fmt.Fprintf(os.Stderr,
+			"ferret: %d fix-ledger entr%s recorded under a different lens matched no finding under lens=%s — "+
+				"re-run report with the lens you recorded the fix under, or re-record the fix\n",
+			n, plural(n, "y", "ies"), lensName)
+	}
+}
+
+// plural picks the singular or plural suffix for n.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
 // sinceFixAnnotation joins one finding's motif to the fix ledger index,
 // returning the human-readable annotation suffix and whether a fix matched.
 // Pure (no corpus/disk) so the motif-keyed join + burn-delta formatting is
@@ -1282,6 +1389,9 @@ func cmdSurprise() error {
 	lo := fromLensFlags(cmd.LensFlags)
 	if err := c.validate("text", fmtJSON); err != nil {
 		return err
+	}
+	if cmd.Order < 1 {
+		return errOrder
 	}
 	if err := c.ensureData(); err != nil {
 		return err

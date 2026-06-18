@@ -10,6 +10,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"math/rand"
@@ -139,12 +140,12 @@ func (g *gen) flush() error {
 			return err
 		}
 		sub := strings.Join(g.subLines, "\n") + "\n"
-		if err := writeAtomic(filepath.Join(dir, "agent-"+g.subAgent+".jsonl"), []byte(sub), 0o600); err != nil {
+		if err := writeAtomic(filepath.Join(dir, "agent-"+g.subAgent+".jsonl"), []byte(sub)); err != nil {
 			return err
 		}
 	}
 	body := strings.Join(g.lines, "\n") + "\n"
-	return writeAtomic(filepath.Join(g.projDir, g.session+".jsonl"), []byte(body), 0o600)
+	return writeAtomic(filepath.Join(g.projDir, g.session+".jsonl"), []byte(body))
 }
 
 // writeAtomic writes data to path durably and atomically: it writes to a
@@ -153,7 +154,8 @@ func (g *gen) flush() error {
 // destination is either the prior content (or absent) or the complete new
 // content, never a truncated state. The temp file is removed on any failure so
 // no stray *.tmp artifact is left to poison a corpus consumer.
-func writeAtomic(path string, data []byte, perm os.FileMode) error {
+func writeAtomic(path string, data []byte) error {
+	const perm os.FileMode = 0o600
 	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return err
@@ -184,7 +186,25 @@ func writeAtomic(path string, data []byte, perm os.FileMode) error {
 		return e
 	}
 	renamed = true
-	return nil
+	// fsync the parent dir so the rename itself survives a crash/power-loss —
+	// os.Rename only dirties the dir inode, which a power cut in the dirty window
+	// can lose, taking the just-published file with it. Matches the production
+	// codec's syncDir (internal/event/codec.go); the fixture generator had dropped
+	// it (ferret-xz8).
+	return syncDir(filepath.Dir(path))
+}
+
+// syncDir fsyncs a directory so a just-published rename within it is durable.
+// A package var so a test can observe that writeAtomic invokes it after rename.
+var syncDir = func(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		return errors.Join(err, d.Close())
+	}
+	return d.Close()
 }
 
 // ---- archetypes ----

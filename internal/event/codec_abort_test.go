@@ -59,10 +59,10 @@ func TestWriterAbort_LogsCleanupFailure(t *testing.T) {
 
 	out := hookStderr(t, func() { w.Abort() })
 
-	if len(*calls) != 1 || (*calls)[0] != path+".tmp" {
-		t.Errorf("expected removeFile called once on %q, got %v", path+".tmp", *calls)
+	if len(*calls) != 1 || (*calls)[0] != w.tmp {
+		t.Errorf("expected removeFile called once on %q, got %v", w.tmp, *calls)
 	}
-	if !strings.Contains(out, "events.jsonl.tmp") || !strings.Contains(out, "boom-remove") {
+	if !strings.Contains(out, filepath.Base(w.tmp)) || !strings.Contains(out, "boom-remove") {
 		t.Errorf("expected cleanup failure logged to stderr, got %q", out)
 	}
 }
@@ -90,10 +90,10 @@ func TestWriterClose_LogsCleanupFailure(t *testing.T) {
 	if cerr == nil {
 		t.Fatal("expected Close to fail on interrupted run, got nil")
 	}
-	if len(*calls) != 1 || (*calls)[0] != path+".tmp" {
-		t.Errorf("expected removeFile called once on %q, got %v", path+".tmp", *calls)
+	if len(*calls) != 1 || (*calls)[0] != w.tmp {
+		t.Errorf("expected removeFile called once on %q, got %v", w.tmp, *calls)
 	}
-	if !strings.Contains(out, "events.jsonl.tmp") || !strings.Contains(out, "boom-remove") {
+	if !strings.Contains(out, filepath.Base(w.tmp)) || !strings.Contains(out, "boom-remove") {
 		t.Errorf("expected cleanup failure logged to stderr, got %q", out)
 	}
 }

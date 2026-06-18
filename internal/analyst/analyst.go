@@ -122,25 +122,33 @@ func BuildPrompt(spine string) (system, user string) {
 
 var errNoJSON = errors.New("analyst: model response contained no JSON object")
 
-// ParseFindings extracts the Result.Findings array from a model response,
-// tolerating ```json fences and leading/trailing prose (a guardrail in case the
-// model ignores "JSON only"). It locates the first '{' and last '}' and decodes
-// the span between them. Exported so response parsing is unit-testable
-// independent of the network.
-func ParseFindings(resp string) ([]Finding, error) {
+// decodeFirstObject decodes the FIRST complete JSON object in a model response
+// into v, tolerating ```json fences and surrounding prose (a guardrail in case
+// the model ignores "JSON only"). It finds the first '{' and streams one object
+// with a json.Decoder, which stops at that object's closing brace and ignores
+// whatever follows. The old first-'{' … last-'}' span over-captured when trailing
+// prose itself contained a '}' (e.g. "...use `gofmt {}`."), grabbing the wrong
+// closer and failing the whole parse — discarding a successful, paid-for model
+// call (ferret-001). Shared by ParseFindings and ParseProposals.
+func decodeFirstObject(resp string, v any) error {
 	s := strings.TrimSpace(resp)
 	s = strings.TrimPrefix(s, "```json")
 	s = strings.TrimPrefix(s, "```")
 	s = strings.TrimSuffix(s, "```")
 	start := strings.Index(s, "{")
-	end := strings.LastIndex(s, "}")
-	if start < 0 || end < start {
-		return nil, errNoJSON
+	if start < 0 {
+		return errNoJSON
 	}
+	return json.NewDecoder(strings.NewReader(s[start:])).Decode(v)
+}
+
+// ParseFindings extracts the Result.Findings array from a model response.
+// Exported so response parsing is unit-testable independent of the network.
+func ParseFindings(resp string) ([]Finding, error) {
 	var env struct {
 		Findings []Finding `json:"findings"`
 	}
-	if err := json.Unmarshal([]byte(s[start:end+1]), &env); err != nil {
+	if err := decodeFirstObject(resp, &env); err != nil {
 		return nil, err
 	}
 	return env.Findings, nil

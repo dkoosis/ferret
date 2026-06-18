@@ -163,7 +163,7 @@ func TestWriteAtomic_PreservesExistingFile_When_RenameFails(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
-	err := writeAtomic(dest, []byte("torn"), 0o600)
+	err := writeAtomic(dest, []byte("torn"))
 	if err == nil {
 		t.Fatal("writeAtomic: expected error with read-only parent dir, got nil")
 	}
@@ -187,5 +187,27 @@ func TestWriteAtomic_PreservesExistingFile_When_RenameFails(t *testing.T) {
 		if strings.HasSuffix(e.Name(), ".tmp") {
 			t.Fatalf("stray tmp artifact left after failed write: %s", e.Name())
 		}
+	}
+}
+
+// TestWriteAtomicSyncsParentDir guards ferret-xz8: the production codec fsyncs
+// the parent dir after rename so the publish survives a crash/power-loss (the
+// rename only dirties the dir inode), and the fixture generator had dropped it.
+// writeAtomic must call syncDir on the destination's parent after a successful
+// rename.
+func TestWriteAtomicSyncsParentDir(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "out.jsonl")
+
+	var synced string
+	orig := syncDir
+	syncDir = func(d string) error { synced = d; return nil }
+	t.Cleanup(func() { syncDir = orig })
+
+	if err := writeAtomic(dest, []byte("payload\n")); err != nil {
+		t.Fatalf("writeAtomic: %v", err)
+	}
+	if synced != dir {
+		t.Errorf("syncDir called with %q, want parent dir %q (rename not made durable)", synced, dir)
 	}
 }

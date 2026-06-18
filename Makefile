@@ -12,7 +12,7 @@ SHELL := /bin/bash
 include .sandbox/lib/Makefile.doctor.mk
 include .sandbox/lib/Makefile.cross.mk
 
-.PHONY: help check audit vet lint test race build vuln dupe nilcheck install clean corpus
+.PHONY: help check audit vet lint test race build vuln dupe nilcheck install deploy clean corpus
 
 # Serialize golangci-lint through the machine-global mkdir mutex (see script
 # header — golangci-lint's cache lock fails exit-3 on contention instead of
@@ -72,6 +72,9 @@ nilcheck: ## Run nilaway (skips if not installed)
 
 install: ## Install ferret to GOPATH/bin
 	go install ./cmd/ferret
+
+deploy: build install ## Build, then install ferret to GOPATH/bin
+	@echo "=== deployed (ferret installed to $$(go env GOPATH)/bin) ==="
 
 clean: ## Remove built binary + sandbox build artifacts
 	@rm -f ferret
