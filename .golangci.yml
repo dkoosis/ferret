@@ -85,6 +85,11 @@ linters:
     - wsl
 
   settings:
+    exhaustive:
+      # A default clause signifies the remaining enum cases are consciously
+      # handled — required for subset switches (e.g. dialogue.Move v1 handles
+      # repair/accept and defaults the neutral + reserved-v2 cases).
+      default-signifies-exhaustive: true
     errcheck:
       exclude-functions:
         - (io.Closer).Close
