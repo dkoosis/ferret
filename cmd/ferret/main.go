@@ -198,6 +198,12 @@ var CLI struct {
 		Format  string `help:"Output format: text|json." default:"text" name:"format"`
 	} `cmd:"" help:"Deterministic task-boundary candidates (1 per user prompt) + thinking-pivot hints."`
 
+	Dialogue struct {
+		Session string `help:"Session ID prefix (required)." required:"" name:"session"`
+		Root    string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
+		Format  string `help:"Output format: text|json." default:"text" name:"format"`
+	} `cmd:"" help:"Tag user turns: per-turn repair/accept moves + PARADISE outcome rollup (regex-first; v1)."`
+
 	Candidates struct {
 		Session     string `help:"Session ID prefix. Omit for corpus-recurrence mode (rank task-shapes across all sessions)." name:"session"`
 		Root        string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
@@ -275,6 +281,7 @@ func main() {
 				"  ferret tokens   --session PREFIX [--lens tool]\n"+
 				"  ferret spine    --session PREFIX [--root DIR]\n"+
 				"  ferret segments --session PREFIX [--root DIR] [--format text|json]\n"+
+				"  ferret dialogue --session PREFIX [--root DIR] [--format text|json]\n"+
 				"  ferret candidates [--session PREFIX | (corpus) --min-sessions 2] [--root DIR] [--top 10] [--format text|json]\n"+
 				"  ferret conformance [--spec FILE] [--format text|json]   (reads stdin if no --spec)\n"+
 				"  ferret adjudicate  --session PREFIX [--model ID] [--emit-prompt] [--propose] [--top 10] [--format text|json]\n"+
@@ -311,6 +318,8 @@ func main() {
 		err = cmdSpine()
 	case "segments":
 		err = cmdSegments()
+	case "dialogue":
+		err = cmdDialogue()
 	case "candidates":
 		err = cmdCandidates()
 	case "conformance":
