@@ -54,8 +54,8 @@ func TestBuildPoolIsRankBlind(t *testing.T) {
 	// anchor on position. With a fixed seed we get a deterministic permutation;
 	// assert it is not the identity order for a pool big enough to shuffle.
 	ep := Episode{Name: "e"}
-	var store []NugCandidate
-	for i := 0; i < 12; i++ {
+	store := make([]NugCandidate, 0, 12)
+	for i := range 12 {
 		store = append(store, NugCandidate{ID: string(rune('a' + i))})
 	}
 	pool := BuildPool(ep, store, 100, rand.New(rand.NewSource(42)))

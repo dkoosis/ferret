@@ -103,10 +103,7 @@ func BuildPool(ep Episode, store []NugCandidate, sampleN int, rng *rand.Rand) []
 // (grade >= relevantGrade). The denominator is min(k, len(returned)) — precision
 // over what was actually shown. Empty returned → 0.
 func PrecisionAtK(returned []string, grades map[string]RelGrade, k int) float64 {
-	n := k
-	if len(returned) < n {
-		n = len(returned)
-	}
+	n := min(len(returned), k)
 	if n == 0 {
 		return 0
 	}
@@ -153,10 +150,7 @@ func Recall(returned []string, poolGrades map[string]RelGrade) float64 {
 // returned grades sorted descending; nDCG = DCG/IDCG. All-zero relevance →
 // IDCG=0 → return 0 (not NaN).
 func NDCGAtK(returned []string, grades map[string]RelGrade, k int) float64 {
-	n := k
-	if len(returned) < n {
-		n = len(returned)
-	}
+	n := min(len(returned), k)
 	if n == 0 {
 		return 0
 	}
