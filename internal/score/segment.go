@@ -72,6 +72,10 @@ type Segment struct {
 	Shape     []string `json:"shape,omitempty"`    // ordered tool-shape tokens of the calls this task owns — the cross-session recurrence key (kuv.12)
 	Pivots    []Pivot  `json:"pivots,omitempty"`
 	Conts     []Cont   `json:"conts,omitempty"`
+	// Outcome is a WEAK, deterministic positive-outcome label for this task — set
+	// only when the task owns a terminal VCS action (commit/push/PR). nil = no
+	// signal (NOT a negative label; absence is silence). See outcome.go. (kuv.8)
+	Outcome *Outcome `json:"outcome,omitempty"`
 }
 
 // Result is the whole segmentation emission for one session — the shared per-task
@@ -452,7 +456,13 @@ func SegmentSource(src transcript.Source) (Result, error) {
 	}); err != nil {
 		return Result{}, err
 	}
-	return sm.result(src), nil
+	res := sm.result(src)
+	// Annotate each task with the weak terminal-action outcome label so it rides
+	// the per-task scaffold every consumer reads (segments output, conformance,
+	// quality axes). A pure post-pass over Segment.Shape — kept out of the
+	// segmenter so the boundary logic stays single-purpose (kuv.8).
+	LabelOutcomes(&res)
+	return res, nil
 }
 
 // collapseWS folds any run of whitespace (including newlines) into single spaces

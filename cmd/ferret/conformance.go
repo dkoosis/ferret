@@ -11,6 +11,7 @@ import (
 
 	"github.com/dkoosis/ferret/internal/conform"
 	"github.com/dkoosis/ferret/internal/out"
+	"github.com/dkoosis/ferret/internal/score"
 )
 
 var (
@@ -37,6 +38,13 @@ type conformSpec struct {
 	Task      string            `json:"task,omitempty"`
 	Reference []string          `json:"reference"`
 	Observed  []conform.ObsCall `json:"observed"`
+	// Outcome is the optional WEAK terminal-action success label for this task,
+	// carried over from the segments scaffold (score.LabelOutcomes, kuv.8). It is
+	// reported alongside the conformance verdict as ONE WEAK FEATURE and is
+	// DELIBERATELY NOT folded into fitness/precision — conform's "naive success
+	// label" (see internal/conform/conform.go header) stays a separate, weaker
+	// signal than the alignment, never a reweight of it. nil = no signal.
+	Outcome *score.Outcome `json:"outcome,omitempty"`
 }
 
 // cmdConformance wires the kong CLI flags to conformance().
@@ -103,6 +111,7 @@ func writeConformanceJSON(w io.Writer, spec conformSpec, res conform.Result) err
 		"offPlan":     res.LogMoves,
 		"noise":       res.Noise,
 		"flowerModel": flowerModel(res),
+		"outcome":     spec.Outcome, // weak terminal-action label; not scored (kuv.8)
 		"moves":       res.Moves,
 	})
 }
@@ -149,6 +158,12 @@ func writeConformanceText(w io.Writer, spec conformSpec, res conform.Result) err
 		}
 	}
 
+	if spec.Outcome != nil && spec.Outcome.Positive {
+		// WEAK success hint (kuv.8), reported beside the verdict but NOT scored:
+		// the task ended in a terminal VCS action. A commit can be WIP and a push
+		// reverted, so this never adjusts fitness/precision — dk's labels rule.
+		fmt.Fprintf(bw, "outcome: shipped~weak (terminal action %s — NOT scored)\n", spec.Outcome.Signal)
+	}
 	fmt.Fprintf(bw, "deviations: %d skipped step(s), %d off-plan call(s)\n", res.ModelMoves, res.LogMoves)
 	if flowerModel(res) {
 		fmt.Fprintf(bw,

@@ -107,6 +107,7 @@ func writeSegmentsText(w io.Writer, res score.Result) error {
 		if seg.Prompt != "" {
 			fmt.Fprintf(bw, "  prompt: %s", truncateRunes(seg.Prompt, spineTextCap))
 		}
+		fmt.Fprint(bw, outcomeNote(*seg))
 		fmt.Fprintln(bw)
 		for _, p := range seg.Pivots {
 			fmt.Fprintf(bw, "  [pivot] think#%d  cue=%q\n", p.Think, p.Cue)
@@ -128,6 +129,16 @@ func writeSegmentsText(w io.Writer, res score.Result) error {
 	}
 	fmt.Fprintln(bw)
 	return bw.Flush()
+}
+
+// outcomeNote renders the WEAK terminal-action success flag (kuv.8) as a trailing
+// note, or "" when the task shipped nothing. NOT ground truth — a hint beside the
+// segment, never a verdict; absence is silence, not a failure label.
+func outcomeNote(seg score.Segment) string {
+	if seg.Outcome == nil || !seg.Outcome.Positive {
+		return ""
+	}
+	return "  [outcome:shipped~weak] " + seg.Outcome.Signal
 }
 
 // callRange renders a segment's owned tool-call index span, or "none".
