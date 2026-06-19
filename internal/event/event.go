@@ -27,6 +27,10 @@ type Event struct {
 	Plugin    string    `json:"plug,omitempty"`
 	MCP       string    `json:"mcp,omitempty"`
 	Version   string    `json:"v,omitempty"`
+	// Prompt is the full, untruncated user-turn text — only set on KindPrompt
+	// events. Captured at ingestion so a downstream consumer can do linguistic /
+	// query-quality analysis without re-parsing raw transcripts (ferret-d01).
+	Prompt string `json:"q,omitempty"`
 }
 
 const (
