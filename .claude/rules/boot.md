@@ -2,16 +2,20 @@
 updated: 2026-06-19
 
 ## lane: TersePanda
+updated: 2026-06-19
 
-→ `bd ready` → sq.2 (golden set + relevance judge, now unblocked); then kuv.5, d28.
+→ **Watch PR#44 (kuv.5)** for bot/codex review; on merge `bd close ferret-kuv.5 --reason "merged #44"` (still claimed/in_progress, close-on-merge). Then next ready: **kuv.10** (landmark progress, plan_approved) or **d28** impl half (in_progress, dk-assigned).
+→ ‡ dk to rule on kuv.5 DEVIATION: pass^k consistency computed over per-task COST (1−CV), NOT efficiency as the plan said — under exact-Shape clustering the axes are shape-determined → spread~0 → decorative 1.0. Flagged in PR#44 + quality.go doc-comment. If dk rejects, swap the consistency scalar.
 
-✓ Merged #35–#39 (score-boot, sq.d0, gates, kuv.8, sq.1); 5 beads closed; boot+interactions → PR#40 (unmerged).
+✓ #41 merged (sq.2 judge + golden + d28 spec). Built kuv.5 → PR#44: internal/score/quality.go (ScoreAxes per-task eff/adapt + ClusterByShape pass^k) + mine.MeanStdDev shared σ (Q3) + `ferret quality` 2-scope cmd. make check green, score cov 93.1%, race clean. `@codex review` requested.
+✓ earlier: merged #35–#39; 5 beads closed.
 
 ‡ traps
-- wave2 lanes all add to cmd/ferret/main.go CLI → worktree-isolate, merge cross-pkg (sq.1) last.
-- worktree agents leave dupe files in shared tree — `git checkout main.go` + rm untracked pre-pull.
+- kuv.5 lives in WORKTREE /Users/vcto/Projects/ferret/ferret-kuv.5 (branch ferret-kuv.5, pushed). `.gitignore` ignores the dir. ✗ leave stray dispatch logs (docs/.../ferret-kuv.5/stage-*.log) in commits.
+- PRE-EXISTING nilaway debt: internal/gates/gates.go:242 + internal/analyst/golden.go:111 (from #37/#41). NOT mine; `make check` doesn't gate on it (`audit` does). Don't chase as a kuv.5 regression.
+- wave2 lanes all add to cmd/ferret/main.go CLI → worktree-isolate.
 
-~ dk: dry fenced grants, zero corrections — trust-the-loop.
+~ dk: dry fenced grants, zero corrections — trust-the-loop. Surface deviations, don't ask permission mid-build.
 
 ## lane: PlaidSparrow
 
