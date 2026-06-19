@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/dkoosis/ferret/internal/score"
 	"github.com/dkoosis/ferret/internal/transcript"
 )
 
@@ -138,7 +139,7 @@ func aggregateCorpus(root string) (aggs map[string]*shapeAgg, sessions, tasks, d
 	}
 	aggs = map[string]*shapeAgg{}
 	for _, src := range srcs {
-		res, serr := segmentSource(src)
+		res, serr := score.SegmentSource(src)
 		if serr != nil {
 			continue
 		}
@@ -152,7 +153,7 @@ func aggregateCorpus(root string) (aggs map[string]*shapeAgg, sessions, tasks, d
 // foldSession clusters one session's costed tasks into the shape aggregates and
 // returns the number it counted (the preamble and zero-cost/shapeless tasks are
 // skipped). Split out of aggregateCorpus to keep that walk flat.
-func foldSession(aggs map[string]*shapeAgg, res segResult) (counted int) {
+func foldSession(aggs map[string]*shapeAgg, res score.Result) (counted int) {
 	for i := range res.Segments {
 		seg := &res.Segments[i]
 		if seg.Index == 0 {

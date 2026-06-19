@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"sort"
+
+	"github.com/dkoosis/ferret/internal/score"
 )
 
 // Candidates is Phase 1 of the metrics-engine→analyst loop (ferret-567 step 4).
@@ -92,7 +94,7 @@ func scoreCandidate(inBytes, outBytes, pivots int) (score, outWeight float64) {
 // they leak nothing to automate or de-context — and the synthetic preamble
 // (Index 0) is excluded. Sorted by score descending, with deterministic
 // tie-breaks (cost desc, then task index asc) so repeated runs are byte-stable.
-func rankCandidates(res segResult) candResult {
+func rankCandidates(res score.Result) candResult {
 	out := candResult{
 		Session:   res.Session,
 		Project:   res.Project,
@@ -139,7 +141,7 @@ func rankCandidates(res segResult) candResult {
 
 // segCallCount returns the number of tool calls a segment owns (0 when it owns
 // none — FirstCall is -1).
-func segCallCount(seg segment) int {
+func segCallCount(seg score.Segment) int {
 	if seg.FirstCall == -1 {
 		return 0
 	}
