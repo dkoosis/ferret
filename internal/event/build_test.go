@@ -86,6 +86,48 @@ func TestBurnBytesCaptureInputPlusResult(t *testing.T) {
 	}
 }
 
+// TestGetNugQueryEpisodeCapture is the Decision-0 contract (ferret-sq.d0): a
+// query-mode get_nug call captures its full query plus the returned nug ids and
+// per-query scores in rank (result) order, a hit missing a score gets zero, a
+// by-id fetch captures neither, and an errored/non-array result yields no hits.
+func TestGetNugQueryEpisodeCapture(t *testing.T) {
+	// result body = array-of-blocks whose text is the get_nug hit JSON array.
+	hits := `[{"type":"text","text":"[{\"id\":\"aaa\",\"score\":0.5},{\"id\":\"bbb\",\"score\":0.3},{\"id\":\"ccc\"}]"}]`
+	src := writeTranscript(t,
+		toolUse("u1", "t1", toolGetNug, `{"query":"memory design","limit":5}`),
+		toolResultContent("u2", "t1", hits),
+		toolUse("u3", "t2", toolGetNug, `{"id":"1fe653da94e4"}`), // by-id fetch
+		toolResultContent("u4", "t2", `"some nug body"`),
+		toolUse("u5", "t3", toolGetNug, `{"query":"timed out one"}`),
+		toolResultContent("u6", "t3", `"The operation timed out."`), // error → no hits
+	)
+	evs := ingest(t, src)
+	if len(evs) != 3 {
+		t.Fatalf("events = %d, want 3", len(evs))
+	}
+
+	q := evs[0]
+	if q.Query != "memory design" {
+		t.Errorf("query = %q, want %q", q.Query, "memory design")
+	}
+	want := []NugHit{{ID: "aaa", Score: 0.5}, {ID: "bbb", Score: 0.3}, {ID: "ccc"}}
+	if len(q.Results) != len(want) {
+		t.Fatalf("results = %+v, want %+v", q.Results, want)
+	}
+	for i, w := range want {
+		if q.Results[i] != w {
+			t.Errorf("result[%d] = %+v, want %+v (rank order + score)", i, q.Results[i], w)
+		}
+	}
+
+	if byID := evs[1]; byID.Query != "" || byID.Results != nil {
+		t.Errorf("by-id fetch captured query=%q results=%+v, want neither", byID.Query, byID.Results)
+	}
+	if errored := evs[2]; errored.Query != "timed out one" || errored.Results != nil {
+		t.Errorf("errored episode = query %q / results %+v, want query set, no hits", errored.Query, errored.Results)
+	}
+}
+
 func TestBurnBytesSplitAcrossCompoundSegments(t *testing.T) {
 	// One result resolves a 2-segment chain: its payload is split across both.
 	content := `"01234567"` // 10 bytes → 5 each

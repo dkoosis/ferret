@@ -228,6 +228,12 @@ func (b *Builder) resolve(st *fileState, blk *transcript.Block, ts time.Time) {
 	if last := evs[n-1]; isSnipe(last) && snipeApprox(blk.Content) {
 		last.Approx = true
 	}
+	// A query-mode get_nug event (single, non-compound) captures its returned nug
+	// hits in rank order from the result envelope — the retrieval half of the
+	// episode (ferret-sq.d0). An errored/empty result yields no hits.
+	if n == 1 && evs[0].Query != "" {
+		evs[0].Results = parseNugHits(blk.Content)
+	}
 	b.resolved[blk.ToolUseID] = struct{}{}
 	delete(st.pending, blk.ToolUseID)
 	delete(st.callTime, blk.ToolUseID)
@@ -303,7 +309,56 @@ func (b *Builder) fromToolUse(src transcript.Source, raw *transcript.Raw, blk *t
 	ev.Action = blk.Name
 	ev.Target = target(input)
 	ev.Bytes = len(blk.Input)
+	ev.Query = getNugQuery(blk.Name, input)
 	return []*Event{&ev}
+}
+
+// toolGetNug is the trixi search tool whose query-mode calls are retrieval
+// episodes (ferret-sq.d0). By-id fetches of the same tool carry no query arg.
+const toolGetNug = "mcp__trixi__get_nug"
+
+// getNugQuery returns the full search string of a query-mode get_nug call, or ""
+// for any other tool or a by-id fetch. A non-empty return marks the event as a
+// retrieval episode whose result ids/scores resolve() captures into Results.
+func getNugQuery(name string, input map[string]any) string {
+	if name != toolGetNug {
+		return ""
+	}
+	q, _ := input["query"].(string)
+	return strings.TrimSpace(q)
+}
+
+// parseNugHits extracts the returned nug hits from a get_nug tool_result, in rank
+// (result) order. The result body is a JSON array of hit objects, each with an
+// "id" and a per-query "score"; an error/timeout result (a bare string) or any
+// non-array body yields no hits. Score is captured as-is — zero when a hit omits
+// it — so all rank-keyed metrics work and the score-distribution metric is unblocked.
+func parseNugHits(content json.RawMessage) []NugHit {
+	text, ok := resultText(content)
+	if !ok {
+		return nil
+	}
+	if text = strings.TrimSpace(text); text == "" || text[0] != '[' {
+		return nil
+	}
+	var raw []struct {
+		ID    string  `json:"id"`
+		Score float64 `json:"score"`
+	}
+	if json.Unmarshal([]byte(text), &raw) != nil {
+		return nil
+	}
+	hits := make([]NugHit, 0, len(raw))
+	for _, r := range raw {
+		if r.ID == "" {
+			continue
+		}
+		hits = append(hits, NugHit{ID: r.ID, Score: r.Score})
+	}
+	if len(hits) == 0 {
+		return nil
+	}
+	return hits
 }
 
 // target pulls the most identifying input field, by priority.

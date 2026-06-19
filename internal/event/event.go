@@ -31,6 +31,25 @@ type Event struct {
 	// events. Captured at ingestion so a downstream consumer can do linguistic /
 	// query-quality analysis without re-parsing raw transcripts (ferret-d01).
 	Prompt string `json:"q,omitempty"`
+	// Query and Results capture a query-mode get_nug retrieval episode (ferret-sq.d0,
+	// spec Decision 0) — set only on KindTool mcp__trixi__get_nug calls that carry a
+	// query argument. By-id fetches (~55% of get_nug calls) carry neither. Query is
+	// the full search string Claude sent; Results are the returned nug hits in rank
+	// (result) order. Captured once at ingest, omitempty, no migration — the d01 way.
+	Query   string   `json:"qq,omitempty"`
+	Results []NugHit `json:"rs,omitempty"`
+}
+
+// NugHit is one returned nug in a get_nug result, in rank order (slice position
+// is the rank). ID is the nug id; Score is the per-query match score read straight
+// from the result envelope. The spec's Decision 0 assumed the CC log carried no
+// per-hit score; the real envelope does (a descending per-query score distinct
+// from the static meta.trixiQuality), so it is captured — Score is zero/omitted
+// only when a given hit or result lacks one. This unblocks the score-distribution
+// metric (R3b/NQC) the spec deferred.
+type NugHit struct {
+	ID    string  `json:"id"`
+	Score float64 `json:"sc,omitempty"`
 }
 
 const (
