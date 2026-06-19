@@ -1,0 +1,20 @@
+go vet ./...
+bash scripts/lint-locked run ./...
+0 issues.
+go test -cover ./...
+ok  	github.com/dkoosis/ferret/cmd/ferret	0.660s	coverage: 39.6% of statements
+ok  	github.com/dkoosis/ferret/cmd/gen-corpus	(cached)	coverage: 22.3% of statements
+ok  	github.com/dkoosis/ferret/internal/analyst	(cached)	coverage: 82.2% of statements
+ok  	github.com/dkoosis/ferret/internal/conform	(cached)	coverage: 100.0% of statements
+ok  	github.com/dkoosis/ferret/internal/dialogue	(cached)	coverage: 97.8% of statements
+ok  	github.com/dkoosis/ferret/internal/event	(cached)	coverage: 83.2% of statements
+ok  	github.com/dkoosis/ferret/internal/fixes	(cached)	coverage: 87.7% of statements
+ok  	github.com/dkoosis/ferret/internal/gates	(cached)	coverage: 93.5% of statements
+ok  	github.com/dkoosis/ferret/internal/lens	(cached)	coverage: 43.1% of statements
+ok  	github.com/dkoosis/ferret/internal/mine	(cached)	coverage: 80.0% of statements
+ok  	github.com/dkoosis/ferret/internal/out	(cached)	coverage: 70.0% of statements
+ok  	github.com/dkoosis/ferret/internal/score	0.584s	coverage: 93.1% of statements
+ok  	github.com/dkoosis/ferret/internal/shellnorm	(cached)	coverage: 67.1% of statements
+ok  	github.com/dkoosis/ferret/internal/transcript	(cached)	coverage: 50.0% of statements
+go build ./...
+=== check pass ===

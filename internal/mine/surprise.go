@@ -100,16 +100,34 @@ func MeanBits(scores []StreamScore) float64 {
 // as friction. Requiring a full σ of EXCESS surprise flips only routines whose
 // host sessions are genuine outliers — a true "loop wearing a routine's clothes".
 func FrictionCut(scores []StreamScore) float64 {
-	m := MeanBits(scores)
-	if len(scores) == 0 {
-		return m
+	bits := make([]float64, len(scores))
+	for i, s := range scores {
+		bits[i] = s.Bits
 	}
+	m, sd := MeanStdDev(bits)
+	return m + sd
+}
+
+// MeanStdDev returns the population mean and standard deviation of xs (both 0 for
+// empty input, std 0 for a single element). It is the shared spread primitive so
+// callers that need a variance metric — FrictionCut's σ-above-mean cut here and
+// the pass^k consistency spread in internal/score — compute it one way instead of
+// each reinventing it (ferret-kuv.5 Q3: extend this, do not add a parallel σ).
+func MeanStdDev(xs []float64) (mean, std float64) {
+	if len(xs) == 0 {
+		return 0, 0
+	}
+	sum := 0.0
+	for _, x := range xs {
+		sum += x
+	}
+	mean = sum / float64(len(xs))
 	v := 0.0
-	for _, s := range scores {
-		d := s.Bits - m
+	for _, x := range xs {
+		d := x - mean
 		v += d * d
 	}
-	return m + math.Sqrt(v/float64(len(scores)))
+	return mean, math.Sqrt(v / float64(len(xs)))
 }
 
 // trainGrams counts every packed id sequence of length 1..order+1.

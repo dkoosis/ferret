@@ -76,6 +76,10 @@ type Segment struct {
 	// only when the task owns a terminal VCS action (commit/push/PR). nil = no
 	// signal (NOT a negative label; absence is silence). See outcome.go. (kuv.8)
 	Outcome *Outcome `json:"outcome,omitempty"`
+	// Axes is the per-task reference-free quality block (efficiency/adaptivity),
+	// set by ScoreAxes in place. nil until scored (mirrors *Outcome). See
+	// quality.go. (kuv.5)
+	Axes *Axes `json:"axes,omitempty"`
 }
 
 // Result is the whole segmentation emission for one session — the shared per-task
