@@ -13,6 +13,17 @@ updated: 2026-06-19
 
 ~ dk: dry fenced grants, zero corrections — trust-the-loop.
 
+## lane: PlaidSparrow
+
+→ verify agent_id/agent_type lands on ferret's capture-hook event (Python-vs-TS field split), then wire it as the parent-vs-subagent key for d01/bbp get_nug + user-turn attribution.
+
+✓ Board-readable get_nug improvement-flow write-up → nug `a55d63b61ddb`; confirmed Q3 (prompt→query) + bbp (repair/acceptance) as the two frontier legs over the shipped det/judged scorers.
+
+‡ traps
+- CC hooks: session_id + transcript_path are SHARED parent↔subagent; only agent_id/agent_type discriminate (SubagentStop also carries agent_transcript_path).
+
+~ dk: research/divergent session — light-touch steering questions, zero corrections.
+
 ## lane: NullMerlin
 
 → Watch PR#34 (ferret-d01) for bot review (like #33); on merge `bd close ferret-d01`, then bbp analysis follow-ons.
