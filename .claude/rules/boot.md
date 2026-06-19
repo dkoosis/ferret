@@ -5,7 +5,7 @@ updated: 2026-06-19
 updated: 2026-06-19
 
 → **Watch PR#44 (kuv.5)** for bot/codex review; on merge `bd close ferret-kuv.5 --reason "merged #44"` (still claimed/in_progress, close-on-merge). Then next ready: **kuv.10** (landmark progress, plan_approved) or **d28** impl half (in_progress, dk-assigned).
-→ ‡ dk to rule on kuv.5 DEVIATION: pass^k consistency computed over per-task COST (1−CV), NOT efficiency as the plan said — under exact-Shape clustering the axes are shape-determined → spread~0 → decorative 1.0. Flagged in PR#44 + quality.go doc-comment. If dk rejects, swap the consistency scalar.
+✓ kuv.5 consistency scalar DECIDED (dk, 2026-06-19): per-task COST (1−CV), not efficiency. Plan+code+docs ratified (commits fd50002/18f27e9 + doc reframe). ✗ re-surface.
 
 ✓ #41 merged (sq.2 judge + golden + d28 spec). Built kuv.5 → PR#44: internal/score/quality.go (ScoreAxes per-task eff/adapt + ClusterByShape pass^k) + mine.MeanStdDev shared σ (Q3) + `ferret quality` 2-scope cmd. make check green, score cov 93.1%, race clean. `@codex review` requested.
 ✓ earlier: merged #35–#39; 5 beads closed.
