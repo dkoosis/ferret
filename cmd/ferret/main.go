@@ -221,6 +221,11 @@ var CLI struct {
 		CommonFlags
 	} `cmd:"" help:"Mine review gates (code-review/plan-review/precommit/QA): per-gate rejection sets + overlap ratio ω (high ω = redundant gate) + confirmed friction loops."`
 
+	Retrieval struct {
+		CommonFlags
+		Session string `help:"Only episodes from sessions matching this prefix/substring (omit for whole corpus)." name:"session"`
+	} `cmd:"" help:"Score get_nug retrieval episodes: RU northstar (consumed/firsttry/nonabandon) + det Q/R/C scorers."`
+
 	Adjudicate struct {
 		Session    string        `help:"Session ID prefix (required)." required:"" name:"session"`
 		Root       string        `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
@@ -289,6 +294,7 @@ func main() {
 				"  ferret candidates [--session PREFIX | (corpus) --min-sessions 2] [--root DIR] [--top 10] [--format text|json]\n"+
 				"  ferret conformance [--spec FILE] [--format text|json]   (reads stdin if no --spec)\n"+
 				"  ferret gates    [--data DIR] [--format text|json]   (overlap ratio ω over review-gate rejections)\n"+
+				"  ferret retrieval  [--session PREFIX] [--format text|json]   (get_nug search quality: RU + Q/R/C)\n"+
 				"  ferret adjudicate  --session PREFIX [--model ID] [--emit-prompt] [--propose] [--top 10] [--format text|json]\n"+
 				"  ferret fixes add  --motif \"Edit!,Read\" --fix \"hookify read-before-edit\" [--note ...]\n"+
 				"  ferret fixes list [--format json]\n\n"+
@@ -331,6 +337,8 @@ func main() {
 		err = cmdConformance()
 	case "gates":
 		err = cmdGates()
+	case "retrieval":
+		err = cmdRetrieval()
 	case "adjudicate":
 		err = cmdAdjudicate()
 	case "fixes add":
