@@ -4,15 +4,14 @@ updated: 2026-06-19
 ## lane: TersePanda
 updated: 2026-06-19
 
-→ **Watch PR#44 (kuv.5)** for bot/codex review; on merge `bd close ferret-kuv.5 --reason "merged #44"` (still claimed/in_progress, close-on-merge). Then next ready: **kuv.10** (landmark progress, plan_approved) or **d28** impl half (in_progress, dk-assigned).
-✓ kuv.5 consistency scalar DECIDED (dk, 2026-06-19): per-task COST (1−CV), not efficiency. Plan+code+docs ratified (commits fd50002/18f27e9 + doc reframe). ✗ re-surface.
+→ next ready: **kuv.10** (landmark progress, plan_approved). Dispatch when picked.
 
-✓ #41 merged (sq.2 judge + golden + d28 spec). Built kuv.5 → PR#44: internal/score/quality.go (ScoreAxes per-task eff/adapt + ClusterByShape pass^k) + mine.MeanStdDev shared σ (Q3) + `ferret quality` 2-scope cmd. make check green, score cov 93.1%, race clean. `@codex review` requested.
+✓ kuv.5 MERGED (#44) + bead closed; worktree/branch pruned; main @ 77e891d. Consistency scalar = per-task COST (1−CV), not efficiency — dk-ratified plan modification (exact-Shape → axes shape-determined → spread~0). Plan+code+docs agree. ✗ re-surface.
+✓ #41 merged (sq.2 judge + golden + d28 spec) → **d28 closed**. kuv.5: internal/score/quality.go (ScoreAxes per-task eff/adapt + ClusterByShape pass^k) + mine.MeanStdDev shared σ (Q3) + `ferret quality` 2-scope cmd.
 ✓ earlier: merged #35–#39; 5 beads closed.
 
 ‡ traps
-- kuv.5 lives in WORKTREE /Users/vcto/Projects/ferret/ferret-kuv.5 (branch ferret-kuv.5, pushed). `.gitignore` ignores the dir. ✗ leave stray dispatch logs (docs/.../ferret-kuv.5/stage-*.log) in commits.
-- PRE-EXISTING nilaway debt: internal/gates/gates.go:242 + internal/analyst/golden.go:111 (from #37/#41). NOT mine; `make check` doesn't gate on it (`audit` does). Don't chase as a kuv.5 regression.
+- PRE-EXISTING nilaway debt: internal/gates/gates.go:242 + internal/analyst/golden.go:111 (from #37/#41). `make check` doesn't gate on it (`audit` does). Don't chase as a regression.
 - wave2 lanes all add to cmd/ferret/main.go CLI → worktree-isolate.
 
 ~ dk: dry fenced grants, zero corrections — trust-the-loop. Surface deviations, don't ask permission mid-build.
