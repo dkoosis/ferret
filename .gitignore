@@ -20,3 +20,5 @@
 
 # /team run ephemera (heartbeat logs)
 .team/
+# bd worktree
+ferret-kuv.5/
