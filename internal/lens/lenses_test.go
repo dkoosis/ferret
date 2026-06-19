@@ -63,3 +63,31 @@ func TestConfidenceLensRegistered(t *testing.T) {
 		t.Errorf("confidence not in Names() = %v", Names())
 	}
 }
+
+// TestIsVCS pins the reusable VCS-family gate (extracted from the coarse lens,
+// reused by the kuv.8 outcome label). It is the FAMILY classifier: true for
+// read-only git/gh calls too, so a consumer wanting the terminal subset must
+// narrow further. Non-VCS shell verbs and tool names are false.
+func TestIsVCS(t *testing.T) {
+	cases := []struct {
+		action string
+		want   bool
+	}{
+		{"git", true},
+		{"git_commit", true},
+		{"git_push", true},
+		{"git_status", true}, // family member even though read-only
+		{"gh", true},
+		{"gh_pr", true},
+		{"go_test", false},
+		{"gitk", false}, // not "git" and no "git_" prefix
+		{"github", false},
+		{"rg", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := IsVCS(c.action); got != c.want {
+			t.Errorf("IsVCS(%q) = %v, want %v", c.action, got, c.want)
+		}
+	}
+}

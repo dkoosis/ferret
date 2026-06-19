@@ -54,12 +54,24 @@ func (coarse) Token(e *event.Event) (string, bool) {
 		if c, ok := coarseShell[e.Action]; ok {
 			return c, true
 		}
-		if strings.HasPrefix(e.Action, "git_") || e.Action == "git" || e.Action == "gh" || strings.HasPrefix(e.Action, "gh_") {
+		if IsVCS(e.Action) {
 			return "vcs", true
 		}
 		return "sh", true
 	}
 	return "", false
+}
+
+// IsVCS reports whether a normalized shell command (shellnorm's Segment.Cmd —
+// "git", "git_commit", "gh", "gh_pr", …) belongs to the version-control family.
+// It is the single source of truth for the coarse lens's "vcs" class and is
+// reused by the terminal-action outcome label (ferret-kuv.8) so the two never
+// drift on what counts as a VCS call. NOTE: this is the FAMILY gate — it is true
+// for read-only calls too (git_status, git_diff). A consumer that needs the
+// mutating/terminal subset (commit/push/PR) must narrow further itself.
+func IsVCS(action string) bool {
+	return strings.HasPrefix(action, "git_") || action == "git" ||
+		action == "gh" || strings.HasPrefix(action, "gh_")
 }
 
 // ---- tool: tool identity (Read, sh:git_diff, mcp:trixi.set_nug) ----
