@@ -242,13 +242,37 @@ func TestPromptDetection(t *testing.T) {
 	)
 	evs := ingest(t, src)
 	prompts := 0
+	var got string
 	for _, ev := range evs {
 		if ev.Kind == KindPrompt {
 			prompts++
+			got = ev.Prompt
 		}
 	}
 	if prompts != 1 {
 		t.Errorf("prompts = %d, want 1 (meta and tool_result lines are not prompts)", prompts)
+	}
+	if got != "fix the bug" {
+		t.Errorf("prompt text = %q, want %q (full text captured at ingestion)", got, "fix the bug")
+	}
+}
+
+func TestPromptTextCapture(t *testing.T) {
+	// Multi-text-block user turn with messy whitespace: capture is full but
+	// whitespace-collapsed, and never truncated.
+	long := strings.Repeat("x", 5000)
+	src := writeTranscript(t,
+		`{"type":"user","uuid":"p1","timestamp":"2026-06-10T10:00:00Z","message":{"role":"user","content":[`+
+			`{"type":"text","text":"  no,\n\n  not that  "},`+
+			`{"type":"text","text":"`+long+`"}]}}`,
+	)
+	evs := ingest(t, src)
+	if len(evs) != 1 || evs[0].Kind != KindPrompt {
+		t.Fatalf("events = %d, want 1 prompt", len(evs))
+	}
+	want := "no, not that " + long
+	if evs[0].Prompt != want {
+		t.Errorf("prompt text len=%d, want len=%d (full, collapsed, untruncated)", len(evs[0].Prompt), len(want))
 	}
 }
 

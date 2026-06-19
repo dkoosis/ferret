@@ -149,7 +149,7 @@ func (b *Builder) assistantLine(src transcript.Source, st *fileState, raw *trans
 // userLine resolves tool_result statuses and detects genuine user prompts.
 func (b *Builder) userLine(src transcript.Source, st *fileState, raw *transcript.Raw, ts time.Time) {
 	sawResult := false
-	sawText := false
+	var parts []string
 	for i := range raw.Message.Content {
 		blk := &raw.Message.Content[i]
 		switch blk.Type {
@@ -157,17 +157,19 @@ func (b *Builder) userLine(src transcript.Source, st *fileState, raw *transcript
 			sawResult = true
 			b.resolve(st, blk, ts)
 		case "text":
-			if len(blk.Text) > 0 {
-				sawText = true
+			if body := strings.TrimSpace(blk.Text); body != "" {
+				parts = append(parts, body)
 			}
 		}
 	}
-	if sawText && !sawResult && !raw.IsMeta {
+	if len(parts) > 0 && !sawResult && !raw.IsMeta {
 		st.events = append(st.events, &Event{
 			Seq: st.seq, Time: ts,
 			Project: src.Project, Session: session(src, raw), Agent: src.Agent,
 			Sidechain: raw.IsSidechain,
 			Kind:      KindPrompt, Action: "prompt",
+			// Full, untruncated prompt text — whitespace-collapsed only (ferret-d01).
+			Prompt:  strings.Join(strings.Fields(strings.Join(parts, " ")), " "),
 			Version: raw.Version,
 		})
 		b.Stats.Prompts++
