@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dkoosis/ferret/internal/score"
 	"github.com/dkoosis/ferret/internal/transcript"
 )
 
@@ -28,9 +29,9 @@ func TestCallShapeTokens(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := callShapeTokens(&tt.blk)
+			got := score.CallShapeTokens(&tt.blk)
 			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
-				t.Errorf("callShapeTokens = %v, want %v", got, tt.want)
+				t.Errorf("CallShapeTokens = %v, want %v", got, tt.want)
 			}
 		})
 	}

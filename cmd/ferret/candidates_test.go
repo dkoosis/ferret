@@ -6,6 +6,8 @@ import (
 	"math"
 	"strings"
 	"testing"
+
+	"github.com/dkoosis/ferret/internal/score"
 )
 
 // TestScoreCandidate pins the composite-factor arithmetic: zero-cost tasks leak
@@ -40,9 +42,9 @@ func TestScoreCandidate(t *testing.T) {
 // dropped (they have nothing to automate or de-context) and the survivors sort by
 // score descending.
 func TestRankCandidatesExcludesNonLeaks(t *testing.T) {
-	res := segResult{
+	res := score.Result{
 		Session: "s", Project: "p", OutOrphan: 7,
-		Segments: []segment{
+		Segments: []score.Segment{
 			{Index: 0, Prompt: "", FirstCall: 0, LastCall: 0, InBytes: 999},         // preamble — excluded
 			{Index: 1, Prompt: "small", FirstCall: 1, LastCall: 1, InBytes: 100},    // cost 100
 			{Index: 2, Prompt: "no calls", FirstCall: -1, LastCall: -1},             // zero cost — excluded

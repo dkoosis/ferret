@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/dkoosis/ferret/internal/dialogue"
+	"github.com/dkoosis/ferret/internal/score"
 	"github.com/dkoosis/ferret/internal/transcript"
 )
 
@@ -103,11 +104,11 @@ func tagUserTurn(line []byte, res *dlgResult, moves *[]dialogue.Move, turn *int)
 	if raw.IsMeta || raw.Message == nil || raw.Type != "user" {
 		return
 	}
-	prompt := promptText(raw.Message.Content)
+	prompt := score.PromptText(raw.Message.Content)
 	if prompt == "" {
 		return
 	}
-	if skip, _, _ := classifyBoundary(prompt); skip {
+	if skip, _, _ := score.ClassifyBoundary(prompt); skip {
 		return
 	}
 	move, cue := dialogue.TagMove(prompt)

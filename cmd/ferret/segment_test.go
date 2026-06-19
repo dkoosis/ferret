@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dkoosis/ferret/internal/transcript"
+	"github.com/dkoosis/ferret/internal/score"
 )
 
 // segFixtureLines is a small synthetic session with TWO user prompts, interleaved
@@ -46,7 +46,7 @@ func runSeg(t *testing.T, lines []string, format string) string {
 // calls are owned by the segment whose prompt precedes them.
 func TestSegmentsBoundaryPerPrompt(t *testing.T) {
 	out := runSeg(t, segFixtureLines(), fmtJSON)
-	var res segResult
+	var res score.Result
 	if err := json.Unmarshal([]byte(out), &res); err != nil {
 		t.Fatalf("decode json: %v\n%s", err, out)
 	}
@@ -75,7 +75,7 @@ func TestSegmentsBoundaryPerPrompt(t *testing.T) {
 // goal-shift cue ("let me now…") and leaves plain reasoning unflagged.
 func TestSegmentsPivotHints(t *testing.T) {
 	out := runSeg(t, segFixtureLines(), fmtJSON)
-	var res segResult
+	var res score.Result
 	if err := json.Unmarshal([]byte(out), &res); err != nil {
 		t.Fatalf("decode json: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestSegmentsPreamble(t *testing.T) {
 			`{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"x"}}]}}`,
 	}
 	out := runSeg(t, lines, fmtJSON)
-	var res segResult
+	var res score.Result
 	if err := json.Unmarshal([]byte(out), &res); err != nil {
 		t.Fatalf("decode: %v\n%s", err, out)
 	}
@@ -155,56 +155,6 @@ func TestSegmentsPreamble(t *testing.T) {
 	}
 	if res.Segments[1].Index != 1 || res.Segments[1].FirstCall != 1 {
 		t.Errorf("seg1 = %+v, want index 1 owning call 1", res.Segments[1])
-	}
-}
-
-// TestPromptTextIgnoresToolResults guards the boundary signal: a user line that
-// only carries a tool_result is NOT a prompt and must not open a segment.
-func TestPromptTextIgnoresToolResults(t *testing.T) {
-	blocks := mustBlocks(t, `[{"type":"tool_result","tool_use_id":"t1","content":"x"}]`)
-	if got := promptText(blocks); got != "" {
-		t.Errorf("tool_result-only line yielded prompt %q, want empty", got)
-	}
-	blocks = mustBlocks(t, `[{"type":"text","text":"  do  the   thing  "}]`)
-	if got := promptText(blocks); got != "do the thing" {
-		t.Errorf("promptText = %q, want collapsed %q", got, "do the thing")
-	}
-}
-
-// TestClassifyBoundary is the unit table for the non-boundary filter (ferret-ajm):
-// affirmations and control built-ins / system envelopes continue; real prompts and
-// namespaced work commands open a boundary.
-func TestClassifyBoundary(t *testing.T) {
-	cmd := func(name string) string {
-		return "<command-name>" + name + "</command-name> <command-message>x</command-message>"
-	}
-	cases := []struct {
-		name     string
-		prompt   string
-		wantSkip bool
-		wantKind string
-	}{
-		{"bare yes", "yes", true, "affirmation"},
-		{"affirm trailing punct", "Sure.", true, "affirmation"},
-		{"multiword affirm", "go ahead", true, "affirmation"},
-		{"yes with more text stays a boundary", "yes, but also rename X", false, ""},
-		{"real prompt", "implement the marker", false, ""},
-		{"control clear", cmd("/clear"), true, "control"},
-		{"control exit", cmd("/exit"), true, "control"},
-		{"namespaced work command is a boundary", cmd("/wrap:wrap"), false, ""},
-		{"namespaced lintbrush is a boundary", cmd("/lintbrush:clean"), false, ""},
-		{"unknown bare command is a boundary", cmd("/deploy"), false, ""},
-		{"local-command carrier", "<local-command-stdout>See ya!</local-command-stdout>", true, "carrier"},
-		{"task-notification carrier", "<task-notification> <task-id>abc</task-id> </task-notification>", true, "carrier"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			skip, kind, _ := classifyBoundary(c.prompt)
-			if skip != c.wantSkip || kind != c.wantKind {
-				t.Errorf("classifyBoundary(%q) = (%v, %q), want (%v, %q)",
-					c.prompt, skip, kind, c.wantSkip, c.wantKind)
-			}
-		})
 	}
 }
 
@@ -227,7 +177,7 @@ func TestSegmentsFoldsNonBoundaries(t *testing.T) {
 			`{"type":"text","text":"<command-name>/clear</command-name>"}]}}`,
 	}
 	out := runSeg(t, lines, fmtJSON)
-	var res segResult
+	var res score.Result
 	if err := json.Unmarshal([]byte(out), &res); err != nil {
 		t.Fatalf("decode: %v\n%s", err, out)
 	}
@@ -266,7 +216,7 @@ func TestSegmentsDropsLeadingNonBoundary(t *testing.T) {
 			`{"type":"tool_use","id":"t0","name":"Read","input":{"file_path":"x"}}]}}`,
 	}
 	out := runSeg(t, lines, fmtJSON)
-	var res segResult
+	var res score.Result
 	if err := json.Unmarshal([]byte(out), &res); err != nil {
 		t.Fatalf("decode: %v\n%s", err, out)
 	}
@@ -302,7 +252,7 @@ func TestSegmentsPerTaskCost(t *testing.T) {
 			`{"type":"tool_result","tool_use_id":"ghost","content":"orphaned"}]}}`,
 	}
 	out := runSeg(t, lines, fmtJSON)
-	var res segResult
+	var res score.Result
 	if err := json.Unmarshal([]byte(out), &res); err != nil {
 		t.Fatalf("decode: %v\n%s", err, out)
 	}
@@ -325,13 +275,4 @@ func TestSegmentsPerTaskCost(t *testing.T) {
 	if res.OutOrphan != 10 {
 		t.Errorf("outOrphan = %d, want 10", res.OutOrphan)
 	}
-}
-
-func mustBlocks(t *testing.T, raw string) transcript.Blocks {
-	t.Helper()
-	var b transcript.Blocks
-	if err := json.Unmarshal([]byte(raw), &b); err != nil {
-		t.Fatal(err)
-	}
-	return b
 }
