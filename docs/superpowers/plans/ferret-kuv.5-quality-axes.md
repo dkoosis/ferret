@@ -106,10 +106,16 @@ here (optional enrichment when a conformance spec is also supplied — deferred 
   join of their ordered `Shape` slice (exact ordered-token equality, Q4 resolved; near-shape is a
   later enrichment). Empty-`Shape` tasks excluded. Same recurrence key kuv.12 candidates cluster on —
   purely deterministic, no analyst sentence (the semantic alternative is out of scope).
-- **Consistency per cluster** — for k same-shape tasks, score how tightly their per-task quality
-  (efficiency, and/or per-task surprise) clusters. **Reuse `mine`'s mean/σ** (Q3). Low spread =
-  high consistency = predictable. Report per cluster: shape key, k, consistency, spread. A k==1
-  cluster has no consistency signal — report as a sentinel, **not** a spurious 1.0.
+- **Consistency per cluster** — for k same-shape tasks, score how tightly their per-task **cost**
+  (`InBytes+OutBytes`) clusters, as `1 − coefficient-of-variation`. **Reuse `mine`'s mean/σ** (Q3).
+  Low spread = high consistency = predictable. Report per cluster: shape key, k, consistency, spread.
+  A k==1 cluster has no consistency signal — report as a sentinel, **not** a spurious 1.0.
+  - ‡ **Plan modification (ratified by dk 2026-06-19): consistency is computed over COST, not
+    efficiency.** Under exact-`Shape` clustering the per-task axes are *shape-determined* — same
+    ordered token sequence ⇒ identical efficiency/adaptivity — so their within-cluster spread is ~0
+    and consistency-over-axes collapses to a decorative 1.0. Cost genuinely varies across same-shape
+    attempts (file sizes differ per run), so cost-CV is the real cross-attempt reliability signal.
+    Supersedes the earlier "consistency over efficiency" framing wherever this doc still says it.
 
 ### Determinism contract
 
