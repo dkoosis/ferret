@@ -217,6 +217,10 @@ var CLI struct {
 		Format string `help:"Output format: text|json." default:"text" name:"format"`
 	} `cmd:"" help:"Score a task's calls against a reference plan: fitness/precision + alignment localizes the deviating call."`
 
+	Gates struct {
+		CommonFlags
+	} `cmd:"" help:"Mine review gates (code-review/plan-review/precommit/QA): per-gate rejection sets + overlap ratio ω (high ω = redundant gate) + confirmed friction loops."`
+
 	Adjudicate struct {
 		Session    string        `help:"Session ID prefix (required)." required:"" name:"session"`
 		Root       string        `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
@@ -284,6 +288,7 @@ func main() {
 				"  ferret dialogue --session PREFIX [--root DIR] [--format text|json]\n"+
 				"  ferret candidates [--session PREFIX | (corpus) --min-sessions 2] [--root DIR] [--top 10] [--format text|json]\n"+
 				"  ferret conformance [--spec FILE] [--format text|json]   (reads stdin if no --spec)\n"+
+				"  ferret gates    [--data DIR] [--format text|json]   (overlap ratio ω over review-gate rejections)\n"+
 				"  ferret adjudicate  --session PREFIX [--model ID] [--emit-prompt] [--propose] [--top 10] [--format text|json]\n"+
 				"  ferret fixes add  --motif \"Edit!,Read\" --fix \"hookify read-before-edit\" [--note ...]\n"+
 				"  ferret fixes list [--format json]\n\n"+
@@ -324,6 +329,8 @@ func main() {
 		err = cmdCandidates()
 	case "conformance":
 		err = cmdConformance()
+	case "gates":
+		err = cmdGates()
 	case "adjudicate":
 		err = cmdAdjudicate()
 	case "fixes add":
