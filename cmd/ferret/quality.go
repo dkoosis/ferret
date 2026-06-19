@@ -79,7 +79,7 @@ func cmdQuality() error {
 func readPipedQualitySpec() (qualitySpec, error) {
 	fi, err := os.Stdin.Stat()
 	if err != nil || fi.Mode()&os.ModeCharDevice != 0 {
-		return nil, nil //nolint:nilerr // a TTY/unstattable stdin means "no spec piped"
+		return nil, nil //nolint:nilerr,nilnil // a TTY/unstattable stdin means "no spec piped"
 	}
 	return readQualitySpec(os.Stdin)
 }
@@ -92,7 +92,7 @@ func readQualitySpec(r io.Reader) (qualitySpec, error) {
 		return nil, fmt.Errorf("%w: %w", errConformReadSpec, err)
 	}
 	if len(strings.TrimSpace(string(b))) == 0 {
-		return nil, nil
+		return nil, nil //nolint:nilnil // empty stream means "no spec" — reference-free path
 	}
 	var spec qualitySpec
 	if err := json.Unmarshal(b, &spec); err != nil {

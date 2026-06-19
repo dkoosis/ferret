@@ -2,6 +2,7 @@ package score
 
 import (
 	"math"
+	"slices"
 
 	"github.com/dkoosis/ferret/internal/mine"
 )
@@ -100,10 +101,8 @@ func ScoreLandmarks(milestones []Milestone, shape []string) Progress {
 // one place, mirroring outcome.go's terminalAction loop.
 func milestoneHit(m Milestone, shape []string) bool {
 	for _, want := range m.Tools {
-		for _, tok := range shape {
-			if tok == want {
-				return true
-			}
+		if slices.Contains(shape, want) {
+			return true
 		}
 	}
 	return false
@@ -146,7 +145,7 @@ func streamDF(corpus *mine.Corpus, tools []string) int {
 	for _, t := range tools {
 		for id, v := range corpus.Vocab {
 			if v == t {
-				want[uint32(id)] = true //nolint:gosec // vocab len ≪ 2^32
+				want[uint32(id)] = true
 			}
 		}
 	}
