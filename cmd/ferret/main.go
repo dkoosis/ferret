@@ -226,6 +226,12 @@ var CLI struct {
 		Session string `help:"Only episodes from sessions matching this prefix/substring (omit for whole corpus)." name:"session"`
 	} `cmd:"" help:"Score get_nug retrieval episodes: RU northstar (consumed/firsttry/nonabandon) + det Q/R/C scorers."`
 
+	Quality struct {
+		Session string `help:"Session ID prefix for per-task axes. Omit for corpus-wide pass^k consistency (cluster recurring task-shapes across all sessions)." name:"session"`
+		Root    string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
+		Format  string `help:"Output format: text|json." default:"text" name:"format"`
+	} `cmd:"" help:"Reference-free quality: per-task efficiency/adaptivity axes (--session), or corpus pass^k consistency over recurring task-shapes (no --session)."`
+
 	Adjudicate struct {
 		Session    string        `help:"Session ID prefix (required)." required:"" name:"session"`
 		Root       string        `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
@@ -295,6 +301,7 @@ func main() {
 				"  ferret conformance [--spec FILE] [--format text|json]   (reads stdin if no --spec)\n"+
 				"  ferret gates    [--data DIR] [--format text|json]   (overlap ratio ω over review-gate rejections)\n"+
 				"  ferret retrieval  [--session PREFIX] [--format text|json]   (get_nug search quality: RU + Q/R/C)\n"+
+				"  ferret quality    [--session PREFIX] [--format text|json]   (per-task axes; corpus pass^k consistency)\n"+
 				"  ferret adjudicate  --session PREFIX [--model ID] [--emit-prompt] [--propose] [--top 10] [--format text|json]\n"+
 				"  ferret fixes add  --motif \"Edit!,Read\" --fix \"hookify read-before-edit\" [--note ...]\n"+
 				"  ferret fixes list [--format json]\n\n"+
@@ -339,6 +346,8 @@ func main() {
 		err = cmdGates()
 	case "retrieval":
 		err = cmdRetrieval()
+	case "quality":
+		err = cmdQuality()
 	case "adjudicate":
 		err = cmdAdjudicate()
 	case "fixes add":
