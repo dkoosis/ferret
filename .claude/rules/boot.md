@@ -1,5 +1,29 @@
 # Boot
-updated: 2026-06-17
+updated: 2026-06-19
+
+## lane: TersePanda
+
+→ `bd ready` → sq.2 (golden set + relevance judge, now unblocked); then kuv.5, d28.
+
+✓ Merged #35–#39 (score-boot, sq.d0, gates, kuv.8, sq.1); 5 beads closed; boot+interactions → PR#40 (unmerged).
+
+‡ traps
+- wave2 lanes all add to cmd/ferret/main.go CLI → worktree-isolate, merge cross-pkg (sq.1) last.
+- worktree agents leave dupe files in shared tree — `git checkout main.go` + rm untracked pre-pull.
+
+~ dk: dry fenced grants, zero corrections — trust-the-loop.
+
+## lane: NullMerlin
+
+→ Watch PR#34 (ferret-d01) for bot review (like #33); on merge `bd close ferret-d01`, then bbp analysis follow-ons.
+
+✓ PR#33 bbp tagger merged (3 gemini fixes accepted); filed+shipped ferret-d01 — full prompt text on events → PR#34
+
+‡ traps
+- d01 captures harness envelopes (teammate-msg/command/compaction-summary) AS prompt text — filtering them is bbp analysis follow-on #4, NOT ingestion
+- ferret-d01 blocks ferret-bbp (dep wired)
+
+~ dk terse fenced grant, "let's resume"→headway; zero corrections, trust-the-loop
 
 ## lane: ProudBuffalo
 
