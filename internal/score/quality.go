@@ -80,7 +80,7 @@ func axesFor(seg Segment) Axes {
 func efficiency(seg Segment) float64 {
 	calls := seg.LastCall - seg.FirstCall + 1
 	distinct := distinctShapeTokens(seg.Shape)
-	if calls <= 0 || distinct == 0 {
+	if seg.FirstCall < 0 || distinct == 0 {
 		return 0
 	}
 	return clampUnit(float64(distinct) / float64(calls))
