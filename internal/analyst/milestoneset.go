@@ -116,24 +116,56 @@ var milestoneSets = []MilestoneSet{
 	},
 }
 
-// MilestoneSets returns the v1 catalog of canned goal patterns. Returned by value
-// (a copy of the slice header over immutable entries) so callers can range it
-// without reaching into package state.
+// MilestoneSets returns a deep copy of the v1 catalog of canned goal patterns, so
+// callers can range and even mutate the result without reaching into package state.
+// Slices are reference types: a shallow header copy would still alias the global
+// Cues/Milestones arrays, contradicting the immutability this exposes.
 func MilestoneSets() []MilestoneSet {
-	return milestoneSets
+	sets := make([]MilestoneSet, len(milestoneSets))
+	for i, set := range milestoneSets {
+		sets[i] = deepCopySet(set)
+	}
+	return sets
 }
 
-// MatchGoal recognizes the goal KIND from a stated intent and returns its
-// milestone set. The first catalog entry (most-specific first) with a cue that
-// appears in the lowercased goal wins — deterministic, order-stable. ok is false
-// when no pattern matches (an unrecognized goal: the --session mode skips it rather
-// than score it against the wrong landmarks). The returned set's Milestones carry
-// NO weights yet — use MilestonesForGoal to get a weighted, caller-owned copy.
+// deepCopySet returns a MilestoneSet sharing no backing storage with set — every
+// slice (Cues, Milestones, each milestone's Tools) is freshly allocated. The
+// exported accessors copy through this so the package-global catalog stays immutable.
+func deepCopySet(set MilestoneSet) MilestoneSet {
+	cues := make([]string, len(set.Cues))
+	copy(cues, set.Cues)
+	milestones := make([]score.Milestone, len(set.Milestones))
+	for i, m := range set.Milestones {
+		tools := make([]string, len(m.Tools))
+		copy(tools, m.Tools)
+		milestones[i] = score.Milestone{ID: m.ID, Tools: tools, Weight: m.Weight}
+	}
+	return MilestoneSet{ID: set.ID, Cues: cues, Milestones: milestones}
+}
+
+// MatchGoal recognizes the goal KIND from a stated intent and returns a deep copy
+// of its milestone set. The first catalog entry (most-specific first) with a cue
+// that appears in the lowercased goal wins — deterministic, order-stable. ok is
+// false when no pattern matches (an unrecognized goal: the --session mode skips it
+// rather than score it against the wrong landmarks). The returned set's Milestones
+// carry NO weights yet — use MilestonesForGoal to get a weighted copy.
 func MatchGoal(goal string) (MilestoneSet, bool) {
-	low := strings.ToLower(goal)
-	if strings.TrimSpace(low) == "" {
+	set, ok := matchGoal(goal)
+	if !ok {
 		return MilestoneSet{}, false
 	}
+	return deepCopySet(set), true
+}
+
+// matchGoal is the internal cue scan: it returns the matched catalog entry by
+// reference (sharing the global's slices) for callers that copy out themselves
+// (MatchGoal deep-copies; MilestonesForGoal builds its own weighted copy). It
+// short-circuits an empty/whitespace goal before lowercasing to skip the alloc.
+func matchGoal(goal string) (MilestoneSet, bool) {
+	if strings.TrimSpace(goal) == "" {
+		return MilestoneSet{}, false
+	}
+	low := strings.ToLower(goal)
 	for _, set := range milestoneSets {
 		for _, cue := range set.Cues {
 			if strings.Contains(low, cue) {
@@ -155,22 +187,24 @@ func MatchGoal(goal string) (MilestoneSet, bool) {
 // no-op then) leaves the copy's weights at the uniform defaultWeight floor so
 // ScoreLandmarks still yields a meaningful ratio. ok mirrors MatchGoal.
 func MilestonesForGoal(goal string, corpus *mine.Corpus) ([]score.Milestone, bool) {
-	set, ok := MatchGoal(goal)
+	set, ok := matchGoal(goal)
 	if !ok {
 		return nil, false
+	}
+	// Seed each weight so WeighByCorpus (which skips non-zero weights as caller
+	// overrides) measures every milestone when there's a corpus, and the uniform
+	// defaultWeight floor stands in when there isn't.
+	weight := defaultWeight
+	if corpus != nil {
+		weight = 0
 	}
 	ms := make([]score.Milestone, len(set.Milestones))
 	for i, m := range set.Milestones {
 		tools := make([]string, len(m.Tools))
 		copy(tools, m.Tools)
-		ms[i] = score.Milestone{ID: m.ID, Tools: tools, Weight: defaultWeight}
+		ms[i] = score.Milestone{ID: m.ID, Tools: tools, Weight: weight}
 	}
 	if corpus != nil {
-		// Clear the default floor so WeighByCorpus measures every milestone (it
-		// skips any with a non-zero Weight, treating it as a caller override).
-		for i := range ms {
-			ms[i].Weight = 0
-		}
 		score.WeighByCorpus(ms, corpus)
 	}
 	return ms, true

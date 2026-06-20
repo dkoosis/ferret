@@ -103,6 +103,26 @@ func TestMatchGoalIsDeterministic(t *testing.T) {
 	}
 }
 
+// TestMatchGoalReturnsDeepCopy: MatchGoal and MilestoneSets hand out deep copies,
+// so mutating a result can't reach back into the package-global catalog.
+func TestMatchGoalReturnsDeepCopy(t *testing.T) {
+	set, ok := MatchGoal("ship the feature")
+	if !ok {
+		t.Fatal("expected a ship-feature match")
+	}
+	set.Cues[0] = "MUTATED"
+	set.Milestones[0].ID = "MUTATED"
+	set.Milestones[0].Tools[0] = "MUTATED"
+
+	fresh, _ := MatchGoal("ship the feature")
+	if fresh.Cues[0] == "MUTATED" || fresh.Milestones[0].ID == "MUTATED" || fresh.Milestones[0].Tools[0] == "MUTATED" {
+		t.Error("MatchGoal aliases the global catalog; a caller's mutation leaked back")
+	}
+	if MilestoneSets()[0].Milestones[0].ID == "MUTATED" {
+		t.Error("MilestoneSets aliases the global catalog")
+	}
+}
+
 // TestMilestonesForGoal: maps a goal to its []score.Milestone with engine-filled
 // uniqueness weights — the exact input ferret-afm's --session mode scores against.
 func TestMilestonesForGoal(t *testing.T) {
