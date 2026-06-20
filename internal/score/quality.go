@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/dkoosis/ferret/internal/conform"
 	"github.com/dkoosis/ferret/internal/mine"
 )
 
@@ -43,6 +44,13 @@ const (
 	// clusterNoSignal flags a k==1 consistency cluster: one attempt is no evidence
 	// of (in)consistency, so it is a sentinel, NOT a spurious perfect 1.0.
 	clusterNoSignal = -1.0
+	// conform-enriched adaptivity gradation cuts on alignment fitness: a near-clean
+	// replay (almost everything synced, in order) reads as recovered; below that the
+	// trace skipped planned gates / churned off-plan widely and reads as stuck. A
+	// perfect fitness is adaptClean. The cuts mirror the reference-free gradations
+	// so the two adaptivity sources land on one comparable [0,1] scale.
+	conformCleanFitness     = 1.0
+	conformRecoveredFitness = 0.5
 )
 
 // Axes is the per-task reference-free quality block. Both ∈ [0,1] (Adaptivity also
@@ -71,6 +79,51 @@ func ScoreAxes(res *Result) {
 // adaptivity formulas tune in one place.
 func axesFor(seg Segment) Axes {
 	return Axes{Efficiency: efficiency(seg), Adaptivity: adaptivity(seg)}
+}
+
+// ScoreAxesWithConform is ScoreAxes with an OPTIONAL conformance-enriched
+// adaptivity axis (ferret-t5d, Q2 follow-on). For each scored segment, if specs
+// carries a conform.Result keyed by that segment's Index, the adaptivity axis is
+// computed from the alignment's recoverable-vs-loop localization instead of the
+// reference-free Shape self-repetition proxy; otherwise the segment falls back to
+// the reference-free axes unchanged. A nil/empty specs map makes this exactly
+// ScoreAxes — the reference-free path stays the default. Efficiency is always the
+// reference-free thrash ratio (the spec localizes recovery, not friction-per-call).
+func ScoreAxesWithConform(res *Result, specs map[int]conform.Result) {
+	for i := range res.Segments {
+		seg := &res.Segments[i]
+		if seg.Index == 0 || seg.FirstCall < 0 {
+			continue
+		}
+		a := axesFor(*seg)
+		if cr, ok := specs[seg.Index]; ok {
+			a.Adaptivity = AdaptivityFromConform(cr)
+		}
+		seg.Axes = &a
+	}
+}
+
+// AdaptivityFromConform scores the adaptivity axis from a conformance alignment
+// (conform.Result). Conformance checking is token-replay + cost-based trace
+// alignment (Rozinat & van der Aalst 2008; Adriansyah et al. 2011/2012): the
+// alignment localizes each deviation as a skipped planned step (ModelMoves) or an
+// off-plan call (LogMoves), and Fitness ∈ [0,1] is how much of the plan replayed
+// in order. That is a strictly stronger recoverable-vs-loop signal than the
+// reference-free proxy: the proxy can only ask "did the Shape loop resolve?",
+// whereas the alignment knows WHICH planned gate was skipped and how much work was
+// off-plan. We map Fitness onto the same three adaptivity gradations: a perfect
+// replay is clean; a near-clean replay (a localized detour the plan still mostly
+// followed) is recovered; a low-fitness trace (skipped gates / wide off-plan
+// churn) is stuck.
+func AdaptivityFromConform(res conform.Result) float64 {
+	switch {
+	case res.Fitness >= conformCleanFitness:
+		return adaptClean
+	case res.Fitness >= conformRecoveredFitness:
+		return adaptRecovered
+	default:
+		return adaptStuck
+	}
 }
 
 // efficiency = distinct shape tokens / owned call count, clamped to [0,1]. Lower

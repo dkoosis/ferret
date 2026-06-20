@@ -3,6 +3,8 @@ package score
 import (
 	"math"
 	"testing"
+
+	"github.com/dkoosis/ferret/internal/conform"
 )
 
 const eps = 1e-9
@@ -53,6 +55,93 @@ func TestAxesFor(t *testing.T) {
 				t.Errorf("efficiency %v out of [0,1]", got.Efficiency)
 			}
 		})
+	}
+}
+
+// TestAdaptivityFromConform verifies the conformance-enriched adaptivity axis:
+// a clean alignment (all sync, nothing skipped/off-plan) is fully adaptive; a
+// localized off-plan detour the plan otherwise replayed reads as recovered; a
+// trace that skipped planned gates / churned off-plan widely reads as stuck. The
+// gradations reuse the reference-free scale so the two sources are comparable.
+func TestAdaptivityFromConform(t *testing.T) {
+	cases := []struct {
+		name string
+		res  conform.Result
+		want float64
+	}{
+		{
+			name: "clean alignment: every step synced, nothing off-plan",
+			res:  conform.Result{Fitness: 1.0, Sync: 4, WorstCost: 4},
+			want: adaptClean,
+		},
+		{
+			name: "localized off-plan detour, plan mostly replayed: recovered",
+			res:  conform.Result{Fitness: 0.8, Sync: 4, LogMoves: 1, Cost: 1, WorstCost: 5},
+			want: adaptRecovered,
+		},
+		{
+			name: "skipped gate + heavy off-plan churn: stuck",
+			res:  conform.Result{Fitness: 0.3, Sync: 1, ModelMoves: 2, LogMoves: 3, Cost: 5, WorstCost: 7},
+			want: adaptStuck,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := AdaptivityFromConform(c.res); got != c.want {
+				t.Errorf("AdaptivityFromConform = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// TestScoreAxesWithConform verifies the dispatch: a segment WITH a supplied
+// conform.Result gets the conformance-enriched adaptivity; a segment WITHOUT one
+// falls back to the reference-free proxy unchanged. Efficiency is untouched by
+// the spec (it stays the reference-free thrash ratio in both paths).
+func TestScoreAxesWithConform(t *testing.T) {
+	// task 1 has a conform result (clean); task 2 (a stuck reference-free loop)
+	// has none and must fall back unchanged.
+	stuckLoop := []string{"Read", "sh:rg", "Read", "sh:rg", "Read", "sh:rg"}
+	res := Result{Segments: []Segment{
+		{Index: 1, FirstCall: 0, LastCall: 3, Shape: []string{"Read", "Edit", "sh:go_test", "sh:git_commit"}},
+		{Index: 2, FirstCall: 4, LastCall: 9, Shape: stuckLoop},
+	}}
+	specs := map[int]conform.Result{
+		1: {Fitness: 1.0, Sync: 4, WorstCost: 4},
+	}
+	ScoreAxesWithConform(&res, specs)
+
+	if res.Segments[0].Axes == nil {
+		t.Fatal("task 1 not scored")
+	}
+	if got := res.Segments[0].Axes.Adaptivity; got != adaptClean {
+		t.Errorf("task 1 (conform-enriched) adaptivity = %v, want %v", got, adaptClean)
+	}
+	if res.Segments[1].Axes == nil {
+		t.Fatal("task 2 not scored")
+	}
+	// task 2 has no spec → reference-free proxy: a loop running to the boundary
+	// unresolved scores adaptStuck.
+	if got := res.Segments[1].Axes.Adaptivity; got != adaptStuck {
+		t.Errorf("task 2 (reference-free fallback) adaptivity = %v, want %v", got, adaptStuck)
+	}
+}
+
+// TestScoreAxesWithConformNilFallsBack verifies a nil/empty spec map degrades to
+// exactly the reference-free ScoreAxes behavior (the default path is unchanged).
+func TestScoreAxesWithConformNilFallsBack(t *testing.T) {
+	segs := []Segment{
+		{Index: 0, FirstCall: 0, LastCall: 0, Shape: []string{"Read"}}, // preamble
+		{Index: 1, FirstCall: -1, LastCall: -1},                        // owns no calls
+		{Index: 2, FirstCall: 1, LastCall: 2, Shape: []string{"Read", "Edit"}},
+	}
+	free := Result{Segments: append([]Segment(nil), segs...)}
+	ScoreAxes(&free)
+	enriched := Result{Segments: append([]Segment(nil), segs...)}
+	ScoreAxesWithConform(&enriched, nil)
+	if mustMarshal(t, free) != mustMarshal(t, enriched) {
+		t.Errorf("nil-spec ScoreAxesWithConform diverged from ScoreAxes:\nfree     %s\nenriched %s",
+			mustMarshal(t, free), mustMarshal(t, enriched))
 	}
 }
 

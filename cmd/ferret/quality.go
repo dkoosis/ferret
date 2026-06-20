@@ -2,12 +2,14 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"sort"
 	"strings"
 
+	"github.com/dkoosis/ferret/internal/conform"
 	"github.com/dkoosis/ferret/internal/out"
 	"github.com/dkoosis/ferret/internal/score"
 	"github.com/dkoosis/ferret/internal/transcript"
@@ -27,7 +29,26 @@ import (
 // parallel to conformance's flowerModel): same task, wildly variable cost.
 const qualitySpreadWarnCap = 0.5
 
+// qualityTaskSpec is one task's conformance reference + observed labeled calls —
+// the same analyst-supplied shape `ferret conformance` consumes, scoped to a
+// single task. Used to enrich the adaptivity axis of that task (ferret-t5d).
+type qualityTaskSpec struct {
+	Reference []string          `json:"reference"`
+	Observed  []conform.ObsCall `json:"observed"`
+}
+
+// qualitySpec is the OPTIONAL conformance enrichment input for `ferret quality
+// --session`: a map of task Index → that task's conformance spec. Supplied by
+// piping JSON on stdin (no new flag — same stdin convention `ferret conformance`
+// uses for its spec). When present, listed tasks get a conformance-enriched
+// adaptivity axis (recoverable-vs-loop localized by the alignment); unlisted tasks
+// and the no-spec case fall back to the reference-free proxy unchanged.
+type qualitySpec map[int]qualityTaskSpec
+
 // cmdQuality wires the kong CLI flags to the per-session or corpus quality scope.
+// For the per-session scope, a conformance spec piped on stdin (JSON: task-index →
+// {reference, observed}) enriches the adaptivity axis from the alignment; with no
+// piped spec the reference-free axes are emitted unchanged.
 func cmdQuality() error {
 	cmd := &CLI.Quality
 	if cmd.Format != fmtText && cmd.Format != fmtJSON {
@@ -42,22 +63,87 @@ func cmdQuality() error {
 		root = r
 	}
 	if strings.TrimSpace(cmd.Session) != "" {
-		return qualitySession(os.Stdout, root, cmd.Session, cmd.Format)
+		spec, err := readPipedQualitySpec()
+		if err != nil {
+			return err
+		}
+		return qualitySessionWithSpec(os.Stdout, root, cmd.Session, cmd.Format, spec)
 	}
 	return qualityCorpus(os.Stdout, root, cmd.Format)
 }
 
-// qualitySession segments one session and emits its per-task quality axes.
+// readPipedQualitySpec reads a conformance enrichment spec from stdin ONLY when
+// stdin is a pipe/redirect (data is being fed), never an interactive terminal —
+// so the default `ferret quality --session X` stays reference-free and does not
+// block waiting on a TTY. nil spec = reference-free path.
+func readPipedQualitySpec() (qualitySpec, error) {
+	fi, err := os.Stdin.Stat()
+	if err != nil || fi.Mode()&os.ModeCharDevice != 0 {
+		return nil, nil //nolint:nilerr,nilnil // a TTY/unstattable stdin means "no spec piped"
+	}
+	return readQualitySpec(os.Stdin)
+}
+
+// readQualitySpec parses the task-index → conformance-spec JSON. An empty stream
+// yields a nil spec (reference-free), not an error.
+func readQualitySpec(r io.Reader) (qualitySpec, error) {
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errConformReadSpec, err)
+	}
+	if len(strings.TrimSpace(string(b))) == 0 {
+		return nil, nil //nolint:nilnil // empty stream means "no spec" — reference-free path
+	}
+	var spec qualitySpec
+	if err := json.Unmarshal(b, &spec); err != nil {
+		return nil, fmt.Errorf("%w: %w", errConformBadSpec, err)
+	}
+	return spec, nil
+}
+
+// qualitySession segments one session and emits its per-task reference-free axes.
 func qualitySession(w io.Writer, root, session, format string) error {
+	return qualitySessionWithSpec(w, root, session, format, nil)
+}
+
+// qualitySessionWithSpec segments one session and emits its per-task axes; when
+// spec carries conformance results keyed by task index, those tasks' adaptivity is
+// computed from the alignment instead of the reference-free proxy. A nil spec is
+// exactly the reference-free path.
+func qualitySessionWithSpec(w io.Writer, root, session, format string, spec qualitySpec) error {
 	res, err := segmentSession(root, session)
 	if err != nil {
 		return err
 	}
-	score.ScoreAxes(&res)
+	if len(spec) == 0 {
+		score.ScoreAxes(&res)
+	} else {
+		aligned, aerr := alignQualitySpec(spec)
+		if aerr != nil {
+			return aerr
+		}
+		score.ScoreAxesWithConform(&res, aligned)
+	}
 	if format == fmtJSON {
 		return writeQualitySessionJSON(w, res)
 	}
 	return writeQualitySessionText(w, res)
+}
+
+// alignQualitySpec runs each task's conformance spec through conform.Align,
+// producing the per-task results ScoreAxesWithConform consumes. A task entry with
+// an empty reference is rejected (errConformNoRef) — the same guard the standalone
+// `ferret conformance` command applies: an empty alignment scores a perfect 1.0
+// fitness, which would silently overwrite that task's adaptivity to clean.
+func alignQualitySpec(spec qualitySpec) (map[int]conform.Result, error) {
+	out := make(map[int]conform.Result, len(spec))
+	for idx, ts := range spec {
+		if len(ts.Reference) == 0 {
+			return nil, fmt.Errorf("%w (task %d)", errConformNoRef, idx)
+		}
+		out[idx] = conform.Align(ts.Reference, ts.Observed)
+	}
+	return out, nil
 }
 
 // qualityCorpus walks every transcript, scores each task's axes, clusters tasks

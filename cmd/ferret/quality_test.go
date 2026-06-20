@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -67,6 +68,88 @@ func TestQualitySessionJSON(t *testing.T) {
 	}
 	if got.Tasks[1].Adaptivity != 0.2 {
 		t.Errorf("task 2 adaptivity = %v, want 0.2 (stuck loop to boundary)", got.Tasks[1].Adaptivity)
+	}
+}
+
+// TestQualitySessionWithConformSpec asserts the conformance-enriched path: when a
+// per-task spec is supplied for the session, the adaptivity axis is taken from the
+// conformance alignment (here task 2's loop fully matches a 2-step reference plan →
+// clean replay → adaptivity 1.0) instead of the reference-free proxy (which scored
+// task 2 a stuck 0.2). Task 1 has no spec entry and keeps its reference-free axis.
+func TestQualitySessionWithConformSpec(t *testing.T) {
+	root := t.TempDir()
+	writeSpineFixture(t, root, "-Users-dev-proj", "q.jsonl", qualitySessionLines())
+
+	// task 2 owns calls Read,Bash,Read,Bash,Read,Bash; all six serve one plan step
+	// "look", so they collapse to a single phase that syncs the 1-step reference →
+	// fitness 1.0 → conform-clean adaptivity (vs the reference-free stuck 0.2).
+	specJSON := `{"2":{"reference":["look"],` +
+		`"observed":[{"call":0,"tool":"Read","step":"look"},{"call":1,"tool":"Bash","step":"look"},` +
+		`{"call":2,"tool":"Read","step":"look"},{"call":3,"tool":"Bash","step":"look"},` +
+		`{"call":4,"tool":"Read","step":"look"},{"call":5,"tool":"Bash","step":"look"}]}}`
+
+	spec, err := readQualitySpec(strings.NewReader(specJSON))
+	if err != nil {
+		t.Fatalf("readQualitySpec: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := qualitySessionWithSpec(&buf, root, "q", fmtJSON, spec); err != nil {
+		t.Fatalf("qualitySessionWithSpec: %v", err)
+	}
+	var got struct {
+		Tasks []struct {
+			Index      int     `json:"index"`
+			Adaptivity float64 `json:"adaptivity"`
+		} `json:"tasks"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v\n%s", err, buf.String())
+	}
+	if len(got.Tasks) != 2 {
+		t.Fatalf("tasks = %d, want 2: %s", len(got.Tasks), buf.String())
+	}
+	if got.Tasks[0].Adaptivity != 1.0 {
+		t.Errorf("task 1 (no spec) adaptivity = %v, want 1.0 (reference-free clean)", got.Tasks[0].Adaptivity)
+	}
+	if got.Tasks[1].Adaptivity != 1.0 {
+		t.Errorf("task 2 (conform-enriched) adaptivity = %v, want 1.0 (clean replay), not the reference-free 0.2",
+			got.Tasks[1].Adaptivity)
+	}
+}
+
+// TestQualitySessionWithEmptyRefRejected pins that a spec task entry with an empty
+// reference is rejected (errConformNoRef) instead of silently scoring a perfect
+// empty alignment that overwrites adaptivity to 1.0.
+func TestQualitySessionWithEmptyRefRejected(t *testing.T) {
+	root := t.TempDir()
+	writeSpineFixture(t, root, "-Users-dev-proj", "q.jsonl", qualitySessionLines())
+
+	// task 2's reference is empty (e.g. a misspelled field) — must be rejected.
+	specJSON := `{"2":{"observed":[{"call":0,"tool":"Read","step":"look"}]}}`
+	spec, err := readQualitySpec(strings.NewReader(specJSON))
+	if err != nil {
+		t.Fatalf("readQualitySpec: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := qualitySessionWithSpec(&buf, root, "q", fmtJSON, spec); !errors.Is(err, errConformNoRef) {
+		t.Fatalf("err = %v; want errConformNoRef", err)
+	}
+}
+
+// TestQualitySessionWithNilSpecMatchesReferenceFree pins that the spec-aware entry
+// with a nil spec is identical to the plain reference-free session path.
+func TestQualitySessionWithNilSpecMatchesReferenceFree(t *testing.T) {
+	root := t.TempDir()
+	writeSpineFixture(t, root, "-Users-dev-proj", "q.jsonl", qualitySessionLines())
+	var free, enriched bytes.Buffer
+	if err := qualitySession(&free, root, "q", fmtJSON); err != nil {
+		t.Fatalf("qualitySession: %v", err)
+	}
+	if err := qualitySessionWithSpec(&enriched, root, "q", fmtJSON, nil); err != nil {
+		t.Fatalf("qualitySessionWithSpec: %v", err)
+	}
+	if free.String() != enriched.String() {
+		t.Errorf("nil-spec path diverged from reference-free:\nfree     %s\nenriched %s", free.String(), enriched.String())
 	}
 }
 
