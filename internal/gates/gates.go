@@ -225,7 +225,6 @@ func aggregate(checks []Check) []GateStat {
 		if gs == nil {
 			gs = &GateStat{Gate: c.Gate}
 			byGate[c.Gate] = gs
-			rejSet[c.Gate] = map[string]bool{}
 		}
 		gs.Checks++
 		switch c.Decision {
@@ -239,7 +238,12 @@ func aggregate(checks []Check) []GateStat {
 			gs.Unknown++
 		}
 		if c.Decision.rejected() {
-			rejSet[c.Gate][c.Session] = true
+			rs := rejSet[c.Gate]
+			if rs == nil {
+				rs = map[string]bool{}
+				rejSet[c.Gate] = rs
+			}
+			rs[c.Session] = true
 		}
 	}
 	stats := make([]GateStat, 0, len(byGate))

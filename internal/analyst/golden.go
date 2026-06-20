@@ -103,10 +103,10 @@ func BuildPool(ep Episode, store []NugCandidate, sampleN int, rng *rand.Rand) []
 // (grade >= relevantGrade). The denominator is min(k, len(returned)) — precision
 // over what was actually shown. Empty returned → 0.
 func PrecisionAtK(returned []string, grades map[string]RelGrade, k int) float64 {
-	n := min(len(returned), k)
-	if n == 0 {
+	if len(returned) == 0 || k <= 0 {
 		return 0
 	}
+	n := min(len(returned), k)
 	hits := 0
 	for _, id := range returned[:n] {
 		if grades[id] >= relevantGrade {
