@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -113,6 +114,25 @@ func TestQualitySessionWithConformSpec(t *testing.T) {
 	if got.Tasks[1].Adaptivity != 1.0 {
 		t.Errorf("task 2 (conform-enriched) adaptivity = %v, want 1.0 (clean replay), not the reference-free 0.2",
 			got.Tasks[1].Adaptivity)
+	}
+}
+
+// TestQualitySessionWithEmptyRefRejected pins that a spec task entry with an empty
+// reference is rejected (errConformNoRef) instead of silently scoring a perfect
+// empty alignment that overwrites adaptivity to 1.0.
+func TestQualitySessionWithEmptyRefRejected(t *testing.T) {
+	root := t.TempDir()
+	writeSpineFixture(t, root, "-Users-dev-proj", "q.jsonl", qualitySessionLines())
+
+	// task 2's reference is empty (e.g. a misspelled field) — must be rejected.
+	specJSON := `{"2":{"observed":[{"call":0,"tool":"Read","step":"look"}]}}`
+	spec, err := readQualitySpec(strings.NewReader(specJSON))
+	if err != nil {
+		t.Fatalf("readQualitySpec: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := qualitySessionWithSpec(&buf, root, "q", fmtJSON, spec); !errors.Is(err, errConformNoRef) {
+		t.Fatalf("err = %v; want errConformNoRef", err)
 	}
 }
 

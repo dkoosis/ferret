@@ -134,3 +134,21 @@ func TestWeighMilestonesUniformFallback(t *testing.T) {
 		t.Errorf("override clobbered: %v; want 7", ms[1].Weight)
 	}
 }
+
+// TestCmdLandmarkNegativeWeightRejected pins that a negative milestone weight is
+// rejected: it would otherwise survive as an "override" and push the [0,1] progress
+// score out of range (a missed negative milestone shrinks totalWeight below hitWeight).
+func TestCmdLandmarkNegativeWeightRejected(t *testing.T) {
+	specPath := t.TempDir() + "/spec.json"
+	spec := `{"milestones":[{"id":"bad","tools":["Read"],"weight":-1}],"shape":["Read"]}`
+	if err := writeFile(t, specPath, spec); err != nil {
+		t.Fatal(err)
+	}
+	CLI.Landmark.Spec = specPath
+	CLI.Landmark.Format = fmtJSON
+	CLI.Landmark.Data = t.TempDir() // empty dir → no corpus, but guard fires first
+	t.Cleanup(func() { CLI.Landmark.Spec, CLI.Landmark.Format, CLI.Landmark.Data = "", "", "" })
+	if err := cmdLandmark(); !errors.Is(err, errLandmarkNegWeight) {
+		t.Fatalf("err = %v; want errLandmarkNegWeight", err)
+	}
+}

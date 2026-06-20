@@ -127,26 +127,31 @@ func WeighByCorpus(milestones []Milestone, corpus *mine.Corpus) {
 	if corpus == nil {
 		return
 	}
+	// Reverse the Vocab once (string→id) so streamDF does O(1) lookups instead of
+	// re-scanning the whole vocab per tool per milestone (O(M·T·V) → O(V + M·T)).
+	vocabID := make(map[string]uint32, len(corpus.Vocab))
+	for id, v := range corpus.Vocab {
+		vocabID[v] = uint32(id)
+	}
 	n := len(corpus.Streams)
 	for i := range milestones {
 		if milestones[i].Weight != 0 {
 			continue // honor caller override
 		}
-		df := streamDF(corpus, milestones[i].Tools)
+		df := streamDF(corpus, milestones[i].Tools, vocabID)
 		milestones[i].Weight = math.Log(float64(n+1)/float64(df+1)) + 1
 	}
 }
 
 // streamDF counts how many streams contain at least one of the given tools — the
-// document frequency for an any-of milestone. Tokens are matched by Vocab string,
-// so a milestone's Shape tokens line up with the corpus's lens tokens.
-func streamDF(corpus *mine.Corpus, tools []string) int {
+// document frequency for an any-of milestone. Tokens are matched by Vocab string
+// (via the precomputed string→id map), so a milestone's Shape tokens line up with
+// the corpus's lens tokens.
+func streamDF(corpus *mine.Corpus, tools []string, vocabID map[string]uint32) int {
 	want := make(map[uint32]bool, len(tools))
 	for _, t := range tools {
-		for id, v := range corpus.Vocab {
-			if v == t {
-				want[uint32(id)] = true
-			}
+		if id, ok := vocabID[t]; ok {
+			want[id] = true
 		}
 	}
 	if len(want) == 0 {

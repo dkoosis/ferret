@@ -118,7 +118,11 @@ func qualitySessionWithSpec(w io.Writer, root, session, format string, spec qual
 	if len(spec) == 0 {
 		score.ScoreAxes(&res)
 	} else {
-		score.ScoreAxesWithConform(&res, alignQualitySpec(spec))
+		aligned, aerr := alignQualitySpec(spec)
+		if aerr != nil {
+			return aerr
+		}
+		score.ScoreAxesWithConform(&res, aligned)
 	}
 	if format == fmtJSON {
 		return writeQualitySessionJSON(w, res)
@@ -127,13 +131,19 @@ func qualitySessionWithSpec(w io.Writer, root, session, format string, spec qual
 }
 
 // alignQualitySpec runs each task's conformance spec through conform.Align,
-// producing the per-task results ScoreAxesWithConform consumes.
-func alignQualitySpec(spec qualitySpec) map[int]conform.Result {
+// producing the per-task results ScoreAxesWithConform consumes. A task entry with
+// an empty reference is rejected (errConformNoRef) — the same guard the standalone
+// `ferret conformance` command applies: an empty alignment scores a perfect 1.0
+// fitness, which would silently overwrite that task's adaptivity to clean.
+func alignQualitySpec(spec qualitySpec) (map[int]conform.Result, error) {
 	out := make(map[int]conform.Result, len(spec))
 	for idx, ts := range spec {
+		if len(ts.Reference) == 0 {
+			return nil, fmt.Errorf("%w (task %d)", errConformNoRef, idx)
+		}
 		out[idx] = conform.Align(ts.Reference, ts.Observed)
 	}
-	return out
+	return out, nil
 }
 
 // qualityCorpus walks every transcript, scores each task's axes, clusters tasks

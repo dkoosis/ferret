@@ -18,6 +18,7 @@ import (
 var (
 	errLandmarkBadSpec      = errors.New("landmark: spec is not valid JSON")
 	errLandmarkNoMilestones = errors.New("landmark: spec.milestones must list ≥1 milestone")
+	errLandmarkNegWeight    = errors.New("landmark: milestone weight must be ≥0 (a non-zero weight is an override; negatives break the [0,1] progress score)")
 	errLandmarkReadSpec     = errors.New("landmark: cannot read spec")
 )
 
@@ -56,6 +57,11 @@ func cmdLandmark() error {
 	}
 	if len(spec.Milestones) == 0 {
 		return errLandmarkNoMilestones
+	}
+	for _, m := range spec.Milestones {
+		if m.Weight < 0 {
+			return fmt.Errorf("%w: %q has weight %g", errLandmarkNegWeight, m.ID, m.Weight)
+		}
 	}
 	weighMilestones(spec.Milestones, cmd.Data)
 	res := score.ScoreLandmarks(spec.Milestones, spec.Shape)
