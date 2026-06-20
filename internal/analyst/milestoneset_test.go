@@ -95,7 +95,7 @@ func TestMatchGoalIsDeterministic(t *testing.T) {
 	if !ok {
 		t.Fatal("expected a match for a multi-cue goal")
 	}
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		got, ok := MatchGoal(goal)
 		if !ok || got.ID != first.ID {
 			t.Fatalf("MatchGoal not deterministic: run %d = %q (ok=%v), want %q", i, got.ID, ok, first.ID)
@@ -162,7 +162,7 @@ func TestMilestonesForGoalNilCorpus(t *testing.T) {
 		}
 	}
 	// Sanity: the returned set scores a full-coverage shape at 1.0.
-	var shape []string
+	shape := make([]string, 0, len(ms))
 	for _, m := range ms {
 		shape = append(shape, m.Tools[0])
 	}
