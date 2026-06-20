@@ -8,7 +8,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/dkoosis/ferret/internal/analyst"
 	"github.com/dkoosis/ferret/internal/lens"
 	"github.com/dkoosis/ferret/internal/mine"
 	"github.com/dkoosis/ferret/internal/out"
@@ -42,14 +44,26 @@ type landmarkSpec struct {
 	Shape      []string          `json:"shape"`
 }
 
-// cmdLandmark wires the kong CLI flags to the landmark progress scorer. It reads
-// the spec, fills uniqueness weights from the corpus (when one is available, else
-// a uniform fallback so the command works from a bare spec), runs the pure scorer,
-// and dispatches the writer.
+// cmdLandmark wires the kong CLI flags to the landmark progress scorer. Two
+// scopes (mirroring quality's --session-vs-corpus fork): with --session it
+// segments a session and scores each task's goal against the milestone-set
+// library; otherwise it reads a single-task --spec/stdin. In both scopes the
+// corpus at --data fills uniqueness weights (uniform fallback if absent).
 func cmdLandmark() error {
 	cmd := &CLI.Landmark
 	if cmd.Format != fmtText && cmd.Format != fmtJSON {
 		return fmt.Errorf("%w: %q (want text|json)", errBadFormat, cmd.Format)
+	}
+	if strings.TrimSpace(cmd.Session) != "" {
+		root := cmd.Root
+		if root == "" {
+			r, err := defaultRoot()
+			if err != nil {
+				return err
+			}
+			root = r
+		}
+		return landmarkSession(os.Stdout, root, cmd.Session, cmd.Data, cmd.Format)
 	}
 	spec, err := readLandmarkSpec(cmd.Spec)
 	if err != nil {
@@ -114,6 +128,82 @@ func landmarkCorpus(dataDir string) *mine.Corpus {
 		return nil
 	}
 	return corpus
+}
+
+// landmarkSession is the --session scope: it segments one session (the same
+// resolution segments/quality use), maps each task's stated goal to its milestone
+// set, scores the task's Shape, and renders the per-task progress. The corpus at
+// dataDir fills uniqueness weights (uniform fallback when absent — weighting is an
+// enhancement, never a hard dependency). The mapping + scoring loop lives in
+// internal/analyst (ScoreSessionLandmarks) so this stays a thin render shell.
+func landmarkSession(w io.Writer, root, session, dataDir, format string) error {
+	res, err := segmentSession(root, session)
+	if err != nil {
+		return err
+	}
+	sp := analyst.ScoreSessionLandmarks(res, landmarkCorpus(dataDir))
+	if format == fmtJSON {
+		return writeLandmarkSessionJSON(w, sp)
+	}
+	return writeLandmarkSessionText(w, sp)
+}
+
+// writeLandmarkSessionJSON emits the per-session landmark verdict as indented
+// JSON (the analyst.SessionProgress schema is the contract).
+func writeLandmarkSessionJSON(w io.Writer, sp analyst.SessionProgress) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(sp)
+}
+
+// writeLandmarkSessionText emits the dense per-task rendering: one block per task
+// (its goal kind + weighted progress + per-milestone hit/miss rows), with
+// unrecognized tasks marked, and a recognized/total rollup.
+func writeLandmarkSessionText(w io.Writer, sp analyst.SessionProgress) error {
+	bw := bufio.NewWriter(w)
+
+	fmt.Fprintf(bw, "landmark session=%s project=%s", sp.Session, sp.Project)
+	if sp.Agent != "" {
+		fmt.Fprintf(bw, " agent=%s", sp.Agent)
+	}
+	fmt.Fprintln(bw)
+	about := func(lines ...string) {
+		for _, ln := range lines {
+			fmt.Fprintln(bw, ln)
+		}
+	}
+	about(
+		"≡ per-task goal PROGRESS: each task's stated goal maps to a necessary-milestone set",
+		"≡ (milestone-set library), scored set-coverage over its calls — order-free, backtrack-tolerant.",
+		"≡ ✓ hit · ✗ missed (necessary, never reached); an unrecognized goal is surfaced, not scored.")
+
+	for i := range sp.Tasks {
+		tp := &sp.Tasks[i]
+		if !tp.Recognized {
+			fmt.Fprintf(bw, "[task %d] goal=%q  unrecognized (no milestone set matched — skipped)\n",
+				tp.Index, truncateRunes(tp.Goal, spineTextCap))
+			continue
+		}
+		p := tp.Progress
+		fmt.Fprintf(bw, "[task %d] %s  progress=%.2f  (%d/%d milestones, weight %.2f/%.2f)\n",
+			tp.Index, tp.GoalKind, p.Score, p.HitCount, p.Total, p.HitWeight, p.TotalWeight)
+		fmt.Fprintf(bw, "  goal: %s\n", truncateRunes(tp.Goal, spineTextCap))
+		for _, h := range p.Hits {
+			if h.Hit {
+				fmt.Fprintf(bw, "  ✓ %-16s (weight %.2f)\n", h.Milestone, h.Weight)
+				continue
+			}
+			fmt.Fprintf(bw, "  ✗ %-16s (weight %.2f — necessary, never reached)\n", h.Milestone, h.Weight)
+		}
+		if missingNecessary(p) {
+			fmt.Fprintf(bw,
+				"  ⚠ missing necessary milestone (uniqueness ≥ %.1f) — goal likely not reached\n",
+				landmarkHighWeightCap)
+		}
+	}
+
+	fmt.Fprintf(bw, "--- tasks=%d recognized=%d\n", sp.Total, sp.Recognized)
+	return bw.Flush()
 }
 
 // readLandmarkSpec reads the spec from a file path, or from stdin when the path is
