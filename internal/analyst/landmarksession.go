@@ -41,7 +41,7 @@ type TaskProgress struct {
 	Goal       string         `json:"goal"`
 	GoalKind   string         `json:"goalKind,omitempty"` // the matched MilestoneSet.ID, empty when unrecognized
 	Recognized bool           `json:"recognized"`         // a milestone set matched the stated goal
-	Progress   score.Progress `json:"progress,omitempty"` // weighted landmark coverage; zero value when unrecognized
+	Progress   score.Progress `json:"progress,omitzero"`  // weighted landmark coverage; zero value when unrecognized
 }
 
 // SessionProgress is the landmark verdict for a whole session: the per-task rows
