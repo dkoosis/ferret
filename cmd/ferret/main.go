@@ -218,10 +218,12 @@ var CLI struct {
 	} `cmd:"" help:"Score a task's calls against a reference plan: fitness/precision + alignment localizes the deviating call."`
 
 	Landmark struct {
-		Spec   string `help:"JSON spec file (loose milestone set + observed shape tokens); '-' or empty = stdin." name:"spec"`
-		Data   string `help:"Artifact directory (corpus for uniqueness weighting; uniform fallback if absent)." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
-		Format string `help:"Output format: text|json." default:"text" name:"format"`
-	} `cmd:"" help:"Score a task's goal PROGRESS by necessary milestones it touched (set-coverage, backtrack-tolerant), each weighted by uniqueness — complements conformance deviation."`
+		Spec    string `help:"JSON spec file (loose milestone set + observed shape tokens); '-' or empty = stdin. Single-task spec scope." name:"spec"`
+		Session string `help:"Session ID prefix: segment the session and score each task's goal against its milestone-set library (no spec needed). Whole-session scope." name:"session"`
+		Root    string `help:"Transcript root (dir of ~/.claude/projects layout); --session scope only." name:"root"`
+		Data    string `help:"Artifact directory (corpus for uniqueness weighting; uniform fallback if absent)." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
+		Format  string `help:"Output format: text|json." default:"text" name:"format"`
+	} `cmd:"" help:"Score goal PROGRESS by necessary milestones touched (set-coverage, backtrack-tolerant), uniqueness-weighted. --spec scores one supplied task; --session segments a session and scores each task against the milestone-set library."`
 
 	Gates struct {
 		CommonFlags
@@ -305,7 +307,7 @@ func main() {
 				"  ferret dialogue --session PREFIX [--root DIR] [--format text|json]\n"+
 				"  ferret candidates [--session PREFIX | (corpus) --min-sessions 2] [--root DIR] [--top 10] [--format text|json]\n"+
 				"  ferret conformance [--spec FILE] [--format text|json]   (reads stdin if no --spec)\n"+
-				"  ferret landmark  [--spec FILE] [--data DIR] [--format text|json]   (milestone progress; reads stdin if no --spec)\n"+
+				"  ferret landmark  [--spec FILE | --session PREFIX [--root DIR]] [--data DIR] [--format text|json]   (milestone progress; spec reads stdin if no --spec)\n"+
 				"  ferret gates    [--data DIR] [--format text|json]   (overlap ratio ω over review-gate rejections)\n"+
 				"  ferret retrieval  [--session PREFIX] [--format text|json]   (get_nug search quality: RU + Q/R/C)\n"+
 				"  ferret quality    [--session PREFIX] [--format text|json]   (per-task axes; corpus pass^k consistency)\n"+

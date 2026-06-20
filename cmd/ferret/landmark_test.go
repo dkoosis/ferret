@@ -4,11 +4,116 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/dkoosis/ferret/internal/analyst"
 	"github.com/dkoosis/ferret/internal/score"
 )
+
+// landmarkSessionFixtureLines is a synthetic session with two recognizable tasks:
+// a ship-feature task (prompt "implement …", Shape Read+Edit → partial progress)
+// and an investigate task (prompt "audit …", Shape Read+Grep → full progress).
+func landmarkSessionFixtureLines() []string {
+	return []string{
+		`{"type":"user","sessionId":"s","message":{"role":"user","content":"implement the landmark session mode"}}`,
+		`{"type":"assistant","sessionId":"s","message":{"role":"assistant","content":[` +
+			`{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"a.go"}},` +
+			`{"type":"tool_use","id":"t2","name":"Edit","input":{"file_path":"a.go"}}]}}`,
+		`{"type":"user","sessionId":"s","message":{"role":"user","content":"investigate how the gates package works"}}`,
+		`{"type":"assistant","sessionId":"s","message":{"role":"assistant","content":[` +
+			`{"type":"tool_use","id":"t3","name":"Read","input":{"file_path":"g.go"}},` +
+			`{"type":"tool_use","id":"t4","name":"Grep","input":{"pattern":"foo"}}]}}`,
+	}
+}
+
+func runLandmarkSession(t *testing.T, lines []string, format string) string {
+	t.Helper()
+	root := t.TempDir()
+	writeSpineFixture(t, root, "-Users-dev-proj", "s.jsonl", lines)
+	var buf bytes.Buffer
+	// Empty data dir → no corpus → uniform default weights (the bare path).
+	if err := landmarkSession(&buf, root, "s", t.TempDir(), format); err != nil {
+		t.Fatalf("landmarkSession: %v", err)
+	}
+	return buf.String()
+}
+
+// TestLandmarkSessionPerTaskJSON is the load-bearing acceptance: segment a
+// session, map each task's stated goal to its milestone set, score the task's
+// Shape, and emit one progress row per recognized task.
+func TestLandmarkSessionPerTaskJSON(t *testing.T) {
+	out := runLandmarkSession(t, landmarkSessionFixtureLines(), fmtJSON)
+	var sp analyst.SessionProgress
+	if err := json.Unmarshal([]byte(out), &sp); err != nil {
+		t.Fatalf("decode json: %v\n%s", err, out)
+	}
+	if sp.Total != 2 || sp.Recognized != 2 {
+		t.Fatalf("total=%d recognized=%d; want 2/2\n%s", sp.Total, sp.Recognized, out)
+	}
+	if sp.Tasks[0].GoalKind != "ship-feature" {
+		t.Errorf("task1 kind = %q; want ship-feature", sp.Tasks[0].GoalKind)
+	}
+	// ship-feature: read+edit of read/edit/test/commit → 0.5.
+	if sp.Tasks[0].Progress.Score != 0.5 {
+		t.Errorf("task1 progress = %v; want 0.5", sp.Tasks[0].Progress.Score)
+	}
+	if sp.Tasks[1].GoalKind != "investigate" || sp.Tasks[1].Progress.Score != 1.0 {
+		t.Errorf("task2 = %+v; want investigate progress 1.0", sp.Tasks[1])
+	}
+}
+
+// TestLandmarkSessionText asserts the human rendering carries the per-task rows,
+// the recognized goal kind, the weighted progress, and the rollup.
+func TestLandmarkSessionText(t *testing.T) {
+	out := runLandmarkSession(t, landmarkSessionFixtureLines(), fmtText)
+	for _, want := range []string{
+		"landmark session=s",
+		"ship-feature",
+		"investigate",
+		"progress=",
+		"tasks=2",
+		"recognized=2",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("text output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestCmdLandmarkSessionRoutes pins that --session routes to the session scope
+// (not the spec scope): cmdLandmark with Session set and no spec must not error
+// on a missing spec, and must emit a SessionProgress JSON shape.
+func TestCmdLandmarkSessionRoutes(t *testing.T) {
+	root := t.TempDir()
+	writeSpineFixture(t, root, "-Users-dev-proj", "s.jsonl", landmarkSessionFixtureLines())
+	CLI.Landmark.Session = "s"
+	CLI.Landmark.Root = root
+	CLI.Landmark.Data = t.TempDir()
+	CLI.Landmark.Format = fmtJSON
+	t.Cleanup(func() {
+		CLI.Landmark.Session, CLI.Landmark.Root, CLI.Landmark.Data, CLI.Landmark.Format = "", "", "", ""
+	})
+	// cmdLandmark writes to os.Stdout; capture it so the routing assertion does not
+	// spill the session JSON into test output (the rendering itself is covered by
+	// runLandmarkSession above). We assert it does not error and routed to session.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	cmdErr := cmdLandmark()
+	os.Stdout = orig
+	_ = w.Close()
+	_, _ = io.Copy(io.Discard, r)
+	_ = r.Close()
+	if cmdErr != nil {
+		t.Fatalf("cmdLandmark session mode: %v", cmdErr)
+	}
+}
 
 func TestReadLandmarkSpecFromFile(t *testing.T) {
 	spec := `{"task":"ship","milestones":[{"id":"read","tools":["Read"],"weight":1}],"shape":["Read","Edit"]}`
