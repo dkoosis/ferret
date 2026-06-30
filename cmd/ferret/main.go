@@ -1079,6 +1079,16 @@ func cmdReport() error {
 		warnLensDivergence(fixIdx, corpus, findings, suppressed, l.Name())
 	}
 
+	// De-island the dialogue + Hop2 retrieval scorers (ferret-bbp.6): roll each
+	// session's human-side Outcome + worst Hop2 grade onto the findings that recur
+	// in it, so report/out surface them beside burn. Pure read of the same events
+	// the corpus was built from; keyed identically to the corpus streams.
+	dlgIdx, err := streamDialogueIndex(c.eventsPath())
+	if err != nil {
+		return err
+	}
+	mine.AttachDialogue(findings, corpus, dlgIdx, cmd.MaxGap)
+
 	if c.format == fmtJSON {
 		type jf struct {
 			Motif        []string `json:"motif"`
@@ -1089,6 +1099,11 @@ func cmdReport() error {
 			FailRate     float64  `json:"failRate"`
 			Burn         int      `json:"burn"`
 			Surprise     float64  `json:"surprise"`
+			Outcome      string   `json:"outcome,omitempty"`
+			Hop2         string   `json:"hop2,omitempty"`
+			Hop1         string   `json:"hop1,omitempty"`
+			Repairs      int      `json:"repairs,omitempty"`
+			Accepts      int      `json:"accepts,omitempty"`
 			Evidence     string   `json:"evidence"`
 			Fixed        bool     `json:"fixed,omitempty"`
 			Fix          string   `json:"fix,omitempty"`
@@ -1103,7 +1118,9 @@ func cmdReport() error {
 			row := jf{
 				Motif: corpus.Tokens(f.IDs), Kind: string(f.Kind), Action: string(f.Action),
 				Count: f.Count, Sessions: f.Sessions, FailRate: f.FailRate,
-				Burn: f.Burn, Surprise: f.Surprise, Evidence: exemplar(corpus, f.ExStream, f.ExSeq),
+				Burn: f.Burn, Surprise: f.Surprise,
+				Outcome: f.Outcome, Hop2: f.Hop2, Hop1: f.Hop1, Repairs: f.Repairs, Accepts: f.Accepts,
+				Evidence: exemplar(corpus, f.ExStream, f.ExSeq),
 			}
 			if e, ok := fixIdx[fixes.MotifKey(corpus.Tokens(f.IDs))]; ok {
 				row.Fixed, row.Fix = true, e.Fix
@@ -1133,7 +1150,9 @@ func cmdReport() error {
 			rows = append(rows, out.MDFinding{
 				Motif: corpus.Tokens(f.IDs), Kind: string(f.Kind), Action: string(f.Action),
 				Count: f.Count, Sessions: f.Sessions, FailRate: f.FailRate,
-				Burn: f.Burn, Evidence: exemplar(corpus, f.ExStream, f.ExSeq),
+				Burn:    f.Burn,
+				Outcome: f.Outcome, Hop2: f.Hop2, Repairs: f.Repairs, Accepts: f.Accepts,
+				Evidence: exemplar(corpus, f.ExStream, f.ExSeq),
 			})
 		}
 		return out.Markdown(os.Stdout, l.Name(), len(findings), rows)
@@ -1161,6 +1180,7 @@ func cmdReport() error {
 		if ann, ok := sinceFixAnnotation(fixIdx, corpus.Tokens(f.IDs), f.Burn); ok {
 			row += ann
 		}
+		row += reportDialogueNote(f)
 		if !sink.Row("%s", row) {
 			break
 		}

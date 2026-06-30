@@ -54,6 +54,34 @@ func TestMarkdownReport(t *testing.T) {
 	}
 }
 
+// TestMarkdownSurfacesDialogue guards ferret-bbp.6: when a finding carries the
+// de-islanded dialogue + Hop2 signals, the human report surfaces them in the
+// evidence block (outcome + retrieval grade), and a finding with no signal renders
+// without an empty "outcome:" fragment.
+func TestMarkdownSurfacesDialogue(t *testing.T) {
+	findings := []MDFinding{
+		{Motif: []string{"get_nug", "Edit"}, Kind: "friction", Action: "hook", Count: 9, Sessions: 4,
+			FailRate: 0.5, Burn: 80000, Evidence: "a1b2c3d4@7",
+			Outcome: "abandoned", Hop2: "low", Repairs: 3, Accepts: 0},
+		{Motif: []string{"go_build", "go_test"}, Kind: "routine", Action: "script", Count: 50, Sessions: 30,
+			FailRate: 0, Burn: 12000, Evidence: "feedface@7"},
+	}
+	var b strings.Builder
+	if err := Markdown(&b, "tool", len(findings), findings); err != nil {
+		t.Fatalf("Markdown: %v", err)
+	}
+	got := b.String()
+	for _, want := range []string{"abandoned", "hop2 low", "repairs 3"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("dialogue-bearing finding missing %q in report:\n%s", want, got)
+		}
+	}
+	// The signal-less routine must not emit a dangling "outcome:" with no value.
+	if strings.Contains(got, "outcome: \n") || strings.Contains(got, "outcome:  ") {
+		t.Errorf("signal-less finding emitted an empty outcome fragment:\n%s", got)
+	}
+}
+
 // TestMarkdownEdges covers the small-magnitude and truncation paths: a sub-cent
 // burn must read "<$0.01" rather than "$0.00", and a capped finding slice must
 // surface the count it dropped instead of silently truncating.
