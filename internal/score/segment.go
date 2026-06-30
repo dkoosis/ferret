@@ -42,6 +42,16 @@ const segContCap = 48
 // so the score package does not couple to cmd's spine renderer for one constant.
 const blockTypeText = "text"
 
+// compactionSummaryOpener is the leading phrase of Claude Code's post-compaction
+// carrier turn — the summary the harness injects as a user message when a session
+// is continued after running out of context. Unlike a <local-command-…> envelope it
+// arrives as a bare text block, so PromptText lifts it like a real prompt and it
+// would otherwise open a spurious task boundary (smoke FP, turn 15). It is a system
+// envelope, not user intent, so classifyBoundary folds it as a "carrier". Matched as
+// a lowercased prefix: distinctive enough that no genuine user prompt collides, while
+// tolerating the variable summary body that follows.
+const compactionSummaryOpener = "this session is being continued from a previous conversation"
+
 // Pivot is one thinking-pivot hint: the global thinking-block index it sits at
 // and the cue phrase that matched (the lowercased prefix-cue, for traceability).
 type Pivot struct {
@@ -158,6 +168,9 @@ func ClassifyBoundary(prompt string) (skip bool, kind, label string) {
 
 	if strings.HasPrefix(low, "<local-command-") || strings.HasPrefix(low, "<task-notification") {
 		return true, "carrier", carrierLabel(low)
+	}
+	if strings.HasPrefix(low, compactionSummaryOpener) {
+		return true, "carrier", "compaction-summary"
 	}
 	if name, ok := commandName(trimmed); ok {
 		if !strings.Contains(name, ":") && controlCommands[name] {

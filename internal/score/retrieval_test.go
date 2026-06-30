@@ -292,6 +292,44 @@ func TestAggregateEmpty(t *testing.T) {
 	}
 }
 
+// TestEpisode_FoldsRetryMotifIntoSelfRequery_When_FollowingActionRetries proves
+// the event.Retry self-requery motif (a following bd_show!->bd_show /
+// retry-after-failure, distinct from a get_nug reformulation chain) reaches the
+// hop-attribution TurnContext. A repair after the agent silently retried its own
+// action indicts the interpretation hop — the substrate bbp.4/bbp.5 read.
+func TestEpisode_FoldsRetryMotifIntoSelfRequery_When_FollowingActionRetries(t *testing.T) {
+	retry := tool(2, "Bash", "bd show x")
+	retry.Retry = true // event builder flagged a retry-after-failure
+	evs := []event.Event{
+		getNug(0, "where is x", "aaa111"), // single query, NOT reformulated
+		tool(1, "Bash", "bd show x"),      // first attempt
+		retry,                             // self-retry motif
+		prompt(3, "no, that's the wrong x"),
+	}
+	eps := BuildEpisodes(evs)
+	if len(eps) != 1 {
+		t.Fatalf("want 1 episode, got %d", len(eps))
+	}
+	ep := eps[0]
+	// The get_nug was not reformulated, so the chain-based SelfRequery stays
+	// false — RU's FirstTry leg must not be polluted by an action-level retry.
+	if ep.SelfRequery {
+		t.Error("get_nug chain SelfRequery should stay false: the query was not reformulated")
+	}
+	// But the retry motif must surface in the episode and in the attribution
+	// TurnContext...
+	if !ep.RetryMotif {
+		t.Error("RetryMotif should be true: a following action carried event.Retry")
+	}
+	if tc := ep.TurnContext(); !tc.SelfRequery {
+		t.Errorf("TurnContext.SelfRequery should be true via the event.Retry motif; got %+v", tc)
+	}
+	// ...and place the repair on the interpretation hop.
+	if got := ep.Hop(); got != dialogue.HopInterp {
+		t.Errorf("Hop() = %q, want %q (a self-retry before a repair indicts interp)", got, dialogue.HopInterp)
+	}
+}
+
 // TestEpisodeHopWiring proves the attribute.TurnContext stub is now filled: the
 // episode's signals flow into AttributeHop and place a repair on the right hop.
 func TestEpisodeHopWiring(t *testing.T) {

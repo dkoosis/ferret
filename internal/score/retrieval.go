@@ -50,6 +50,7 @@ type Episode struct {
 	Results int    `json:"results"` // size of the served (last query's) result set
 
 	SelfRequery bool `json:"selfRequery,omitempty"` // ≥2 get_nug calls before a consumed result — Q1 / HopInterp tell
+	RetryMotif  bool `json:"retryMotif,omitempty"`  // a following action carried event.Retry (bd_show!→bd_show / retry-after-failure) — a HopInterp tell, kept SEPARATE from SelfRequery so RU's FirstTry leg stays the get_nug-chain-only signal
 	EmptyResult bool `json:"emptyResult,omitempty"` // served set was empty — R3a / HopRetrieval tell
 	Oversized   bool `json:"oversized,omitempty"`   // served set over the QPP cap — R3a tell
 
@@ -85,12 +86,19 @@ func (e Episode) ServedLoose() bool {
 }
 
 // TurnContext projects the episode's deterministic signals into the dialogue
-// attribution contract (fills the internal/dialogue/attribute.go stub): the
-// self-requery / empty / oversized booleans AttributeHop reads to place a repair
-// onto the hop it indicts.
+// attribution contract (fills internal/dialogue/attribute.go): the self-requery /
+// empty / oversized booleans AttributeHop reads to place a repair onto the hop it
+// indicts.
+//
+// SelfRequery here is the UNION of both self-correction tells — a get_nug
+// reformulation chain (Episode.SelfRequery) OR a following action the event
+// builder flagged as a retry-after-failure (Episode.RetryMotif, the
+// bd_show!→bd_show motif). Either means the agent tried to fix its own action
+// before the human spoke, which is the HopInterp signal. RU keeps the narrower
+// SelfRequery; only this attribution view widens it.
 func (e Episode) TurnContext() dialogue.TurnContext {
 	return dialogue.TurnContext{
-		SelfRequery:     e.SelfRequery,
+		SelfRequery:     e.SelfRequery || e.RetryMotif,
 		EmptyResult:     e.EmptyResult,
 		OversizedResult: e.Oversized,
 	}
@@ -110,6 +118,7 @@ type epBuild struct {
 	queries                 int
 	results                 []event.NugHit
 	selfRequery             bool
+	retryMotif              bool // a following action carried event.Retry
 
 	refID     string // first returned id referenced by a following action (tell 1)
 	refRank   int    // its 1-based rank in results
@@ -196,8 +205,15 @@ func (b *epBuild) addQuery(ev *event.Event) {
 
 // addAction records a following action's contribution to the consumption tells:
 // an explicit reference to a returned id (tell 1), a task-advancing Edit/Write
-// (tell 2 input), or a set_nug (coverage-gap input + tell-2 disqualifier).
+// (tell 2 input), or a set_nug (coverage-gap input + tell-2 disqualifier). It
+// also folds the event.Retry self-requery motif — a following action the event
+// builder flagged as a retry-after-failure (bd_show!→bd_show) — into the episode,
+// for the hop-attribution TurnContext (HopInterp). This is a hop-attribution-only
+// signal; it deliberately does not touch the RU consumption tells.
 func (b *epBuild) addAction(ev *event.Event) {
+	if ev.Retry {
+		b.retryMotif = true
+	}
 	if b.refID == "" {
 		if id, rank := referencedID(ev, b.results); id != "" {
 			b.refID, b.refRank = id, rank
@@ -256,6 +272,7 @@ func (b *epBuild) finalize() Episode {
 		Queries:        b.queries,
 		Results:        len(b.results),
 		SelfRequery:    b.selfRequery,
+		RetryMotif:     b.retryMotif,
 		EmptyResult:    empty,
 		Oversized:      len(b.results) > oversizeResultCap,
 		ConsumedStrict: consumedStrict,

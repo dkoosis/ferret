@@ -190,6 +190,7 @@ func TestClassifyBoundary(t *testing.T) {
 		{"unknown bare command is a boundary", cmd("/deploy"), false, ""},
 		{"local-command carrier", "<local-command-stdout>See ya!</local-command-stdout>", true, "carrier"},
 		{"task-notification carrier", "<task-notification> <task-id>abc</task-id> </task-notification>", true, "carrier"},
+		{"compaction-summary carrier", "This session is being continued from a previous conversation that ran out of context. The conversation is summarized below:", true, "carrier"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -199,6 +200,36 @@ func TestClassifyBoundary(t *testing.T) {
 					c.prompt, skip, kind, c.wantSkip, c.wantKind)
 			}
 		})
+	}
+}
+
+// TestSegmentSourceCompactionSummary guards the smoke FP at turn 15: the
+// post-compaction carrier turn (a user message the harness injects, opening with
+// "This session is being continued from a previous conversation…") reads as prompt
+// text but is a system envelope, not user intent — it must fold into the live
+// segment as a carrier, NOT open a spurious boundary.
+func TestSegmentSourceCompactionSummary(t *testing.T) {
+	lines := []string{
+		`{"type":"user","sessionId":"s","message":{"role":"user","content":"do the real task"}}`,
+		`{"type":"assistant","sessionId":"s","message":{"role":"assistant","content":[` +
+			`{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"x"}}]}}`,
+		`{"type":"user","sessionId":"s","message":{"role":"user","content":"This session is being continued from a previous conversation that ran out of context. The conversation is summarized below:"}}`,
+		`{"type":"assistant","sessionId":"s","message":{"role":"assistant","content":[` +
+			`{"type":"tool_use","id":"t2","name":"Edit","input":{"file_path":"y"}}]}}`,
+	}
+	res, err := SegmentSource(writeSession(t, lines))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Segments) != 1 {
+		t.Fatalf("compaction summary must NOT open a boundary: want 1 segment, got %d: %+v", len(res.Segments), res.Segments)
+	}
+	// Both calls attribute to the single live task; the summary folded as a carrier.
+	if res.Segments[0].FirstCall != 0 || res.Segments[0].LastCall != 1 {
+		t.Errorf("seg range = %d..%d, want 0..1 (both calls owned by the live task)", res.Segments[0].FirstCall, res.Segments[0].LastCall)
+	}
+	if res.Conts != 1 || len(res.Segments[0].Conts) != 1 || res.Segments[0].Conts[0].Kind != "carrier" {
+		t.Errorf("want one carrier continuation, got conts=%d seg0.Conts=%+v", res.Conts, res.Segments[0].Conts)
 	}
 }
 
