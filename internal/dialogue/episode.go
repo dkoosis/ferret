@@ -27,6 +27,23 @@ const (
 // still flagged repair-heavy. v1 heuristic — tune against dk-validated episodes.
 const repairHeavyCut = 2
 
+// ClassifyTurns rolls one episode's ordered user turns up into an Outcome: it
+// TagMoves each raw turn, then Classify()s the move sequence. This is the
+// per-episode binding the segmenter needs — a segment IS an episode, so its
+// ordered user turns (the opening prompt plus any folded affirmations) are exactly
+// this input. The session-level rollup (cmd/ferret/dialogue.go) is the same
+// TagMove→Classify pipeline over a whole transcript; this narrows it to one task,
+// so "this routine SUCCEEDS" vs "this loop ends in abandonment" reads at the
+// episode grain. PARADISE task-success leg (Walker et al. 1997).
+func ClassifyTurns(turns []string) Outcome {
+	moves := make([]Move, 0, len(turns))
+	for _, t := range turns {
+		m, _ := TagMove(t)
+		moves = append(moves, m)
+	}
+	return Classify(moves)
+}
+
 // Classify reads an ordered move sequence (one episode's user turns, in turn
 // order) into an Outcome. v1 rules, deliberately simple and auditable:
 //
