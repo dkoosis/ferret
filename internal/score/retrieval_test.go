@@ -352,3 +352,132 @@ func TestEpisodeHopWiring(t *testing.T) {
 		})
 	}
 }
+
+// --- ferret-bbp.4: deterministic Hop2 (query→result) QPP retrieval-quality grade ---
+
+// TestEpisodeQPP_GradesResultSetQuality walks each rubric branch of the
+// reference-free QPP grade: empty→low, oversized→low-clarity (mid, charged to
+// retrieval), result-used→high, results-but-no-use→mid. The grade is a pure
+// function of the served result-set signals — scored even when nothing broke.
+func TestEpisodeQPP_GradesResultSetQuality(t *testing.T) {
+	cases := []struct {
+		name      string
+		ep        Episode
+		wantGrade QPPGrade
+		wantHop   dialogue.Hop
+	}{
+		{
+			name:      "empty/error result → low, charged to retrieval",
+			ep:        Episode{EmptyResult: true},
+			wantGrade: QPPLow, wantHop: dialogue.HopRetrieval,
+		},
+		{
+			name:      "oversized set → low-clarity (mid), charged to retrieval",
+			ep:        Episode{Results: 30, Oversized: true},
+			wantGrade: QPPMid, wantHop: dialogue.HopRetrieval,
+		},
+		{
+			name:      "oversized beats a downstream accept: clarity defect is not masked",
+			ep:        Episode{Results: 30, Oversized: true, ConsumedLoose: true},
+			wantGrade: QPPMid, wantHop: dialogue.HopRetrieval,
+		},
+		{
+			name:      "result used → high",
+			ep:        Episode{Results: 3, ConsumedStrict: true, ConsumedLoose: true},
+			wantGrade: QPPHigh, wantHop: dialogue.HopNone,
+		},
+		{
+			name:      "results returned, no use signal → mid",
+			ep:        Episode{Results: 3},
+			wantGrade: QPPMid, wantHop: dialogue.HopNone,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := c.ep.QPP()
+			if got.Grade != c.wantGrade {
+				t.Errorf("Grade = %q, want %q", got.Grade, c.wantGrade)
+			}
+			if got.Hop != c.wantHop {
+				t.Errorf("Hop = %q, want %q", got.Hop, c.wantHop)
+			}
+		})
+	}
+}
+
+// TestEpisodeQPP_DataDiagnosisChargesRetrievalNotQuery is the critical bbp.4
+// nuance: a human DATA-diagnosis reaction ("it moved the file") after an empty
+// search is a Hop2 (retrieval) FAIL — the data/index was stale, the query was
+// faithful. The QPP grade is LOW and the failure is charged to the RETRIEVAL hop,
+// NEVER the query/interp hop. A data diagnosis is not lexically a repair, so the
+// dialogue tagger reads it Neutral; the grade keys off the empty result-set, not
+// the move, so the query is never blamed for a data failure.
+func TestEpisodeQPP_DataDiagnosisChargesRetrievalNotQuery(t *testing.T) {
+	evs := []event.Event{
+		getNug(0, "where is landmark.go"),                             // empty: the file moved, index stale
+		prompt(1, "it moved the file, it's under internal/score now"), // data diagnosis, NOT a query correction
+	}
+	eps := BuildEpisodes(evs)
+	if len(eps) != 1 {
+		t.Fatalf("want 1 episode, got %d", len(eps))
+	}
+	ep := eps[0]
+	// A data diagnosis is Neutral, not a repair cue — the human's words never
+	// indict the query.
+	if ep.ClosingMove != dialogue.MoveNeutral {
+		t.Fatalf("ClosingMove = %q, want neutral (a data diagnosis is not a repair cue)", ep.ClosingMove)
+	}
+	q := ep.QPP()
+	if q.Grade != QPPLow {
+		t.Errorf("Grade = %q, want low (an empty served set is a Hop2 fail)", q.Grade)
+	}
+	if q.Hop != dialogue.HopRetrieval {
+		t.Errorf("Hop = %q, want retrieval (the data/index failed, not the query)", q.Hop)
+	}
+	if q.Hop == dialogue.HopInterp {
+		t.Error("a Hop2 data-diagnosis fail must NOT be charged to the query/interp hop")
+	}
+}
+
+// TestEpisodeQPP_SelfRequeryNotChargedToRetrieval is the inverse guard: a
+// self-requery that ends in a used, clean result is QUERY (Hop1/interp) churn,
+// not a retrieval defect. The retrieval delivered, so the grade is HIGH and no
+// retrieval hop is charged — a query failure is never charged to Hop2.
+func TestEpisodeQPP_SelfRequeryNotChargedToRetrieval(t *testing.T) {
+	evs := []event.Event{
+		getNug(0, "lock", "aaa111"),
+		getNug(1, "file lock coordination", "bbb222"), // reformulation: self-requery (Hop1 churn)
+		shell(2, "trixi get bbb222"),                  // the returned nug was used
+		prompt(3, "yes"),
+	}
+	ep := BuildEpisodes(evs)[0]
+	if !ep.SelfRequery {
+		t.Fatal("setup: expected a self-requery chain")
+	}
+	q := ep.QPP()
+	if q.Grade != QPPHigh {
+		t.Errorf("Grade = %q, want high (the result was used; the requery is Hop1 churn)", q.Grade)
+	}
+	if q.Hop != dialogue.HopNone {
+		t.Errorf("Hop = %q, want none (no retrieval-hop defect)", q.Hop)
+	}
+}
+
+// TestEpisodeQPP_Deterministic is the byte-stability gate (doc.go contract):
+// identical episodes grade identically across repeated calls.
+func TestEpisodeQPP_Deterministic(t *testing.T) {
+	eps := []Episode{
+		{EmptyResult: true},
+		{Results: 30, Oversized: true},
+		{Results: 3, ConsumedLoose: true},
+		{Results: 3},
+	}
+	for i := range eps {
+		first := eps[i].QPP()
+		for run := range 5 {
+			if got := eps[i].QPP(); got != first {
+				t.Fatalf("episode %d run %d not stable: got %+v, want %+v", i, run, got, first)
+			}
+		}
+	}
+}
