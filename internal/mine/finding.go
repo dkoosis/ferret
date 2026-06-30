@@ -20,8 +20,38 @@ type Finding struct {
 	FailRate float64     // share of member tokens that are fail-marked
 	Burn     int         // measured tokens of context the motif's occurrences consumed
 	Surprise float64     // mean bits/tok of the sessions the motif recurs in (0 = no signal)
-	ExStream int         // exemplar location
+
+	// Dialogue + hop signals (ferret-bbp.6) — the human-side OUTCOME and the
+	// deterministic Hop2 retrieval-quality grade for the sessions this motif recurs
+	// in, rolled on by AttachDialogue so the MAIN findings pipeline surfaces them
+	// beside burn: a motif that drags context AND ends repair-heavy/abandoned with an
+	// empty-set retrieval is worse than burn alone shows. Aggregated per HOST SESSION
+	// (the Surprise grain) — a coarse association, not per-occurrence attribution.
+	// Zero values mean no signal (the session carried no accept/repair, or the motif
+	// touched no scored retrieval). Hop1 is the LLM interp-fidelity leg (ferret-bbp.5):
+	// reserved, left zero so it enriches later without reshaping the struct.
+	Outcome string // dialogue PARADISE outcome: success | repair-heavy | abandoned ("" = unknown)
+	Hop2    string // worst QPP retrieval grade across host sessions: low | mid | high ("" = no retrieval)
+	Hop1    string // reserved — LLM interp-fidelity grade (ferret-bbp.5), zero until built
+	Repairs int    // repair-tagged user turns summed across host sessions
+	Accepts int    // accept-tagged user turns summed across host sessions
+
+	ExStream int // exemplar location
 	ExSeq    int
+}
+
+// StreamDialogue is one session's deterministic dialogue + Hop2 rollup, keyed into
+// AttachDialogue by Corpus.StreamKeys ("project/session@agent"). The producer
+// (cmd/ferret) reads the events the corpus is built from, tags user turns with the
+// dialogue mover, and grades each retrieval episode's Hop2 QPP — then hands the
+// per-session reduction here. Outcome / Hop2 hold the canonical taxonomy strings
+// (dialogue.Outcome / score.QPPGrade) so package mine stays decoupled from those
+// packages; "" in either means the session produced no signal.
+type StreamDialogue struct {
+	Outcome string // dialogue.Outcome for the session ("" = unknown / no signal)
+	Hop2    string // worst score.QPPGrade across the session's retrieval episodes ("" = none)
+	Repairs int    // repair-tagged user turns in the session
+	Accepts int    // accept-tagged user turns in the session
 }
 
 // FindingKind is what the motif IS.
@@ -103,6 +133,82 @@ func Findings(c *Corpus, cards []*Card, maxGap int, surprise map[string]float64,
 		return out[i].Count > out[j].Count
 	})
 	return out
+}
+
+// AttachDialogue rolls the per-session dialogue + Hop2 signals onto each finding,
+// de-islanding the dialogue / retrieval scorers into the MAIN findings pipeline
+// (ferret-bbp.6). For each motif it aggregates over the streams it recurs in — the
+// same host-session grain motifSurprise uses: repair/accept turns SUM, and the
+// WORST outcome / worst Hop2 grade surface, so a burn-ranked finding also reads
+// "...and these sessions ended abandoned with an empty-set retrieval". A nil index
+// is the off switch (the fix-baseline path, which only needs burn, passes nil).
+// Hop1 (the bbp.5 LLM interp leg) is intentionally never set here — it enriches the
+// reserved field later without touching this pass.
+func AttachDialogue(findings []*Finding, c *Corpus, idx map[string]StreamDialogue, maxGap int) {
+	if idx == nil {
+		return
+	}
+	for _, f := range findings {
+		agg := aggregateDialogue(f, c, idx, maxGap)
+		f.Outcome, f.Hop2 = agg.Outcome, agg.Hop2
+		f.Repairs, f.Accepts = agg.Repairs, agg.Accepts
+	}
+}
+
+// aggregateDialogue rolls every stream whose motif hosts this finding into one
+// worst-wins StreamDialogue: counts summed, Outcome/Hop2 taking the most-severe grade.
+func aggregateDialogue(f *Finding, c *Corpus, idx map[string]StreamDialogue, maxGap int) StreamDialogue {
+	var agg StreamDialogue
+	for si, st := range c.Streams {
+		if !containsMotif(st, f.IDs, maxGap) {
+			continue
+		}
+		sd, ok := idx[c.StreamKeys[si]]
+		if !ok {
+			continue
+		}
+		agg.Repairs += sd.Repairs
+		agg.Accepts += sd.Accepts
+		if outcomeSeverity(sd.Outcome) > outcomeSeverity(agg.Outcome) {
+			agg.Outcome = sd.Outcome
+		}
+		if hopSeverity(sd.Hop2) > hopSeverity(agg.Hop2) {
+			agg.Hop2 = sd.Hop2
+		}
+	}
+	return agg
+}
+
+// outcomeSeverity ranks dialogue.Outcome strings so the worst (most negative) one
+// across a motif's host sessions wins the rollup — abandoned outranks repair-heavy
+// outranks success; unknown / "" carry no signal (severity 0).
+func outcomeSeverity(o string) int {
+	switch o {
+	case "abandoned":
+		return 3
+	case "repair-heavy":
+		return 2
+	case "success":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// hopSeverity ranks score.QPPGrade strings so the worst retrieval grade wins the
+// rollup — low (the clearest Hop2 fail) outranks mid outranks high; "" = no
+// retrieval episode scored, no signal.
+func hopSeverity(g string) int {
+	switch g {
+	case "low":
+		return 3
+	case "mid":
+		return 2
+	case "high":
+		return 1
+	default:
+		return 0
+	}
 }
 
 // measure re-matches the motif across every stream and returns total

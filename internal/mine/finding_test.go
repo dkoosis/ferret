@@ -151,6 +151,88 @@ func TestFindingsSkipsPhantomMotif(t *testing.T) {
 	}
 }
 
+// TestAttachDialogueRollsUpPerMotif guards ferret-bbp.6: the per-session dialogue
+// Outcome + Hop2 retrieval grade roll onto each motif's Finding, aggregated over the
+// streams the motif recurs in (the surprise grain). The WORST outcome and WORST Hop2
+// grade across host sessions surface (so a motif that ends abandoned in any of its
+// sessions reads that way), and repair/accept turns SUM. A nil index is the off
+// switch, and Hop1 (the bbp.5 LLM leg) is never set here.
+func TestAttachDialogueRollsUpPerMotif(t *testing.T) {
+	// motif a→b recurs in two sessions; c→d only in the third.
+	c := bytesCorpusKeyed([][]tb{
+		{{"a", 1}, {"b", 1}},
+		{{"a", 1}, {"b", 1}},
+		{{"c", 1}, {"d", 1}},
+	}, []string{"p/s1@", "p/s2@", "p/s3@"})
+
+	idx := map[string]StreamDialogue{
+		"p/s1@": {Outcome: "success", Hop2: "high", Accepts: 1},
+		"p/s2@": {Outcome: "abandoned", Hop2: "low", Repairs: 2},
+		"p/s3@": {Outcome: "repair-heavy", Hop2: "mid", Repairs: 1, Accepts: 1},
+	}
+
+	cards := []*Card{
+		{IDs: idsFor(c, "a", "b"), Bucket: BucketScript},
+		{IDs: idsFor(c, "c", "d"), Bucket: BucketScript},
+	}
+	got := Findings(c, cards, 3, nil, 0)
+	AttachDialogue(got, c, idx, 3)
+
+	byMotif := func(tok string) *Finding {
+		t.Helper()
+		want := idsFor(c, tok)[0]
+		for _, f := range got {
+			if f.IDs[0] == want {
+				return f
+			}
+		}
+		t.Fatalf("no finding rooted at %q", tok)
+		return nil
+	}
+
+	ab := byMotif("a")
+	if ab.Outcome != "abandoned" {
+		t.Errorf("a→b Outcome = %q, want abandoned (worst across s1+s2)", ab.Outcome)
+	}
+	if ab.Hop2 != "low" {
+		t.Errorf("a→b Hop2 = %q, want low (worst across s1+s2)", ab.Hop2)
+	}
+	if ab.Repairs != 2 || ab.Accepts != 1 {
+		t.Errorf("a→b repairs/accepts = %d/%d, want 2/1 (summed across s1+s2)", ab.Repairs, ab.Accepts)
+	}
+	if ab.Hop1 != "" {
+		t.Errorf("a→b Hop1 = %q, want empty (bbp.5 not built)", ab.Hop1)
+	}
+
+	cd := byMotif("c")
+	if cd.Outcome != "repair-heavy" || cd.Hop2 != "mid" {
+		t.Errorf("c→d outcome/hop2 = %q/%q, want repair-heavy/mid (s3 only)", cd.Outcome, cd.Hop2)
+	}
+}
+
+// TestAttachDialogueNilIndexIsOff proves the off switch: a nil index leaves every
+// dialogue field at its zero value (the fix-baseline path, which only needs burn).
+func TestAttachDialogueNilIndexIsOff(t *testing.T) {
+	c := bytesCorpusKeyed([][]tb{{{"a", 1}, {"b", 1}}}, []string{"p/s1@"})
+	got := Findings(c, []*Card{{IDs: idsFor(c, "a", "b"), Bucket: BucketScript}}, 3, nil, 0)
+	AttachDialogue(got, c, nil, 3)
+	f := got[0]
+	if f.Outcome != "" || f.Hop2 != "" || f.Repairs != 0 || f.Accepts != 0 {
+		t.Errorf("nil index should leave dialogue fields zero, got %+v", f)
+	}
+}
+
+// TestAttachDialogueSkipsUnscoredStreams proves a motif seen only in streams absent
+// from the index keeps its zero-value dialogue fields — no phantom signal.
+func TestAttachDialogueSkipsUnscoredStreams(t *testing.T) {
+	c := bytesCorpusKeyed([][]tb{{{"a", 1}, {"b", 1}}}, []string{"p/s1@"})
+	got := Findings(c, []*Card{{IDs: idsFor(c, "a", "b"), Bucket: BucketScript}}, 3, nil, 0)
+	AttachDialogue(got, c, map[string]StreamDialogue{"other@": {Outcome: "abandoned", Hop2: "low"}}, 3)
+	if f := got[0]; f.Outcome != "" || f.Hop2 != "" {
+		t.Errorf("motif in an unscored stream should stay zero, got Outcome=%q Hop2=%q", f.Outcome, f.Hop2)
+	}
+}
+
 // TestFindingsSplitsRoutineBySurprise guards ferret-c7r: the SAME recurring
 // motif is a routine to script when its host sessions are predictable, but
 // friction to fix when those sessions are surprising. Surprise — not the motif

@@ -22,6 +22,13 @@ type MDFinding struct {
 	FailRate float64  // share of fail-marked member tokens (0..1)
 	Burn     int      // measured tokens of context the motif's occurrences cost
 	Evidence string   // exemplar location, "sess@pos"
+
+	// Dialogue + hop signals (ferret-bbp.6), resolved to strings by main.go from
+	// mine.Finding. Empty = no signal; rendered into the evidence block only when set.
+	Outcome string // dialogue outcome: success | repair-heavy | abandoned
+	Hop2    string // worst Hop2 retrieval grade across host sessions: low | mid | high
+	Repairs int    // repair-tagged user turns across host sessions
+	Accepts int    // accept-tagged user turns across host sessions
 }
 
 // usdPerToken prices burn in dollars for the human report. burn counts the
@@ -64,8 +71,8 @@ func Markdown(w io.Writer, lens string, total int, findings []MDFinding) error {
 	fmt.Fprintf(bw, "_lens %s · %d findings · cost ≈ burn × Sonnet input price ($3/1M tok)_\n", lens, total)
 
 	byKind := map[string][]MDFinding{}
-	for _, f := range findings {
-		byKind[f.Kind] = append(byKind[f.Kind], f)
+	for i := range findings {
+		byKind[findings[i].Kind] = append(byKind[findings[i].Kind], findings[i])
 	}
 
 	for _, sec := range mdSections {
@@ -84,8 +91,8 @@ func Markdown(w io.Writer, lens string, total int, findings []MDFinding) error {
 			continue
 		}
 		fmt.Fprintln(bw)
-		for _, f := range group {
-			writeMDFinding(bw, f)
+		for i := range group {
+			writeMDFinding(bw, group[i])
 		}
 	}
 
@@ -104,8 +111,29 @@ func writeMDFinding(bw *bufio.Writer, f MDFinding) {
 	fmt.Fprintln(bw, "  <details><summary>evidence</summary>")
 	fmt.Fprintln(bw)
 	fmt.Fprintf(bw, "  %d occurrences · %.0f%% fail · ex: %s\n", f.Count, f.FailRate*100, f.Evidence)
+	if note := mdDialogueNote(f); note != "" {
+		fmt.Fprintln(bw)
+		fmt.Fprintf(bw, " %s\n", note)
+	}
 	fmt.Fprintln(bw)
 	fmt.Fprintln(bw, "  </details>")
+}
+
+// mdDialogueNote renders the de-islanded dialogue + Hop2 signals (ferret-bbp.6) as
+// a single evidence line — "outcome: abandoned · hop2 low · repairs 3 · accepts 0"
+// — emitting only the legs that carry a signal, so a finding with none adds nothing.
+func mdDialogueNote(f MDFinding) string {
+	var parts []string
+	if f.Outcome != "" {
+		parts = append(parts, "outcome: "+f.Outcome)
+	}
+	if f.Hop2 != "" {
+		parts = append(parts, "hop2 "+f.Hop2)
+	}
+	if f.Repairs > 0 || f.Accepts > 0 {
+		parts = append(parts, fmt.Sprintf("repairs %d · accepts %d", f.Repairs, f.Accepts))
+	}
+	return strings.Join(parts, " · ")
 }
 
 // mdCostPhrase renders "~Nk tokens / ~$X across M sessions" — the
