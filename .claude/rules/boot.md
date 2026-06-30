@@ -1,121 +1,39 @@
 # Boot
-updated: 2026-06-19
+updated: 2026-06-30
 
-## lane: TersePanda
-updated: 2026-06-19
+*Project working-memory. Maintained for future-me: current state + live frontier + traps that still bite. Resolved lanes pruned — history lives in beads/PRs.*
 
-→ next ready: **kuv.10** (landmark progress, plan_approved). Dispatch when picked.
+## State
+- main @ `8672537`, origin synced. PR queue EMPTY.
+- Scorers live in **`internal/score/`** (landmark/quality/conform all there — ratified, design-doc D2). New scorers go here.
+- `/team` = one shared tree + loto (worktrees retired). No concurrent `make check`; primary verifies once at wave end.
 
-✓ kuv.5 MERGED (#44) + bead closed; worktree/branch pruned; main @ 77e891d. Consistency scalar = per-task COST (1−CV), not efficiency — dk-ratified plan modification (exact-Shape → axes shape-determined → spread~0). Plan+code+docs agree. ✗ re-surface.
-✓ #41 merged (sq.2 judge + golden + d28 spec) → **d28 closed**. kuv.5: internal/score/quality.go (ScoreAxes per-task eff/adapt + ClusterByShape pass^k) + mine.MeanStdDev shared σ (Q3) + `ferret quality` 2-scope cmd.
-✓ earlier: merged #35–#39; 5 beads closed.
+## Frontier — where the work is
 
-‡ traps
-- PRE-EXISTING nilaway debt: internal/gates/gates.go:242 + internal/analyst/golden.go:111 (from #37/#41). `make check` doesn't gate on it (`audit` does). Don't chase as a regression.
-- wave2 lanes all add to cmd/ferret/main.go CLI → worktree-isolate.
+**ferret-bbp** (epic, in_progress) — User-turn repair/acceptance tagger: read intent from the *human's words*, not just tool sequences. **Deterministic spine COMPLETE** (#49–52): boundary guard → per-segment Outcome → TurnContext/AttributeHop → Hop2 QPP → surfaced on `mine.Finding` (rank/report/out). The **consumer clause** of the retrieval-outcome contract below.
+- ✓ shipped: bbp.1 (compaction-carrier boundary guard) · bbp.2 (per-seg Outcome rollup) · bbp.3 (TurnContext, un-stubbed AttributeHop) · bbp.4 (det. Hop2 QPP scorer, `internal/score/qpp.go`) · bbp.6 (de-island dialogue+hop onto `mine.Finding`, emit seam `cmd/ferret/finding_dialogue.go`)
+- → remaining = the **LLM half**, both `requires_plan` (dk drives, ✗ bare impl): **bbp.5** Hop1 interp-fidelity judge (API-shape + judge-prompt + bias-guard) · **bbp.7** v2 intent-move taxonomy (reject/clarify/constrain), design-time LLM mining. Next move: plan-lane both, or sit with dk on the taxonomy.
+- bbp regex-first; ✗ emotion detector (dev jargon "kill/dead/braindead" ≠ affect)
 
-~ dk: dry fenced grants, zero corrections — trust-the-loop. Surface deviations, don't ask permission mid-build.
+Under epic **ferret-kuv** (container, ✗ dispatch): **567** (metrics-engine for a Claude analyst — per-candidate bundle + proposal loop, in_progress), **kuv.3** (tool-for-intent applicability check, in_progress).
 
-## lane: PlaidSparrow
+**Retrieval-outcome contract (trixi⇄ferret)** — drafted 2026-06-29 → `~/Projects/dk/Project/trixi/specs/retrieval-outcome-contract-design.md`. The validation seam:
+`trixi/observe.2.1` emits retrieval-event JSONL (producer) → `ferret/bbp` joins to task segments + adjudicates outcome (consumer) → `search-loop.4` reads back via interrupted-time-series (reader).
+Decided calls: `schema_version`/record · sidecar JSONL not the CC transcript · per-task-segment grain (store fine, roll up) · `config_fingerprint` as ITS segment-key · key = `(session_id, agent_id, ts)`, carry `agent_type`. Out of scope: `observe.2.2` (Q3 prompt→query, upstream). **ferret's side of this contract = the bbp epic.**
 
-→ verify agent_id/agent_type lands on ferret's capture-hook event (Python-vs-TS field split), then wire it as the parent-vs-subagent key for d01/bbp get_nug + user-turn attribution.
+## Live traps
+- **agent_id/agent_type are the ONLY parent↔subagent discriminator** — `session_id` + `transcript_path` are SHARED (claude-code-guide-confirmed). Anything keying retrieval/attribution per-agent MUST carry `agent_id` (it's Trap 2 in the contract; bbp.3 TurnContext attribution rides on it).
+- **/team shared-tree clobber** — a wave agent relocating a *peer's* untracked files via a flat-basename scratch dir can silently destroy untracked work (lost kuv.10's `internal/score/landmark.go`, 6-19). Filed **`ccp-l1nf`** (cc-plugins, P1). loto is a no-op *within* a wave (shared identity, loto-fs84); write-set disjointness is the only guard and it's leaky for untracked files. ✗ reach outside your write-set.
+- **Branch-staleness diff** — a branch that LOOKS like a huge diff vs main is usually a stale merge-base fooling the *three-dot* diff. Real tell = two-dot tree diff: `git diff main <branch>`.
+- nilaway debt at `gates.go:242` / `golden.go:111` — CLEARED by #48 (provably nil-safe). ✗ re-chase as a regression.
+- **`codex-review.yml` fails at infra level** (~30s run, no review posted) — recurring across PRs; the `@codex review` comment trigger doesn't land a verdict. ✗ wait on it or treat as a gate. `make check` (local) is the gate (ci-on-demand.md).
+- **bbp impl lint tail** — adding fields to a hot struct (`mine.Finding`→152B) trips `rangeValCopy` on *existing* value-range loops; integration beads tend to push a func past gocognit 15. Cheap to fix at wave verify (index-range + helper-extract), but expect it.
 
-✓ Board-readable get_nug improvement-flow write-up → nug `a55d63b61ddb`; confirmed Q3 (prompt→query) + bbp (repair/acceptance) as the two frontier legs over the shipped det/judged scorers.
+## dk read (stable, 30+ sessions)
+Dry fenced grants, zero corrections → trust-the-loop. Surface deviations, ✗ ask permission mid-build. On **open design** dk drives + wants the *why* before a model-changing/destructive call; hand him the approve/merge fork crisply (he ends on "next?"). When dk states a ground-truth fact, verify-then-proceed — ✗ re-litigate.
 
-‡ traps
-- CC hooks: session_id + transcript_path are SHARED parent↔subagent; only agent_id/agent_type discriminate (SubagentStop also carries agent_transcript_path).
+## Loose thread
+- read-before-edit/write hookify guard — top ferret-scan burn finding (`Edit!⇝Read` + `Write!⇝Read⇝Write`, ~670k). Build as a hook, log in the ferret fix ledger. Harness-side, not a ferret bead. Done-status unverified.
 
-~ dk: research/divergent session — light-touch steering questions, zero corrections.
-
-## lane: NullMerlin
-
-→ Watch PR#34 (ferret-d01) for bot review (like #33); on merge `bd close ferret-d01`, then bbp analysis follow-ons.
-
-✓ PR#33 bbp tagger merged (3 gemini fixes accepted); filed+shipped ferret-d01 — full prompt text on events → PR#34
-
-‡ traps
-- d01 captures harness envelopes (teammate-msg/command/compaction-summary) AS prompt text — filtering them is bbp analysis follow-on #4, NOT ingestion
-- ferret-d01 blocks ferret-bbp (dep wired)
-
-~ dk terse fenced grant, "let's resume"→headway; zero corrections, trust-the-loop
-
-## lane: ProudBuffalo
-
-→ Merge PR#25 (5ic) + #26 (kuv.2 det-half): `gh pr merge 25 26 --squash`. Then kuv.2 analyst-merge half — interactive, dk=validator.
-
-✓ /team backlog: 5ic + kuv.2 det-half → PR#25/#26; grooming deferred 567 behind kuv.2
-
-‡ traps
-- kuv.2 bead STAYS OPEN post-#26 — only deterministic Go half shipped; analyst merge half remains (by design)
-- left local: fix/ferret-5ic + fix/ferret-kuv.2 (pushed); wave branch team/impl-20260616-2241 kept
-
-~ dk: grooming + autonomous team-backlog, zero corrections — trust-the-loop when fenced
-
-## lane: PrimeLeopard
-
-→ Build read-before-edit/write hookify guard — top baseline fix (~670k burn: Edit!⇝Read + Write!⇝Read⇝Write), log in ferret fix ledger (skill §Close the loop). `/ferret:scan` re-runs.
-
-✓ /team backlog drain: kuv.1 spine subcommand → draft PR#23 (await dk merge); kuv.7 closed (snipe WAS indexed in-window → DESIGN non-adoption finding VALID)
-✓ deferred ferret-567 → dk call: 2026-06-11 design superseded-ish by kuv intent reframe ("Extends ferret-567") — live / fold / supersede?
-
-‡ traps
-- SHARED checkout, ≥1 LIVE peer — a peer did the docs/→vault move (a3defde, UNPUSHED on main; main 1 ahead of origin, peer pushes). I branch-switched + reset --hard in the shared tree = risky; use worktrees / loto-coordinate next time. ✗ blanket commit/push.
-- left local: team/impl-20260616-1500 + fix/ferret-kuv.1 (pushed). Old 0611/1237 peer-branch traps STALE → dropped
-
-## lane: MildEgret
-
-→ Merge PR#27 (kuv.4 conform det-half): `gh pr merge 27 --squash`. Then kuv.4 analyst-labeling half (interactive, dk=validator) — bead STAYS OPEN.
-
-✓ kuv.4 deterministic conformance scorer → PR#27 (`ferret conformance` + internal/conform, 100% cov, make check green). Validated loto/6ccedb07 — localizes skipped wait-green gate + 8 off-plan polls.
-
-‡ traps
-- seq reference is enough (dk call) — ✗ build branching/partial-order model
-- left: fix/ferret-kuv.4 (pushed)
-
-~ dk: terse fenced grant, zero corrections, trust-the-loop; commit→push staccato at close.
-
-## lane: PrimeStoat
-
-→ ferret-bbp when picked — user-turn repair/acceptance tagger, regex-first, extends kuv intent-reframe. `bd show ferret-bbp`
-
-✓ assessed ferret vs ../dk AHI report (analyzing agent-human interaction logs.md); filed ferret-bbp w/ refs (PARADISE, ISO 24617-2, CA repair, USE)
-
-‡ traps
-- ferret reads tool-call stream only; AHI gap = USER-side language (repair "no/try again", acceptance "save this") → outcome label, the missing PARADISE leg
-- v1 regex-only, ✗ emotion detector (dev jargon "kill/dead/braindead" ≠ affect)
-
-~ dk: terse fenced grant, "yes + refs", zero corrections — trust-the-loop
-
-## lane: UltraVole
-
-→ After PR#31 merges, close the 9 beads: `bd close ferret-s3z ferret-0vz ferret-g2o ferret-v42 ferret-c71 ferret-001 ferret-0m7 ferret-020 ferret-xz8`.
-
-✓ Fixed 9 go-bug-audit beads (s3z 0vz g2o v42 c71 001 0m7 020 xz8) + tests → PR#31; check/race/nilcheck green
-
-‡ traps
-- beads still CLAIMED (open) — close on merge
-- lockData `//go:build unix` (Flock); dropped writeAtomic perm (unparam)
-
-~ dk killed the conservative profile: commit/push/PR freely, review IS the PR. ✗ ask before committing.
-
-## lane: GoldSquirrel
-
-→ PR queue empty — no pending merges. Check `gh pr list` next session.
-
-✓ assessed PRs: merged #32 (CLAUDE.md team-maintainer profile only — code already in #31), closed #30 superseded (stale, merging would regress 792 lines)
-
-‡ traps
-- #30/#32 LOOKED like huge diffs vs main — stale merge-base fooling three-dot diff. Real tell = two-dot tree diff (`git diff main branch`). #31 squash-folded kuv.12+candidates+bug-audit, so branch copies were dupes.
-
-~ dk fenced "IFF improves" grant, zero corrections — trust-the-loop
-
-## lane: RawStarling
-
-→ Review 6 plan docs in docs/superpowers/plans/ (bbp, kuv.5/8/9/10, 2p6); ratify `internal/score/` as scorer pkg home (all 6 flagged it; design doc D2 says so) → `bd update <id> --set-metadata plan_approved=true` per plan to unblock impl.
-
-✓ /team backlog drain: 6 plan-gated beads → 6 plan docs on main (2 waves, 0 corrections)
-
-‡ traps
-- queue is 100% plan-gate-pending now — next /team backlog defers all 6 as gate-pending until plans approved. epic ferret-kuv = container, ✗ dispatch.
-
-~ dk: terse fenced grant, ended on "next?" — wants the approve/merge fork, ✗ more dispatch
+## Shipped ledger
+bbp deterministic spine #49–52 (bbp.1/.2/.3/.4/.6) · landmark wave kuv.10/vy7/afm/t5d (#45–47) · sq.2 judge+golden + d28 spec (#41) · kuv.5 quality axes (#44) · kuv.4 conformance (#27) · kuv.2 segmentation · kuv.1 spine (#23) · d01 prompt-text capture (#34) · bbp tagger (#33) · 9 go-bug-audit fixes (#31) · nilaway clear (#48).
