@@ -89,6 +89,39 @@ func TestClassify(t *testing.T) {
 	}
 }
 
+// TestClassifyTurns is the per-EPISODE rollup contract (ferret-bbp.2): an
+// episode's ordered user turns (a segment's opening prompt + folded acks) tag to
+// moves and roll up into one Outcome. Covers the success leg and every non-success
+// path, including repair-heavy — which only surfaces when several repairs land in
+// the SAME episode (a structure the move-string view expresses but per-segment
+// extraction rarely yields, since most repairs open fresh segments).
+func TestClassifyTurns(t *testing.T) {
+	tests := []struct {
+		name  string
+		turns []string
+		want  Outcome
+	}{
+		{"neutral then accept is success",
+			[]string{"add a foo function", "lgtm ship it"}, OutcomeSuccess},
+		{"one repair then accept still success",
+			[]string{"add a foo function", "no, use bar", "great, that works"}, OutcomeSuccess},
+		{"three repairs then accept is repair-heavy",
+			[]string{"no wrong", "still wrong", "no not that", "yes perfect"}, OutcomeRepairHeavy},
+		{"opens on repair, no accept is abandoned",
+			[]string{"no, that's wrong, revert it"}, OutcomeAbandoned},
+		{"only neutral turns is unknown",
+			[]string{"add a test for the parser", "where do the events live?"}, OutcomeUnknown},
+		{"empty episode is unknown", nil, OutcomeUnknown},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ClassifyTurns(tt.turns); got != tt.want {
+				t.Errorf("ClassifyTurns(%q) = %q, want %q", tt.turns, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAttributeHop(t *testing.T) {
 	tests := []struct {
 		name string

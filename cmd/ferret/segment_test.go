@@ -231,6 +231,37 @@ func TestSegmentsDropsLeadingNonBoundary(t *testing.T) {
 	}
 }
 
+// TestSegmentsPerEpisodeOutcome is the ferret-bbp.2 contract: each segment is an
+// episode, and its user turns (opening prompt + folded affirmations) roll up into
+// a per-episode dialogue Outcome rendered beside the segment. A task that opens
+// neutral and ends on a folded "lgtm" is success; a task whose prompt is itself a
+// correction with no later acceptance is abandoned.
+func TestSegmentsPerEpisodeOutcome(t *testing.T) {
+	lines := []string{
+		`{"type":"user","sessionId":"s","message":{"role":"user","content":"add a foo function"}}`,
+		`{"type":"assistant","sessionId":"s","message":{"role":"assistant","content":[` +
+			`{"type":"tool_use","id":"t1","name":"Write","input":{"file_path":"foo.go"}}]}}`,
+		// "lgtm" folds into seg1 as an affirmation → the accept (success) leg.
+		`{"type":"user","sessionId":"s","message":{"role":"user","content":"lgtm"}}`,
+		// A corrective prompt opens seg2; with no later accept it is abandoned.
+		`{"type":"user","sessionId":"s","message":{"role":"user","content":"no, that's wrong, revert it"}}`,
+		`{"type":"assistant","sessionId":"s","message":{"role":"assistant","content":[` +
+			`{"type":"tool_use","id":"t2","name":"Read","input":{"file_path":"x"}}]}}`,
+	}
+	out := runSeg(t, lines, "text")
+	for ln := range strings.SplitSeq(out, "\n") {
+		if strings.Contains(ln, "add a foo function") && !strings.Contains(ln, "[dialogue:success]") {
+			t.Errorf("seg1 line missing [dialogue:success]: %q", ln)
+		}
+		if strings.Contains(ln, "revert it") && !strings.Contains(ln, "[dialogue:abandoned]") {
+			t.Errorf("seg2 line missing [dialogue:abandoned]: %q", ln)
+		}
+	}
+	if !strings.Contains(out, "[dialogue:success]") || !strings.Contains(out, "[dialogue:abandoned]") {
+		t.Errorf("per-episode outcomes not rendered:\n%s", out)
+	}
+}
+
 // TestSegmentsPerTaskCost is the step-3 contract (ferret-567): each task carries
 // its input-byte spend and the output bytes its calls pulled in, with results
 // attributed to the OWNING task by tool_use id even when the result lands on a

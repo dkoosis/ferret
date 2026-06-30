@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/dkoosis/ferret/internal/dialogue"
 	"github.com/dkoosis/ferret/internal/score"
 )
 
@@ -108,6 +109,7 @@ func writeSegmentsText(w io.Writer, res score.Result) error {
 			fmt.Fprintf(bw, "  prompt: %s", truncateRunes(seg.Prompt, spineTextCap))
 		}
 		fmt.Fprint(bw, outcomeNote(*seg))
+		fmt.Fprint(bw, dialogueOutcomeNote(seg))
 		fmt.Fprintln(bw)
 		for _, p := range seg.Pivots {
 			fmt.Fprintf(bw, "  [pivot] think#%d  cue=%q\n", p.Think, p.Cue)
@@ -139,6 +141,37 @@ func outcomeNote(seg score.Segment) string {
 		return ""
 	}
 	return "  [outcome:shipped~weak] " + seg.Outcome.Signal
+}
+
+// dialogueOutcomeNote renders a segment's per-EPISODE dialogue Outcome — the
+// PARADISE task-success leg (Walker et al. 1997) — as a trailing note: it tags the
+// segment's user turns with the v1 move tagger and rolls them up via
+// dialogue.ClassifyTurns. OutcomeUnknown (no accept/repair signal in the turns) is
+// silence, mirroring outcomeNote — a per-segment outcome is a hint, never a verdict.
+func dialogueOutcomeNote(seg *score.Segment) string {
+	out := dialogue.ClassifyTurns(segmentUserTurns(seg))
+	if out == dialogue.OutcomeUnknown {
+		return ""
+	}
+	return "  [dialogue:" + string(out) + "]"
+}
+
+// segmentUserTurns gathers one segment's genuine user turns in order: the prompt
+// that opened it, then each affirmation continuation the segmenter folded in (the
+// "lgtm"/"ship it" acks that carry the accept signal). Carrier and control
+// continuations are transcript plumbing, not user language, so they are left out;
+// the synthetic preamble (empty prompt) contributes no turn.
+func segmentUserTurns(seg *score.Segment) []string {
+	var turns []string
+	if seg.Prompt != "" {
+		turns = append(turns, seg.Prompt)
+	}
+	for i := range seg.Conts {
+		if seg.Conts[i].Kind == "affirmation" {
+			turns = append(turns, seg.Conts[i].Text)
+		}
+	}
+	return turns
 }
 
 // callRange renders a segment's owned tool-call index span, or "none".
