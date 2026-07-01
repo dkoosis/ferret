@@ -108,7 +108,7 @@ func TestWriteRetrievalJSONSchema(t *testing.T) {
 	}
 	roll := score.Aggregate(eps)
 	var buf bytes.Buffer
-	if err := writeRetrievalJSON(&buf, "", roll, eps, 0); err != nil {
+	if err := writeRetrievalJSON(&buf, "", roll, eps, 0, nil); err != nil {
 		t.Fatal(err)
 	}
 	var doc struct {

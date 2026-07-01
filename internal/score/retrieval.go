@@ -44,10 +44,11 @@ type Episode struct {
 	Project string `json:"project"`
 	Agent   string `json:"agent,omitempty"`
 
-	RootSeq int    `json:"rootSeq"` // Seq of the rooting get_nug call
-	Query   string `json:"query"`   // the (first) search string
-	Queries int    `json:"queries"` // get_nug calls in the chain — Q2 reformulation depth
-	Results int    `json:"results"` // size of the served (last query's) result set
+	RootSeq int    `json:"rootSeq"`          // Seq of the rooting get_nug call
+	Prompt  string `json:"prompt,omitempty"` // human turn that PRECEDED the root query ("" = none) — the Hop1 interp-fidelity judge's input
+	Query   string `json:"query"`            // the (first) search string
+	Queries int    `json:"queries"`          // get_nug calls in the chain — Q2 reformulation depth
+	Results int    `json:"results"`          // size of the served (last query's) result set
 
 	SelfRequery bool `json:"selfRequery,omitempty"` // ≥2 get_nug calls before a consumed result — Q1 / HopInterp tell
 	RetryMotif  bool `json:"retryMotif,omitempty"`  // a following action carried event.Retry (bd_show!→bd_show / retry-after-failure) — a HopInterp tell, kept SEPARATE from SelfRequery so RU's FirstTry leg stays the get_nug-chain-only signal
@@ -114,6 +115,7 @@ func (e Episode) Hop() dialogue.Hop {
 type epBuild struct {
 	session, project, agent string
 	rootSeq                 int
+	prompt                  string // human turn preceding the root query (Episode.Prompt)
 	query                   string
 	queries                 int
 	results                 []event.NugHit
@@ -142,8 +144,9 @@ func isQueryGetNug(ev *event.Event) bool {
 // not episodes (no query to score).
 func BuildEpisodes(evs []event.Event) []Episode {
 	var (
-		eps []Episode
-		cur *epBuild
+		eps        []Episode
+		cur        *epBuild
+		lastPrompt string // most recent human turn — the Prompt of any episode rooted after it
 	)
 	flush := func() {
 		if cur != nil {
@@ -160,6 +163,9 @@ func BuildEpisodes(evs []event.Event) []Episode {
 				cur.hasClose = true
 				flush()
 			}
+			// Update AFTER closing: a prompt closes the open episode as its
+			// reaction, then becomes the preceding-prompt for the next one.
+			lastPrompt = ev.Prompt
 		case isQueryGetNug(ev):
 			// Fold a reformulation into the open episode only while it serves the
 			// same intent: no consuming action and no human turn since the root.
@@ -167,7 +173,7 @@ func BuildEpisodes(evs []event.Event) []Episode {
 				cur.addQuery(ev)
 			} else {
 				flush()
-				cur = newEpBuild(ev)
+				cur = newEpBuild(ev, lastPrompt)
 			}
 		case cur != nil:
 			cur.addAction(ev)
@@ -183,12 +189,13 @@ func (b *epBuild) foldsReformulation() bool {
 	return !b.consumed() && !b.hasClose
 }
 
-func newEpBuild(ev *event.Event) *epBuild {
+func newEpBuild(ev *event.Event, prompt string) *epBuild {
 	return &epBuild{
 		session: ev.Session,
 		project: ev.Project,
 		agent:   ev.Agent,
 		rootSeq: ev.Seq,
+		prompt:  prompt,
 		query:   ev.Query,
 		queries: 1,
 		results: ev.Results,
@@ -268,6 +275,7 @@ func (b *epBuild) finalize() Episode {
 		Project:        b.project,
 		Agent:          b.agent,
 		RootSeq:        b.rootSeq,
+		Prompt:         b.prompt,
 		Query:          b.query,
 		Queries:        b.queries,
 		Results:        len(b.results),

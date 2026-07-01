@@ -68,7 +68,7 @@ func (c Config) model() string {
 // not needed, so thinking display stays at the default.
 func Run(ctx context.Context, cfg Config, session, spine string) (Result, error) {
 	system, user := BuildPrompt(spine)
-	model, text, err := complete(ctx, cfg, system, user)
+	model, text, _, err := complete(ctx, cfg, system, user)
 	if err != nil {
 		return Result{}, err
 	}
@@ -79,13 +79,24 @@ func Run(ctx context.Context, cfg Config, session, spine string) (Result, error)
 	return Result{Session: session, Model: model, Findings: findings}, nil
 }
 
+// Usage is the token cost of one model call — the burn a burn-measuring tool is
+// obliged to report for its own LLM use (ferret-bbp.5 staged-LLM decision).
+type Usage struct{ InputTokens, OutputTokens int64 }
+
+// usageFrom carries the SDK's per-call token counts into the local Usage. Kept a
+// pure mapping so it is unit-testable without a network call.
+func usageFrom(u anthropic.Usage) Usage {
+	return Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
+}
+
 // complete sends one (system, user) turn to Claude with adaptive thinking and
-// returns the responding model id and the concatenated text content. The shared
-// transport for both analyst modes (adjudicate, propose) — the modes differ only
-// in prompt assembly and response parsing, not in how the model is called.
-func complete(ctx context.Context, cfg Config, system, user string) (model, text string, err error) {
+// returns the responding model id, the concatenated text content, and the call's
+// token usage. The shared transport for every analyst mode (adjudicate, propose,
+// relevance, coverage) — the modes differ only in prompt assembly and response
+// parsing, not in how the model is called.
+func complete(ctx context.Context, cfg Config, system, user string) (model, text string, usage Usage, err error) {
 	if !cfg.HasAPIKey() {
-		return "", "", ErrNoAPIKey
+		return "", "", Usage{}, ErrNoAPIKey
 	}
 	// Operator deadline: bound the whole call (all retries) so a wedged/throttled
 	// API can't busy the CLI for ~30min with no settable ceiling (ferret-c71).
@@ -114,7 +125,7 @@ func complete(ctx context.Context, cfg Config, system, user string) (model, text
 		},
 	})
 	if err != nil {
-		return "", "", fmt.Errorf("analyst: messages call failed: %w", err)
+		return "", "", Usage{}, fmt.Errorf("analyst: messages call failed: %w", err)
 	}
 
 	// Thinking blocks precede the text block; collect the text content.
@@ -124,5 +135,5 @@ func complete(ctx context.Context, cfg Config, system, user string) (model, text
 			b.WriteString(tb.Text)
 		}
 	}
-	return resp.Model, b.String(), nil
+	return resp.Model, b.String(), usageFrom(resp.Usage), nil
 }
