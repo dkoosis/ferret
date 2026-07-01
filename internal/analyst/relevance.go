@@ -229,7 +229,7 @@ func RunCoverage(ctx context.Context, cfg Config, episode, prompt, query string)
 	}
 	res, err := ParseCoverage(text)
 	if err != nil {
-		return CoverageResult{}, Usage{}, err
+		return CoverageResult{}, usage, err
 	}
 	res.Episode = episode
 	return res, usage, nil

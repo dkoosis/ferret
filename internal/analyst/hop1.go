@@ -88,7 +88,12 @@ func Hop1(ctx context.Context, cfg Config, episodeID string, ep score.Episode) (
 	}
 	cov, usage, err := RunCoverage(ctx, cfg, episodeID, ep.Prompt, ep.Query)
 	if err != nil {
-		return Hop1Result{Episode: episodeID, LLMCalled: true}, err
+		return Hop1Result{
+			Episode:      episodeID,
+			LLMCalled:    true,
+			InputTokens:  usage.InputTokens,
+			OutputTokens: usage.OutputTokens,
+		}, err
 	}
 	return Hop1Result{
 		Episode:      episodeID,

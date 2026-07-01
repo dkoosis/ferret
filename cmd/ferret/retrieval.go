@@ -26,6 +26,9 @@ func cmdRetrieval() error {
 	if err := c.validate(fmtText, fmtJSON); err != nil {
 		return err
 	}
+	if err := validateHop1(cmd.Hop1, cmd.Session); err != nil {
+		return err
+	}
 	if err := c.ensureData(); err != nil {
 		return err
 	}

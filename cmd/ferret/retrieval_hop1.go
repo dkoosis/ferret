@@ -38,23 +38,22 @@ func validateHop1(hop1 bool, session string) error {
 	return nil
 }
 
-// runRetrievalHop1 is the --hop1 branch of cmdRetrieval. It validates the session
-// guard, honours --emit-prompt (no network), then judges each episode — continuing
-// past any single episode's failure — and renders the result with burn.
+// runRetrievalHop1 is the --hop1 branch of cmdRetrieval. The session guard runs
+// earlier in cmdRetrieval, before the corpus is even loaded. It honours
+// --emit-prompt (no network), then judges each episode — continuing past any
+// single episode's failure — and renders the result with burn.
 func runRetrievalHop1(c *common, eps []score.Episode) error {
 	cmd := &CLI.Retrieval
-	if err := validateHop1(cmd.Hop1, cmd.Session); err != nil {
-		return err
-	}
 	if cmd.EmitPrompt {
 		fmt.Fprint(os.Stdout, hop1EmitPrompts(eps))
 		return nil
 	}
 
+	// No API-key precheck here: a session of all-floor episodes never calls the
+	// model, so requiring a key upfront would fail runs that cost nothing. Each
+	// escalating episode's own call surfaces ErrNoAPIKey through the normal
+	// continue-on-error per-episode path if no key is set.
 	cfg := analyst.Config{Model: cmd.Model, Timeout: cmd.Timeout}
-	if !cfg.HasAPIKey() {
-		return analyst.ErrNoAPIKey
-	}
 	ctx, stop := analystContext()
 	defer stop()
 
@@ -97,11 +96,17 @@ type hop1Judge func(ctx context.Context, cfg analyst.Config, episodeID string, e
 func runHop1Episodes(ctx context.Context, cfg analyst.Config, eps []score.Episode, judge hop1Judge) (rows []hop1Row, anyErr bool) {
 	rows = make([]hop1Row, 0, len(eps))
 	for i := range eps {
+		if ctx.Err() != nil {
+			anyErr = true
+			break
+		}
 		ep := eps[i]
 		id := hop1EpisodeID(ep)
 		res, err := judge(ctx, cfg, id, ep)
 		if err != nil {
-			rows = append(rows, hop1Row{Result: analyst.Hop1Result{Episode: id, LLMCalled: true}, Err: err.Error()})
+			res.Episode = id
+			res.LLMCalled = true
+			rows = append(rows, hop1Row{Result: res, Err: err.Error()})
 			anyErr = true
 			continue
 		}
