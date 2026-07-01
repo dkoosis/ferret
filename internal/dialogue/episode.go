@@ -47,40 +47,49 @@ func ClassifyTurns(turns []string) Outcome {
 // Classify reads an ordered move sequence (one episode's user turns, in turn
 // order) into an Outcome. v1 rules, deliberately simple and auditable:
 //
-//   - ends on Accept, repairs ≤ cut          → success
-//   - any Accept but repairs > cut            → repair-heavy
-//   - repairs present, no closing Accept      → abandoned
-//   - no Accept and no Repair                 → unknown (no outcome signal)
+//   - ends on Accept, friction ≤ cut          → success
+//   - any Accept but friction > cut            → repair-heavy
+//   - friction present, no closing Accept      → abandoned
+//   - no Accept and no friction                → unknown (no outcome signal)
 //
-// "Abandoned by topic switch" (a new neutral task with no accept on the prior
-// one) is a cross-episode signal the segmenter sees but a single move slice does
-// not; wiring that in is the ∇ follow-on noted in the bead.
+// v2 (bbp.7) widens "friction" past MoveRepair without changing the signature or
+// the rules: MoveReject (the Disagree-Correct split of repair) and MoveRepair both
+// count via IsRepairMove — so the split is behavior-preserving — and MoveClarify /
+// MoveMetaCommunication add to the friction tally too (the human had to ask, or
+// steer the agent's communication). The MoveConstrain flag is a LOW-CONFIDENCE
+// candidate (Phase D-b) and stays INERT here; MoveNewTask detection (its
+// abandonment wiring is bbp.8) and the catalog moves hit the default arm.
+//
+// "Abandoned by topic switch" (a new task with no accept on the prior one) is a
+// cross-episode signal the segmenter sees but a single move slice does not; wiring
+// that in via MoveNewTask is the ∇ follow-on (ferret-bbp.8).
 func Classify(moves []Move) Outcome {
-	var accepts, repairs int
+	var accepts, friction int
 	last := MoveNeutral
 	for _, m := range moves {
-		switch m {
-		case MoveAccept:
+		switch {
+		case m == MoveAccept:
 			accepts++
 			last = m
-		case MoveRepair:
-			repairs++
+		case IsRepairMove(m), m == MoveClarify, m == MoveMetaCommunication:
+			friction++
 			last = m
 		default:
-			// neutral and reserved v2 moves don't move the outcome needle
+			// neutral, the constrain flag, new-task detection, and the catalog moves
+			// don't move the outcome needle
 		}
 	}
 	switch {
-	case accepts == 0 && repairs == 0:
+	case accepts == 0 && friction == 0:
 		return OutcomeUnknown
 	case last == MoveAccept:
 		// closed on acceptance: success unless the friction count is high
-		if repairs <= repairHeavyCut {
+		if friction <= repairHeavyCut {
 			return OutcomeSuccess
 		}
 		return OutcomeRepairHeavy
 	default:
-		// did not close on acceptance (trailing repair or topic switch)
+		// did not close on acceptance (trailing friction or topic switch)
 		return OutcomeAbandoned
 	}
 }

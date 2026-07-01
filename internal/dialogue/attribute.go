@@ -56,7 +56,10 @@ type TurnContext struct {
 // the clearest interpretation-gap tell, so it wins; an empty/oversized result
 // with no self-requery is a retrieval-gap tell.
 func AttributeHop(move Move, ctx TurnContext) Hop {
-	if move != MoveRepair {
+	// Both repair moves indict a hop: the v2 split of MoveRepair into MoveReject
+	// (Disagree-Correct) + MoveRepair (Redo-Differently) must not silently drop the
+	// attribution a rejecting close used to carry. IsRepairMove keeps it whole.
+	if !IsRepairMove(move) {
 		return HopNone
 	}
 	switch {

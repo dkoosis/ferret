@@ -117,13 +117,15 @@ func tagUserTurn(line []byte, res *dlgResult, moves *[]dialogue.Move, turn *int)
 		Text: truncateRunes(prompt, dialogueCap),
 	})
 	*moves = append(*moves, move)
-	switch move {
-	case dialogue.MoveRepair:
+	switch {
+	case dialogue.IsRepairMove(move):
+		// v2 split: MoveReject counts with MoveRepair so the display tally does not
+		// silently drop rejecting turns.
 		res.Repairs++
-	case dialogue.MoveAccept:
+	case move == dialogue.MoveAccept:
 		res.Accepts++
 	default:
-		// neutral and the reserved v2 moves carry no v1 tally
+		// clarify/meta/constrain/new-task + catalog moves carry no r/a tally
 	}
 	*turn++
 }
