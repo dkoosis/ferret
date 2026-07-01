@@ -231,7 +231,11 @@ var CLI struct {
 
 	Retrieval struct {
 		CommonFlags
-		Session string `help:"Only episodes from sessions matching this prefix/substring (omit for whole corpus)." name:"session"`
+		Session    string        `help:"Only episodes from sessions matching this prefix/substring (omit for whole corpus)." name:"session"`
+		Hop1       bool          `help:"Grade each episode's Hop1 interp-fidelity (LLM judge; requires --session, reports its own token cost)." name:"hop1"`
+		Model      string        `help:"Claude model ID for --hop1 (default: claude-sonnet-4-6)." name:"model"`
+		EmitPrompt bool          `help:"With --hop1: assemble + print each escalated episode's judge prompt without calling the model." name:"emit-prompt"`
+		Timeout    time.Duration `help:"With --hop1: operator deadline for the analyst call across all retries (0 = SDK defaults)." default:"5m" name:"timeout"`
 	} `cmd:"" help:"Score get_nug retrieval episodes: RU northstar (consumed/firsttry/nonabandon) + det Q/R/C scorers."`
 
 	Quality struct {

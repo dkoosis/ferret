@@ -141,7 +141,7 @@ func ParseRelevance(resp string) ([]NugJudgment, error) {
 // on retrieval order.
 func RunRelevance(ctx context.Context, cfg Config, episode, prompt, query string, candidates []NugCandidate) (RelevanceResult, error) {
 	system, user := BuildRelevancePrompt(prompt, query, candidates)
-	_, text, err := complete(ctx, cfg, system, user)
+	_, text, _, err := complete(ctx, cfg, system, user)
 	if err != nil {
 		return RelevanceResult{}, err
 	}
@@ -219,17 +219,18 @@ func ParseCoverage(resp string) (CoverageResult, error) {
 }
 
 // RunCoverage judges one prompt→query translation (Q3). It needs no results, so
-// it runs on every episode — not just pooled ones. Same transport as Run.
-func RunCoverage(ctx context.Context, cfg Config, episode, prompt, query string) (CoverageResult, error) {
+// it runs on every episode — not just pooled ones. Same transport as Run. Returns
+// the call's token Usage so a burn-measuring caller (analyst.Hop1) can report it.
+func RunCoverage(ctx context.Context, cfg Config, episode, prompt, query string) (CoverageResult, Usage, error) {
 	system, user := BuildCoveragePrompt(prompt, query)
-	_, text, err := complete(ctx, cfg, system, user)
+	_, text, usage, err := complete(ctx, cfg, system, user)
 	if err != nil {
-		return CoverageResult{}, err
+		return CoverageResult{}, Usage{}, err
 	}
 	res, err := ParseCoverage(text)
 	if err != nil {
-		return CoverageResult{}, err
+		return CoverageResult{}, usage, err
 	}
 	res.Episode = episode
-	return res, nil
+	return res, usage, nil
 }

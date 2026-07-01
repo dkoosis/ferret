@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/anthropics/anthropic-sdk-go"
 )
 
 // hangingDoer is a stub transport that never responds — it blocks until the
@@ -18,6 +20,15 @@ func (hangingDoer) Do(req *http.Request) (*http.Response, error) {
 	return nil, req.Context().Err()
 }
 
+// TestUsageFromMapsTokens pins the SDK-usage → Usage mapping the burn accounting
+// rides on: input/output token counts carried through, nothing else.
+func TestUsageFromMapsTokens(t *testing.T) {
+	got := usageFrom(anthropic.Usage{InputTokens: 123, OutputTokens: 45})
+	if got.InputTokens != 123 || got.OutputTokens != 45 {
+		t.Errorf("usageFrom = %+v, want {123, 45}", got)
+	}
+}
+
 // TestCompleteRespectsOperatorTimeout asserts a Config.Timeout bounds the whole
 // call: against a transport that never responds, complete returns an error
 // promptly (well inside the SDK's ~10min/attempt × ~3 retries) rather than
@@ -26,7 +37,7 @@ func TestCompleteRespectsOperatorTimeout(t *testing.T) {
 	cfg := Config{APIKey: "sk-test", Timeout: 50 * time.Millisecond, HTTPClient: hangingDoer{}}
 
 	start := time.Now()
-	_, _, err := complete(context.Background(), cfg, "system", "user")
+	_, _, _, err := complete(context.Background(), cfg, "system", "user")
 	elapsed := time.Since(start)
 
 	if err == nil {
@@ -50,7 +61,7 @@ func TestCompleteCancelsOnContextCancel(t *testing.T) {
 	}()
 
 	start := time.Now()
-	_, _, err := complete(ctx, cfg, "system", "user")
+	_, _, _, err := complete(ctx, cfg, "system", "user")
 	if err == nil {
 		t.Fatal("complete() err = nil; want a cancellation error")
 	}

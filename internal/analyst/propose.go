@@ -119,7 +119,7 @@ func ParseProposals(resp string) ([]Proposal, error) {
 // assembly and parsing.
 func RunPropose(ctx context.Context, cfg Config, session, bundle, spine string) (ProposeResult, error) {
 	system, user := BuildProposePrompt(bundle, spine)
-	model, text, err := complete(ctx, cfg, system, user)
+	model, text, _, err := complete(ctx, cfg, system, user)
 	if err != nil {
 		return ProposeResult{}, err
 	}

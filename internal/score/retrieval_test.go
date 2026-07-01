@@ -481,3 +481,51 @@ func TestEpisodeQPP_Deterministic(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildEpisodesCapturesRootPrompt pins Episode.Prompt to the human turn that
+// PRECEDED the episode's root query (the Hop1 judge's input), and to "" when no
+// prompt preceded it — mirroring ClosingMove, which reads the FOLLOWING turn.
+func TestBuildEpisodesCapturesRootPrompt(t *testing.T) {
+	withPrompt := BuildEpisodes([]event.Event{
+		prompt(0, "find x"),
+		getNug(1, "x query", "id1"),
+		prompt(2, "yes"),
+	})
+	if len(withPrompt) != 1 {
+		t.Fatalf("want 1 episode, got %d", len(withPrompt))
+	}
+	if withPrompt[0].Prompt != "find x" {
+		t.Errorf("Prompt = %q, want %q", withPrompt[0].Prompt, "find x")
+	}
+
+	noPrompt := BuildEpisodes([]event.Event{
+		getNug(0, "x query", "id1"),
+		prompt(1, "yes"),
+	})
+	if len(noPrompt) != 1 {
+		t.Fatalf("want 1 episode, got %d", len(noPrompt))
+	}
+	if noPrompt[0].Prompt != "" {
+		t.Errorf("Prompt = %q, want empty (no prompt preceded the root query)", noPrompt[0].Prompt)
+	}
+}
+
+// TestBuildEpisodesSharesPromptAcrossSameTurnEpisodes pins the intended (not
+// buggy) behavior when one human turn roots more than one episode: a consuming
+// Edit closes episode 1 without a new prompt, then a later get_nug roots episode
+// 2 in the same turn — both carry the one prompt that opened the turn. Prompt is
+// never reset on episode flush.
+func TestBuildEpisodesSharesPromptAcrossSameTurnEpisodes(t *testing.T) {
+	eps := BuildEpisodes([]event.Event{
+		prompt(0, "find x"),
+		getNug(1, "q1", "id1"),
+		tool(2, "Edit", "x.go"), // consumes → closes episode 1 without a new prompt
+		getNug(3, "q2", "id2"),  // roots episode 2 in the SAME human turn
+	})
+	if len(eps) != 2 {
+		t.Fatalf("want 2 episodes, got %d", len(eps))
+	}
+	if eps[0].Prompt != "find x" || eps[1].Prompt != "find x" {
+		t.Errorf("Prompt = (%q, %q), want both %q", eps[0].Prompt, eps[1].Prompt, "find x")
+	}
+}
