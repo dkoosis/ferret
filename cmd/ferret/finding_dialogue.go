@@ -65,13 +65,17 @@ func reduceStreamDialogue(evs []event.Event) mine.StreamDialogue {
 		}
 		m, _ := dialogue.TagMove(evs[i].Prompt)
 		moves = append(moves, m)
-		switch m {
-		case dialogue.MoveRepair:
+		switch {
+		case dialogue.IsRepairMove(m):
+			// v2 split: both MoveRepair (Redo-Differently) and MoveReject
+			// (Disagree-Correct) are repairs — counting only MoveRepair here would
+			// silently drop every rejecting turn from the r/a tally.
 			repairs++
-		case dialogue.MoveAccept:
+		case m == dialogue.MoveAccept:
 			accepts++
 		default:
-			// neutral and the reserved v2 moves carry no v1 tally
+			// clarify/meta/constrain/new-task + catalog moves carry no r/a tally;
+			// the friction ones still reach Outcome via dialogue.Classify below.
 		}
 	}
 	sd := mine.StreamDialogue{Repairs: repairs, Accepts: accepts}

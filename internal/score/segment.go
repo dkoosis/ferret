@@ -3,6 +3,7 @@ package score
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -38,6 +39,11 @@ import (
 // segContCap bounds the continuation label rendered/stored per folded turn.
 const segContCap = 48
 
+// kindCarrier is the Cont.Kind for a non-dialogue system envelope folded into the
+// live segment (local-command, task-notification, compaction summary, teammate
+// relay, bash I/O echo, interrupt/image marker).
+const kindCarrier = "carrier"
+
 // blockTypeText is the transcript content-block type for plain text. Kept local
 // so the score package does not couple to cmd's spine renderer for one constant.
 const blockTypeText = "text"
@@ -51,6 +57,15 @@ const blockTypeText = "text"
 // a lowercased prefix: distinctive enough that no genuine user prompt collides, while
 // tolerating the variable summary body that follows.
 const compactionSummaryOpener = "this session is being continued from a previous conversation"
+
+// imageMarkerRe matches Claude Code's pasted-image placeholder, e.g. "[Image #1]".
+// A user turn is frequently just this marker (a bare paste) OR the marker riding
+// in front of a genuine instruction ("[Image #1] fix this"). wholeImageMarkerRe
+// tests the former — the whole (trimmed) prompt is one or more markers and nothing
+// else — so only a marker-only turn folds; an embedded marker keeps its turn
+// (else real dialogue is dropped, Phase A P1 trap). Detection only here; the span
+// is stripped for tagging by dialogue.TagMove, not by the boundary pass.
+var wholeImageMarkerRe = regexp.MustCompile(`(?i)^(\s*\[image(\s+#\d+)?\]\s*)+$`)
 
 // Pivot is one thinking-pivot hint: the global thinking-block index it sits at
 // and the cue phrase that matched (the lowercased prefix-cue, for traceability).
@@ -167,10 +182,29 @@ func ClassifyBoundary(prompt string) (skip bool, kind, label string) {
 	low := strings.ToLower(trimmed)
 
 	if strings.HasPrefix(low, "<local-command-") || strings.HasPrefix(low, "<task-notification") {
-		return true, "carrier", carrierLabel(low)
+		return true, kindCarrier, carrierLabel(low)
+	}
+	// Phase A (bbp.7) — three non-dialogue carrier buckets riding the prompt field:
+	//   teammate-relay + bash I/O echo fit the <…> envelope → carrierLabel, whole-turn
+	//   skip. Interrupt/image markers have NO envelope → fixed labels (carrierLabel
+	//   would degrade to the useless "carrier"). ~14-16% of raw follow-up turns are
+	//   these artifacts, not dialogue — pre-filter, don't tag.
+	if strings.HasPrefix(low, "<teammate-message") ||
+		strings.HasPrefix(low, "<bash-input>") ||
+		strings.HasPrefix(low, "<bash-stdout>") ||
+		strings.HasPrefix(low, "<bash-stderr>") {
+		return true, kindCarrier, carrierLabel(low)
+	}
+	if strings.HasPrefix(low, "[request interrupted") {
+		return true, kindCarrier, "interrupt-artifact"
+	}
+	// Whole-turn image marker only: an embedded marker ("[Image #1] fix this") keeps
+	// its turn and opens a boundary — the marker span is stripped downstream, not here.
+	if wholeImageMarkerRe.MatchString(trimmed) {
+		return true, kindCarrier, "image-marker"
 	}
 	if strings.HasPrefix(low, compactionSummaryOpener) {
-		return true, "carrier", "compaction-summary"
+		return true, kindCarrier, "compaction-summary"
 	}
 	if name, ok := commandName(trimmed); ok {
 		if !strings.Contains(name, ":") && controlCommands[name] {
@@ -207,7 +241,7 @@ func carrierLabel(low string) string {
 	if i := strings.IndexByte(low, '>'); i > 1 {
 		return strings.Trim(low[:i+1], "<>")
 	}
-	return "carrier"
+	return kindCarrier
 }
 
 // segmenter accumulates the deterministic segmentation as it streams a transcript

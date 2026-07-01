@@ -86,13 +86,16 @@ func TestBuildEpisodes(t *testing.T) {
 				ClosingMove: dialogue.MoveAccept, Outcome: dialogue.OutcomeSuccess, Answerable: true},
 		},
 		{
-			name: "retrieved but ignored: results, no use, repair close",
+			// "no, that's wrong" is a wrongness claim → v2 MoveReject (the
+			// Disagree-Correct split of repair). Outcome + the ConsumedLoose/Answerable
+			// tells are unchanged: reject counts as a repair via IsRepairMove.
+			name: "retrieved but ignored: results, no use, reject close",
 			evs: []event.Event{
 				getNug(0, "how", "aaa111", "bbb222"),
 				prompt(1, "no, that's wrong"),
 			},
 			want: Episode{Queries: 1, Results: 2, ConsumedStrict: false, ConsumedLoose: false,
-				ClosingMove: dialogue.MoveRepair, Outcome: dialogue.OutcomeAbandoned, Answerable: true},
+				ClosingMove: dialogue.MoveReject, Outcome: dialogue.OutcomeAbandoned, Answerable: true},
 		},
 		{
 			name: "coverage gap: empty search then set_nug",
@@ -330,6 +333,50 @@ func TestEpisode_FoldsRetryMotifIntoSelfRequery_When_FollowingActionRetries(t *t
 	}
 }
 
+// TestBuildEpisodesRejectRepairParity is the retrieval-side behavior-preserving
+// guard for the v2 repair→reject split (bbp.7): the two finalize() booleans that
+// key on the closing move — tell3 (→ConsumedLoose) and goodAbandon — read the move
+// through dialogue.IsRepairMove, so a MoveReject close must yield the SAME Episode
+// as the identical MoveRepair close. "that's wrong" (reject) and "no, redo it"
+// (repair) are contrasted against the same retrieval prefix.
+func TestBuildEpisodesRejectRepairParity(t *testing.T) {
+	// tell3 → ConsumedLoose: non-empty result, no explicit consume, a pushback close.
+	// Both moves are repair-class, so tell3 is false for both (a pushback is not use).
+	nonEmpty := func(closing string) Episode {
+		return one(t, []event.Event{getNug(0, "how", "aaa111", "bbb222"), prompt(1, closing)})
+	}
+	rj, rp := nonEmpty("that's wrong"), nonEmpty("no, redo it differently")
+	if rj.ClosingMove != dialogue.MoveReject || rp.ClosingMove != dialogue.MoveRepair {
+		t.Fatalf("setup: got moves reject=%q repair=%q", rj.ClosingMove, rp.ClosingMove)
+	}
+	if rj.ConsumedLoose != rp.ConsumedLoose || rj.ConsumedLoose {
+		t.Errorf("ConsumedLoose parity broke: reject=%v repair=%v (both want false)", rj.ConsumedLoose, rp.ConsumedLoose)
+	}
+	if rj.Outcome != rp.Outcome || rj.Outcome != dialogue.OutcomeAbandoned {
+		t.Errorf("Outcome parity broke: reject=%q repair=%q (both want abandoned)", rj.Outcome, rp.Outcome)
+	}
+
+	// goodAbandon: empty result, no set_nug, no self-requery, a pushback close → NOT
+	// a good abandonment for either move (the human pushed back, didn't accept absence).
+	empty := func(closing string) Episode {
+		return one(t, []event.Event{getNug(0, "obscure"), prompt(1, closing)})
+	}
+	erj, erp := empty("that's wrong"), empty("no, redo it differently")
+	if erj.GoodAbandon != erp.GoodAbandon || erj.GoodAbandon {
+		t.Errorf("GoodAbandon parity broke: reject=%v repair=%v (both want false)", erj.GoodAbandon, erp.GoodAbandon)
+	}
+}
+
+// one builds exactly one episode from evs, failing if the count isn't 1.
+func one(t *testing.T, evs []event.Event) Episode {
+	t.Helper()
+	eps := BuildEpisodes(evs)
+	if len(eps) != 1 {
+		t.Fatalf("want 1 episode, got %d: %+v", len(eps), eps)
+	}
+	return eps[0]
+}
+
 // TestEpisodeHopWiring proves the attribute.TurnContext stub is now filled: the
 // episode's signals flow into AttributeHop and place a repair on the right hop.
 func TestEpisodeHopWiring(t *testing.T) {
@@ -343,6 +390,11 @@ func TestEpisodeHopWiring(t *testing.T) {
 		{"oversized repair → retrieval", Episode{ClosingMove: dialogue.MoveRepair, Oversized: true}, dialogue.HopRetrieval},
 		{"accept → none", Episode{ClosingMove: dialogue.MoveAccept, SelfRequery: true}, dialogue.HopNone},
 		{"repair, no signal → none", Episode{ClosingMove: dialogue.MoveRepair}, dialogue.HopNone},
+		// v2 reject-close parity (bbp.7): a MoveReject close indicts the SAME hop a
+		// MoveRepair close did — the split must not drop hop attribution.
+		{"self-requery reject → interp", Episode{ClosingMove: dialogue.MoveReject, SelfRequery: true}, dialogue.HopInterp},
+		{"empty-result reject → retrieval", Episode{ClosingMove: dialogue.MoveReject, EmptyResult: true}, dialogue.HopRetrieval},
+		{"reject, no signal → none", Episode{ClosingMove: dialogue.MoveReject}, dialogue.HopNone},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

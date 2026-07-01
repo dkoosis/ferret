@@ -6,18 +6,27 @@
 // agent-side burn/loop proxy, plus the only direct OUTCOME signal we have:
 // acceptance vs abandonment (the missing PARADISE leg).
 //
-// v1 is regex/lexical only — high precision before any model. An LLM classifier
-// is a deliberate v2 escalation, gated to phenomena beyond lexical reach
-// (frustration-in-context, dialogue-act disambiguation); see the staged-LLM
-// decision recorded in the bead/KG. Do NOT build an emotion detector: dev jargon
-// ("kill", "dead", "crash", "braindead") is style, not affect (bbp constraint).
+// v1 was regex/lexical only, three moves (repair/accept/neutral). v2 (ferret-bbp.7)
+// keeps the regex-first posture but widens the taxonomy to the corpus-corroborated
+// dialogue moves, split two ways: OUTCOME-BEARING moves that change an
+// episode.Outcome (reject, narrowed repair, clarify, meta-communication, constrain
+// flag, new-task detection) and CATALOG-only moves that are tagged for the record
+// but move no finding (delegate-judgment, inform-FYI, solicit-opinion, status-check,
+// long-paste, record-deposit). An LLM classifier stays a deliberate escalation,
+// gated to phenomena beyond lexical reach; see the staged-LLM decision in the
+// bead/KG. Do NOT build an emotion detector: dev jargon ("kill", "dead", "crash",
+// "braindead") is style, not affect (bbp constraint).
 //
 // Borrowed framing (cite the method + source in code, per the kuv convention):
 //   - Repair structure (trouble source → repair initiation → repair solution):
 //     Schegloff, Jefferson & Sacks 1977. A user turn that initiates repair right
 //     after an agent action localizes a friction boundary from the HUMAN side.
 //   - Dialogue acts / communicative functions: ISO 24617-2 (Bunt 2012). The
-//     per-turn Move is a coarse, auditable subset of that taxonomy.
+//     per-turn Move is a coarse, auditable subset of that taxonomy. The
+//     meta-communication move is ISO 24617-2's Partner Communication Management
+//     dimension (style/process feedback: "be terse", "slow down").
+//   - Follow-up-query motivation/action taxonomy grounding reject/constrain: Kim
+//     et al. 2024, arXiv:2407.13166.
 //   - Outcome = task success: PARADISE (Walker et al. 1997) — task success +
 //     dialogue cost. Episode.Outcome supplies the success leg burn alone can't.
 package dialogue
@@ -28,14 +37,16 @@ import (
 )
 
 // Move is the communicative function of one user turn — a coarse, auditable
-// subset of ISO 24617-2 dialogue acts. v1 classifies into Repair / Accept /
-// Neutral; the finer moves are reserved consts the v2 (or LLM) layer can fill.
+// subset of ISO 24617-2 dialogue acts.
 type Move string
 
 const (
-	// MoveRepair — the user corrects, rejects, or re-specifies the prior turn:
-	// the trouble-source signal (Schegloff 1977). The strongest human-side marker
-	// that the preceding agent action did not serve the task.
+	// --- v1 core (still emitted) ---
+
+	// MoveRepair — narrowed in v2 to Redo-Differently: the user redirects the work
+	// to a different approach (try again, undo/revert, "the other one", "i meant").
+	// Distinct from MoveReject (contesting a claim as wrong). Both are the
+	// trouble-source signal (Schegloff 1977) and both count as repairs for Outcome.
 	MoveRepair Move = "repair"
 	// MoveAccept — the user signals the prior turn served: approval or a "keep it"
 	// directive. The success leg of the outcome.
@@ -44,15 +55,65 @@ const (
 	// constraint). Not friction, not outcome — just task content.
 	MoveNeutral Move = "neutral"
 
-	// --- reserved for v2 / the finer ISO 24617-2 split (not yet emitted) ---
+	// --- v2 outcome-bearing (ferret-bbp.7 Wave 1) ---
 
-	// MoveReject — an outright rejection distinct from corrective repair. v2.
+	// MoveReject — Disagree-Correct: the user contests a claim or deliverable as
+	// wrong ("that's incorrect", "you're mistaken", "still broken"). Split out of v1
+	// repair; counts as a repair for Outcome so the split is behavior-preserving.
 	MoveReject Move = "reject"
-	// MoveClarify — the user answers an agent question or disambiguates. v2.
+	// MoveClarify — the user answers an agent question / disambiguates in response to
+	// it. Context-sensitive: only emitted when the prior agent turn was a question
+	// (MoveContext.PriorAgentQuestion). Friction — the agent had to ask.
 	MoveClarify Move = "clarify"
-	// MoveConstrain — the user adds a constraint without rejecting prior work. v2.
+	// MoveMetaCommunication — process/style feedback about HOW the agent is
+	// communicating, not the task ("be terse", "slow down", "too much detail"). ISO
+	// 24617-2 Partner Communication Management. Friction.
+	MoveMetaCommunication Move = "meta-communication"
+	// MoveConstrain — the user adds a constraint / hedge mid-task ("make sure…",
+	// "only for…", "but keep…"). v2 ships this as a LOW-CONFIDENCE lexical candidate
+	// flag only (Phase D option b), never a confident tag: it labels the turn but is
+	// INERT for Outcome until a follow-on judge (bbp.7b) lands.
 	MoveConstrain Move = "constrain"
+	// MoveNewTask — a fresh directive / topic switch ("new task:", "moving on to…").
+	// DETECTION only in bbp.7; the cross-episode abandonment-by-topic-switch wiring
+	// that consumes it is ferret-bbp.8. Inert for Outcome here.
+	MoveNewTask Move = "new-task"
+
+	// --- v2 catalog-only (ferret-bbp.7 Wave 2): tagged for the record, inert for
+	// Outcome (they hit Classify's default arm). ---
+
+	// MoveDelegateJudgment — a standing directive handing the agent discretion
+	// ("use your judgment", "whichever you prefer", "merge if it improves").
+	MoveDelegateJudgment Move = "delegate-judgment"
+	// MoveInformFYI — an informational aside ("fyi", "heads up", "note:").
+	MoveInformFYI Move = "inform-fyi"
+	// MoveSolicitOpinion — an evaluative question ("do you think", "would you
+	// recommend", "is it worth").
+	MoveSolicitOpinion Move = "solicit-opinion"
+	// MoveStatusCheck — a progress interrogative ("status?", "where do we stand",
+	// "what's left").
+	MoveStatusCheck Move = "status-check"
+	// MoveLongPaste — a long structured paste (length + list/code markers) rather
+	// than a composed instruction.
+	MoveLongPaste Move = "long-paste"
+	// MoveRecordDeposit — a persist directive ("save that as a nug", "remember
+	// that", "write it down").
+	MoveRecordDeposit Move = "record-deposit"
 )
+
+// MoveContext carries the per-turn context a context-sensitive move needs. Kept
+// SEPARATE from internal/dialogue/attribute.go's TurnContext (retrieval-hop
+// attribution, bbp.4/.5) so the two concerns don't entangle: this one is about the
+// dialogue turn's neighbours, that one about a retrieval episode's result set.
+//
+// PriorAgentQuestion is the Phase C signal for MoveClarify — whether the agent's
+// immediately-preceding turn was a question the human is now answering. Populating
+// it requires walking the assistant turns beside the user turns (a caller that sees
+// both), which is a follow-on wiring step; TagMove leaves it zero, so the plain
+// (context-free) path never emits MoveClarify.
+type MoveContext struct {
+	PriorAgentQuestion bool
+}
 
 // Signal is one tagged user turn: where it sat, what it did, and the cue that
 // fired (kept for traceability — every label points at the substring that
@@ -64,21 +125,141 @@ type Signal struct {
 	Text string `json:"text"`          // compact label of the turn (truncated by caller)
 }
 
-// repairCues are high-precision corrective/rejection markers. Conservative by
-// design: a missed repair costs less than a false alarm that wastes the human's
-// validation budget. Matched as whole-turn negations or leading correctives, not
-// loose substrings — "no" must lead the turn, never appear mid-sentence.
-//
-// Excludes dev jargon ("kill"/"dead"/"crash") on purpose: those are workflow
-// vocabulary, not repair or affect.
-var repairCues = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)^(no|nope|nah)\b`),
-	regexp.MustCompile(`(?i)\b(not (that|what|right|quite)|that('?s| is) (not|wrong)|that('?s| is)n'?t)\b`),
-	regexp.MustCompile(`(?i)\b(wrong|incorrect|undo|revert|redo)\b`),
-	regexp.MustCompile(`(?i)\b(try again|do(n'?t| not) (do )?that)\b`),
-	regexp.MustCompile(`(?i)\b(i mean|i meant|what i meant|as i (said|asked)|like i said)\b`),
+// IsRepairMove reports whether a move counts as a repair for Outcome purposes —
+// both the narrowed MoveRepair (Redo-Differently) and MoveReject (Disagree-Correct).
+// Callers that gate on "did the human push back on this action" (episode.Classify,
+// AttributeHop, the retrieval closing-move tells) MUST use this rather than a bare
+// `== MoveRepair`, so the v2 repair→reject split stays behavior-preserving.
+func IsRepairMove(m Move) bool { return m == MoveRepair || m == MoveReject }
+
+// rejectCues — Disagree-Correct: the human contests a claim/deliverable as WRONG.
+// Split out of v1's repair set. Wrongness is matched as a PREDICATE ("that's wrong",
+// "you're mistaken"), never a bare "wrong" — bare `\bwrong\b` false-fires on
+// "what's wrong with the parser?" (interrogative), "fix the wrong file" (noun
+// modifier), and "nothing wrong with that" (negated). "not right" likewise only
+// as a predicate about the work, so "not right now" (temporal) stays neutral.
+// Excludes dev jargon ("kill"/"dead"/"crash"/"braindead") on purpose.
+var rejectCues = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\b(that|this|it)('?s| is| was)\s+(wrong|incorrect|mistaken)\b`),
+	regexp.MustCompile(`(?i)\bthat('?s| is)?\s*not (right|correct|true)\b`),
+	regexp.MustCompile(`(?i)\bthat('?s| is)n'?t (right|correct|true)\b`),
+	regexp.MustCompile(`(?i)\byou('?re| are) (wrong|mistaken|incorrect)\b`),
+	regexp.MustCompile(`(?i)\bnot (true|correct|quite)\b`),
 	regexp.MustCompile(`(?i)\b(you (missed|forgot|skipped)|still (wrong|broken))\b`),
 	regexp.MustCompile(`(?i)\bactually,?\s+no\b`),
+}
+
+// repairCues — Redo-Differently: the human redirects the work (retry, undo, "the
+// other one", re-specify, dismiss the approach). Narrowed from v1 (wrongness-claim
+// cues moved to rejectCues). A leading bare "no" is handled separately (matchRepair)
+// so "no worries"/"no problem" don't false-fire. "not that <object>" requires the
+// object so the intensifier "not that hard"/"not that big a deal" stays neutral.
+var repairCues = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\b(try again|redo|do it (again|differently)|do that (again|differently))\b`),
+	regexp.MustCompile(`(?i)\bdo(n'?t| not) (do )?that\b`),
+	regexp.MustCompile(`(?i)\b(undo|revert|roll back)\b`),
+	regexp.MustCompile(`(?i)\bnot that (one|file|way|thing|approach|part|line|function)\b`),
+	regexp.MustCompile(`(?i)\bnot what (i|you|we)\b`),
+	regexp.MustCompile(`(?i)\bthe other (one|file|way|approach)\b`),
+	// dismissal — "that's not the point", "that isn't it", "that's not going to
+	// work": v1 counted these as repair; the v2 narrowing dropped them (recall
+	// regression). Matched on the specific dismissal OBJECTS, not a blanket
+	// "that('s) not …" — the blanket form false-fires on the intensifier/assessment
+	// "that's not that hard" (P1-3). Reject's wrongness cues run first, so "that's
+	// not right" still routes to reject.
+	regexp.MustCompile(`(?i)\bthat('?s| is) not (the (point|answer|issue|problem|goal|idea)|going to work|gonna work|it|what)\b`),
+	regexp.MustCompile(`(?i)\bthat isn'?t (it|right|what|going to work)\b`),
+	regexp.MustCompile(`(?i)\bthat (won'?t|doesn'?t|wouldn'?t) work\b`),
+	regexp.MustCompile(`(?i)\b(i mean|i meant|what i meant|as i (said|asked)|like i said)\b`),
+}
+
+// leadingNoRe / benignNoRe gate the leading-"no" redirect ("no, use X instead"):
+// a genuine correction, EXCEPT the reassurance openers "no worries"/"no problem"/
+// "no rush" etc. RE2 has no lookahead, so the exclusion is a second pattern.
+var (
+	leadingNoRe = regexp.MustCompile(`(?i)^(no|nope|nah)\b`)
+	benignNoRe  = regexp.MustCompile(`(?i)^(no|nope|nah)\b\s+(worries|worry|problem|problemo|rush|hurry|biggie|big deal|thanks|thank you)\b`)
+)
+
+// matchRepair reports whether target is a Redo-Differently move — a repairCue OR a
+// leading "no" that is not a benign reassurance opener.
+func matchRepair(target string) (cue string, ok bool) {
+	if cue, ok := firstMatch(target, repairCues); ok {
+		return cue, true
+	}
+	if leadingNoRe.MatchString(target) && !benignNoRe.MatchString(target) {
+		return "no", true
+	}
+	return "", false
+}
+
+// metaCues — Partner Communication Management (ISO 24617-2): feedback on HOW the
+// agent communicates, not the task. Narrowed (dk plan-review) to communication-
+// directed phrasing only: bare "shorter"/"smaller"/"speed up"/"more detail" false-
+// fire on ordinary coding tasks ("make it shorter", "speed up the query", "split
+// this file", "make the function shorter"), which would inject noise into the
+// friction/Outcome signal on dk's own transcripts. Genuine process complaints stay.
+var metaCues = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\bbe (more )?(terse|succinct|concise|brief|quiet)\b`),
+	regexp.MustCompile(`(?i)\btoo (verbose|wordy|long-winded|chatty)\b`),
+	regexp.MustCompile(`(?i)\btoo much (detail|explanation|narration|output|talking)\b`),
+	regexp.MustCompile(`(?i)\byou('?re| are) (being )?(too )?(verbose|wordy|chatty|repeating yourself)\b`),
+	regexp.MustCompile(`(?i)\b(slow down|stop explaining|stop narrating|stop asking|no need to (explain|narrate)|don'?t (explain|narrate))\b`),
+	regexp.MustCompile(`(?i)\b(less (detail|verbose)|keep it (short|brief|terse))\b`),
+}
+
+// delegateCues — a standing directive handing the agent discretion.
+var delegateCues = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\buse your (judg?ement|judgment|discretion)\b`),
+	regexp.MustCompile(`(?i)\b(your call|up to you|you decide|as you see fit)\b`),
+	regexp.MustCompile(`(?i)\bwhichever you (prefer|think|like)\b`),
+	regexp.MustCompile(`(?i)\b(whatever you think|if it improves|merge if)\b`),
+}
+
+// recordDepositCues — a persist directive. Ranked ABOVE newTask so "save that as a
+// nug" (imperative + object) is a deposit, not a fresh task (Phase B.0 collision).
+var recordDepositCues = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\b(save|write|record|store|jot)\b[^.]*\b(as|to|in|down)\b[^.]*\bnug\b`),
+	regexp.MustCompile(`(?i)\b(remember (that|this|to)|write (that|this|it) down|jot (that|this) down)\b`),
+	regexp.MustCompile(`(?i)\b(make a note|add a bead|file a bead|save (that|this|it) as a nug)\b`),
+}
+
+// newTaskCues — a fresh directive / topic switch. DETECTION floor: keyed on
+// explicit topic-switch + abandon-switch markers, NOT bare imperatives (those would
+// swallow every neutral task turn). Precision over recall — deeper recall tuning
+// belongs with ferret-bbp.8, where the abandonment-by-topic-switch effect on Outcome
+// is measurable; tuning cues here blind is guessing.
+var newTaskCues = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)^(new task|new topic|next up|moving on|switching to|unrelated)\b`),
+	regexp.MustCompile(`(?i)^(next task|different (task|thing|topic)|one more (thing|task))\b`),
+	regexp.MustCompile(`(?i)^(let'?s (move on|switch|do something (else|different))|on to the next)\b`),
+	regexp.MustCompile(`(?i)^(forget (that|this|it)|scrap (that|this|it)|never ?mind( that| this| it)?)\b`),
+	regexp.MustCompile(`(?i)\b(separate (task|issue|thing)|switch(ing)? gears|moving on to)\b`),
+}
+
+// statusCheckCues — a progress interrogative.
+var statusCheckCues = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\b(status\?|progress\?|where (do we|are we) stand|where are we)\b`),
+	regexp.MustCompile(`(?i)\b(what'?s (left|the status)|how'?s it going|are we done|is it done)\b`),
+}
+
+// solicitCues — an evaluative question soliciting the agent's opinion.
+var solicitCues = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\b((what )?do you think|would you recommend|do you recommend)\b`),
+	regexp.MustCompile(`(?i)\b(is it worth|worth (doing|it)|would you|thoughts\?)\b`),
+}
+
+// informCues — an informational aside.
+var informCues = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)^(fyi|note:|heads up|just so you know|for (the )?record|for reference)\b`),
+	regexp.MustCompile(`(?i)\b(i noticed|just noting|for what it'?s worth)\b`),
+}
+
+// constrainCues — a hedge/constraint mid-task. LOW-CONFIDENCE candidate flag only
+// (Phase D-b): residual, checked below the confident moves, and INERT for Outcome.
+var constrainCues = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\b(make sure|be sure to|just (make sure|ensure)|only (if|when|for|the)|as long as)\b`),
+	regexp.MustCompile(`(?i)\b(but keep|but don'?t|without (breaking|changing|touching)|stick to|don'?t break)\b`),
 }
 
 // acceptCues are high-precision approval / "keep it" markers — the success leg.
@@ -91,6 +272,16 @@ var acceptCues = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)^(thanks|thank you)\b`),
 }
 
+// imageMarkerRe strips Claude Code's pasted-image placeholder ("[Image #1]") from a
+// turn before it is judged, so a leading marker can't push a real cue out of the
+// lead window or defeat a `^`-anchored cue (segment.go folds a WHOLE-turn marker;
+// this handles the embedded case for every TagMove caller, including the events
+// path). Mirrors internal/score/segment.go's wholeImageMarkerRe.
+// TODO(bbp): a markdown image whose alt text is literally "Image"/"Image #N"
+// (`![Image](url)`) would be stripped here — RE2 has no lookbehind to require the
+// preceding char is not "!", and the FP is cosmetic + rare, so left as-is.
+var imageMarkerRe = regexp.MustCompile(`(?i)\[image(\s+#\d+)?\]`)
+
 // signalLeadRunes is the leading window a long turn is matched against. A repair
 // or accept is characteristically a SHORT turn ("no, try snipe" / "great, ship
 // it"); in a long composed turn (an email draft, pasted content) a buried "that
@@ -101,40 +292,119 @@ var acceptCues = []*regexp.Regexp{
 const (
 	signalShortRunes = 200
 	signalLeadRunes  = 64
+	// longPasteRunes is the length above which a structured turn (list/code markers)
+	// is a paste, not a composed instruction. Well above signalShortRunes so an
+	// ordinary long instruction is not mislabeled.
+	longPasteRunes = 800
 )
 
-// TagMove classifies one user turn into a v1 Move and returns the cue that fired.
-// Repair wins over accept when both match (a "no, but the rename is great" turn
-// is fundamentally a correction). A turn matching neither is MoveNeutral.
+// TagMove classifies one user turn into a v2 Move and returns the cue that fired.
+// It is the context-free entry point (MoveContext zero) — it never emits
+// MoveClarify, which needs the prior-agent-question signal. See TagMoveContext.
+func TagMove(turn string) (Move, string) {
+	return TagMoveContext(turn, MoveContext{})
+}
+
+// TagMoveContext classifies one user turn under the v2 taxonomy, consulting ctx for
+// the context-sensitive moves. The precedence is a single TOTAL order (Phase B.0),
+// highest first — the friction/outcome-bearing moves win over catalog and accept,
+// and the low-confidence constrain flag + structural long-paste are residuals:
+//
+//	reject → repair → meta → delegate → record-deposit → new-task → status-check →
+//	solicit-opinion → inform-fyi → accept → constrain → clarify → long-paste → neutral
+//
+// Real collisions resolved by the order: reject beats repair ("no, that's wrong" is
+// a wrongness claim); meta beats delegate ("use your judgment but be terse" is
+// process feedback); record-deposit beats new-task ("save that as a nug" is a
+// deposit, not a fresh directive). MoveClarify sits low — it rescues a would-be
+// neutral turn that is actually answering the agent's question.
 //
 // The argument is the genuine user-prompt text (whitespace-collapsed); the caller
 // is responsible for having stripped tool-result carriers and command envelopes —
 // this function judges words, not transcript plumbing.
-func TagMove(turn string) (Move, string) {
-	t := strings.TrimSpace(turn)
+func TagMoveContext(turn string, ctx MoveContext) (Move, string) {
+	t := strings.TrimSpace(imageMarkerRe.ReplaceAllString(turn, " "))
+	t = strings.TrimSpace(collapseSpaces(t))
 	if t == "" {
 		return MoveNeutral, ""
 	}
+
+	// Long structured paste is judged on the FULL turn (length is the signal), but
+	// only as a residual so it can't preempt a dialogue cue sitting in the lead.
+	longPasteCue, longPasteHit := longPaste(t)
+
 	target := t
-	// Count runes with a short-circuit so a huge pasted turn isn't fully
-	// rune-sliced just to test its length.
-	runeCount := 0
-	for range t {
-		runeCount++
-		if runeCount > signalShortRunes {
-			break
-		}
-	}
-	if runeCount > signalShortRunes {
+	if isLong(t) {
 		target = leadWindow(t, signalLeadRunes) // long turn: judge only the lead
 	}
-	if cue, ok := firstMatch(target, repairCues); ok {
+
+	// Total precedence order — first match wins. Reject and repair lead (repair via
+	// matchRepair, which folds in the guarded leading-"no"); the rest are plain
+	// cue-list passes.
+	if cue, ok := firstMatch(target, rejectCues); ok {
+		return MoveReject, cue
+	}
+	if cue, ok := matchRepair(target); ok {
 		return MoveRepair, cue
 	}
-	if cue, ok := firstMatch(target, acceptCues); ok {
-		return MoveAccept, cue
+	for _, pass := range []struct {
+		move Move
+		pats []*regexp.Regexp
+	}{
+		{MoveMetaCommunication, metaCues},
+		{MoveDelegateJudgment, delegateCues},
+		{MoveRecordDeposit, recordDepositCues},
+		{MoveNewTask, newTaskCues},
+		{MoveStatusCheck, statusCheckCues},
+		{MoveSolicitOpinion, solicitCues},
+		{MoveInformFYI, informCues},
+		{MoveAccept, acceptCues},
+		{MoveConstrain, constrainCues},
+	} {
+		if cue, ok := firstMatch(target, pass.pats); ok {
+			return pass.move, cue
+		}
+	}
+	// Clarify is the context-sensitive rescue: a turn that matched none of the above
+	// but arrived right after an agent question is the human answering it.
+	if ctx.PriorAgentQuestion {
+		return MoveClarify, "prior-agent-question"
+	}
+	if longPasteHit {
+		return MoveLongPaste, longPasteCue
 	}
 	return MoveNeutral, ""
+}
+
+// longPaste reports whether s is a long structured paste — over longPasteRunes with
+// list or fenced-code markers — so a bulk paste reads as content, not instruction.
+func longPaste(s string) (cue string, ok bool) {
+	if !overRunes(s, longPasteRunes) {
+		return "", false
+	}
+	if strings.Contains(s, "```") {
+		return "code-fence", true
+	}
+	if strings.Count(s, "- ")+strings.Count(s, "* ")+strings.Count(s, "• ") >= 3 {
+		return "list-markers", true
+	}
+	return "", false
+}
+
+// isLong reports whether s exceeds the short-turn threshold (rune-count short
+// circuit so a huge paste isn't fully sliced just to measure it).
+func isLong(s string) bool { return overRunes(s, signalShortRunes) }
+
+// overRunes reports whether s has more than n runes, counting with a short circuit.
+func overRunes(s string, n int) bool {
+	count := 0
+	for range s {
+		count++
+		if count > n {
+			return true
+		}
+	}
+	return false
 }
 
 // leadWindow returns the first n runes of s — the slice a long turn's move is
@@ -149,6 +419,10 @@ func leadWindow(s string, n int) string {
 	}
 	return s
 }
+
+// collapseSpaces folds runs of whitespace into single spaces — image-marker
+// stripping can leave doubled spaces that would defeat a cue's word boundaries.
+func collapseSpaces(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 // firstMatch returns the matched substring of the first pattern that fires, so
 // the Signal can carry the exact cue that earned its label.

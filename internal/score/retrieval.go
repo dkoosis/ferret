@@ -259,7 +259,7 @@ func (b *epBuild) finalize() Episode {
 	// tells only apply to a non-empty result set.
 	consumedStrict := !empty && b.refID != ""
 	tell2 := !empty && b.advanced && !b.selfRequery && !b.sawSetNug
-	tell3 := !empty && b.hasClose && b.closingMove != dialogue.MoveRepair
+	tell3 := !empty && b.hasClose && !dialogue.IsRepairMove(b.closingMove)
 
 	var moves []dialogue.Move
 	if b.hasClose {
@@ -268,7 +268,7 @@ func (b *epBuild) finalize() Episode {
 	outcome := dialogue.Classify(moves)
 
 	coverageGap := empty && b.sawSetNug
-	goodAbandon := empty && !coverageGap && !b.selfRequery && b.closingMove != dialogue.MoveRepair
+	goodAbandon := empty && !coverageGap && !b.selfRequery && !dialogue.IsRepairMove(b.closingMove)
 
 	return Episode{
 		Session:        b.session,

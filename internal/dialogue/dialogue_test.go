@@ -11,14 +11,29 @@ func TestTagMove(t *testing.T) {
 		turn string
 		want Move
 	}{
-		// repair — corrective / rejection
+		// repair (v2 narrowed → Redo-Differently): redirect the work
 		{"leading no", "no, use snipe instead", MoveRepair},
 		{"not that", "not that one, the other file", MoveRepair},
-		{"thats wrong", "that's wrong", MoveRepair},
 		{"try again", "try again with the flag set", MoveRepair},
 		{"i meant", "i meant the other package", MoveRepair},
-		{"you missed", "you missed the error case", MoveRepair},
-		{"actually no", "actually no, revert that", MoveRepair},
+		{"undo", "undo that change", MoveRepair},
+		{"the other one", "use the other file instead", MoveRepair},
+
+		// reject (v2 split → Disagree-Correct): contest a claim as wrong
+		{"thats wrong", "that's wrong", MoveReject},
+		{"youre wrong", "you're wrong about that", MoveReject},
+		{"incorrect", "that is incorrect", MoveReject},
+		{"you missed", "you missed the error case", MoveReject},
+		{"still broken", "still broken after that", MoveReject},
+		{"actually no", "actually no, that's not right", MoveReject},
+		{"not correct", "that's not correct", MoveReject},
+
+		// P0-1 repair-class recall: broad "that('s/is) (not|isn't) …" dismissals that
+		// v1 counted as repair and the v2 narrowing dropped (they must count again).
+		{"thats not the point", "that's not the point", MoveRepair},
+		{"that isnt it", "that isn't it", MoveRepair},
+		{"thats not going to work", "that's not going to work", MoveRepair},
+		{"that is not what i want", "that is not what i want here", MoveRepair},
 
 		// accept — success leg
 		{"leading yes", "yes exactly that", MoveAccept},
@@ -27,24 +42,72 @@ func TestTagMove(t *testing.T) {
 		{"save this", "save this to the kg", MoveAccept},
 		{"thanks", "thanks, perfect", MoveAccept},
 
+		// meta-communication — process/style feedback (ISO PCM)
+		{"be terse", "be terse from now on", MoveMetaCommunication},
+		{"too verbose", "that's too verbose, cut it down", MoveMetaCommunication},
+		{"slow down", "slow down and explain step by step", MoveMetaCommunication},
+		{"stop explaining", "stop explaining and just do it", MoveMetaCommunication},
+
+		// new-task detection — explicit topic switch (not bare imperatives)
+		{"new task", "new task: refactor the parser", MoveNewTask},
+		{"moving on", "moving on to the deploy script", MoveNewTask},
+		{"switching to", "switching to the docs now", MoveNewTask},
+		{"unrelated", "unrelated: the CI is red", MoveNewTask},
+		// P1-4 added abandon-switch markers
+		{"forget that", "forget that, let's look at the store", MoveNewTask},
+		{"scrap that", "scrap that approach entirely", MoveNewTask},
+		{"never mind that", "never mind that", MoveNewTask},
+		{"new topic", "new topic — the deploy pipeline", MoveNewTask},
+		{"next up", "next up, wire the CLI", MoveNewTask},
+
+		// delegate-judgment — standing directive (catalog)
+		{"use your judgment", "use your judgment on the naming", MoveDelegateJudgment},
+		{"whichever", "whichever you prefer is fine", MoveDelegateJudgment},
+		{"merge if", "merge if it improves the code", MoveDelegateJudgment},
+
+		// record-deposit — persist directive (catalog); beats new-task on collision
+		{"save as nug", "save that as a nug", MoveRecordDeposit},
+		{"remember", "remember that we chose option b", MoveRecordDeposit},
+		{"write it down", "write that down for later", MoveRecordDeposit},
+
+		// status-check / solicit-opinion / inform-fyi (catalog)
+		{"status", "status? where do we stand", MoveStatusCheck},
+		{"whats left", "what's left to do here", MoveStatusCheck},
+		{"do you think", "do you think this is the right approach", MoveSolicitOpinion},
+		{"worth it", "is it worth adding a cache", MoveSolicitOpinion},
+		{"fyi", "fyi the daemon restarted overnight", MoveInformFYI},
+		{"heads up", "heads up, the schema changed", MoveInformFYI},
+
+		// constrain — low-confidence flag (residual)
+		{"make sure", "make sure it still passes the linter", MoveConstrain},
+		{"but keep", "but keep the public API stable", MoveConstrain},
+
 		// neutral — fresh task content, no signal
 		{"fresh request", "add a test for the parser", MoveNeutral},
 		{"question", "where do the events live?", MoveNeutral},
 		{"empty", "", MoveNeutral},
 
-		// dev-jargon trap — workflow vocabulary, NOT repair or affect
+		// dev-jargon trap — workflow vocabulary, NOT repair/reject or affect
 		{"kill jargon", "kill that process and restart", MoveNeutral},
 		{"dead jargon", "the daemon is dead, boot it", MoveNeutral},
+		{"crash jargon", "reproduce the crash then patch it", MoveNeutral},
+		{"braindead jargon", "the braindead retry loop needs a cap", MoveNeutral},
 
-		// repair wins when both signals appear
-		{"repair beats accept", "no, but the rename is great", MoveRepair},
+		// precedence: reject beats repair; both present
+		{"reject beats repair", "no, that's wrong, try again", MoveReject},
+		{"repair when only redirect", "no, but the rename is great", MoveRepair},
+		// meta beats delegate on collision
+		{"meta beats delegate", "use your judgment but be terse", MoveMetaCommunication},
+
+		// embedded image marker stripped so the leading cue still fires
+		{"image marker stripped", "[Image #1] that's wrong", MoveReject},
 
 		// long-turn gate: a cue buried deep in composed/pasted content is task
 		// content, not a correction — only the leading window counts.
 		{"buried cue in long turn", "Help me respond to Jeremy about the call next week " +
 			strings.Repeat("with a lot of neutral lead-in prose first ", 5) +
 			"and then that isn't relevant", MoveNeutral},
-		{"leading cue in long turn", "no, that's wrong — " +
+		{"leading cue in long turn", "no, use bar instead — " +
 			strings.Repeat("here is the long explanation that follows ", 10), MoveRepair},
 	}
 	for _, tt := range tests {
@@ -54,6 +117,105 @@ func TestTagMove(t *testing.T) {
 				t.Errorf("TagMove(%q) = %q, want %q", tt.turn, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestTagMoveFixPassNegatives pins the false-positive guards from the bbp.7 fix
+// pass — ordinary coding/workflow turns that MUST NOT tag an outcome-bearing move,
+// so the friction/Outcome signal stays clean on dk's own transcripts.
+func TestTagMoveFixPassNegatives(t *testing.T) {
+	tests := []struct {
+		name string
+		turn string
+		want Move
+	}{
+		// P1-1: bare "wrong"/"not right" must not tag reject.
+		{"interrogative wrong", "what's wrong with the parser?", MoveNeutral},
+		{"noun-phrase wrong", "fix the wrong file", MoveNeutral},
+		{"negated wrong", "nothing wrong with that", MoveNeutral},
+		{"temporal not right now", "not right now, later", MoveNeutral},
+		// P1-2: code/perf phrasing must not tag meta-communication.
+		{"split file", "split this file into two", MoveNeutral},
+		{"make it shorter", "make it shorter", MoveNeutral},
+		{"make it smaller", "make it smaller", MoveNeutral},
+		{"speed up query", "speed up the query", MoveNeutral},
+		{"function shorter", "make the function shorter", MoveNeutral},
+		// P1-3: intensifier/assessment construction must not tag repair. "that's not
+		// that hard" is an assessment (task is easy), NOT a dismissal — dismissal
+		// cues key on specific objects (point/it/work), not a blanket "that's not".
+		{"assessment not that hard", "that's not that hard to do", MoveNeutral},
+		{"bare not that hard", "not that hard", MoveNeutral},
+		{"not that big a deal", "not that big a deal", MoveNeutral},
+		// P2: benign leading "no" must not tag repair.
+		{"no worries", "no worries", MoveNeutral},
+		{"no rush", "no rush on that", MoveNeutral},
+		{"no problem then accept", "no problem, ship it", MoveAccept},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got, _ := TagMove(tt.turn); got != tt.want {
+				t.Errorf("TagMove(%q) = %q, want %q", tt.turn, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestTagMoveContextClarify covers the Phase C context-sensitive move: a turn that
+// matches no lexical cue but arrives right after an agent question is the human
+// answering it (MoveClarify). Without the context flag the same turn is neutral,
+// and a turn that DOES match a friction cue keeps that stronger label.
+func TestTagMoveContextClarify(t *testing.T) {
+	tests := []struct {
+		name string
+		turn string
+		ctx  MoveContext
+		want Move
+	}{
+		{"answer after question is clarify", "the second one", MoveContext{PriorAgentQuestion: true}, MoveClarify},
+		{"same turn no context is neutral", "the second one", MoveContext{}, MoveNeutral},
+		{"reject still wins over clarify", "no, that's wrong", MoveContext{PriorAgentQuestion: true}, MoveReject},
+		{"accept still wins over clarify", "yes, perfect", MoveContext{PriorAgentQuestion: true}, MoveAccept},
+		{"plain TagMove never emits clarify", "the second one", MoveContext{}, MoveNeutral},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got, _ := TagMoveContext(tt.turn, tt.ctx); got != tt.want {
+				t.Errorf("TagMoveContext(%q, %+v) = %q, want %q", tt.turn, tt.ctx, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestLongPaste covers the structural catalog move: a long turn with list/code
+// markers reads as a paste, but a long composed instruction with a leading cue does
+// not (the cue wins), and a short list is not a paste.
+func TestLongPaste(t *testing.T) {
+	longList := strings.Repeat("- item with enough text to clear the length floor here\n", 30)
+	if got, _ := TagMove(longList); got != MoveLongPaste {
+		t.Errorf("long bulleted paste = %q, want long-paste", got)
+	}
+	longFence := "```\n" + strings.Repeat("some code line goes here and there\n", 30) + "```"
+	if got, _ := TagMove(longFence); got != MoveLongPaste {
+		t.Errorf("long code-fence paste = %q, want long-paste", got)
+	}
+	if got, _ := TagMove("- one\n- two\n- three"); got != MoveNeutral {
+		t.Errorf("short list = %q, want neutral (under length floor)", got)
+	}
+}
+
+// TestIsRepairMove pins the predicate the repair→reject split rides on: both moves
+// count as repairs so episode.Classify / AttributeHop / the retrieval tells stay
+// behavior-preserving.
+func TestIsRepairMove(t *testing.T) {
+	for _, m := range []Move{MoveRepair, MoveReject} {
+		if !IsRepairMove(m) {
+			t.Errorf("IsRepairMove(%q) = false, want true", m)
+		}
+	}
+	for _, m := range []Move{MoveAccept, MoveNeutral, MoveClarify, MoveConstrain, MoveNewTask} {
+		if IsRepairMove(m) {
+			t.Errorf("IsRepairMove(%q) = true, want false", m)
+		}
 	}
 }
 
