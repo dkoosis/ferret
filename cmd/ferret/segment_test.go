@@ -262,6 +262,39 @@ func TestSegmentsPerEpisodeOutcome(t *testing.T) {
 	}
 }
 
+// TestSegmentsAbandonByTopicSwitch is the ferret-bbp.12 contract: dialogueOutcomeNote
+// threads the NEXT segment's opening move so a task that reads `unknown` on its own
+// (neutral prompt, no accept, no friction) flips to `abandoned` when the following
+// segment opens on a fresh task (MoveNewTask) — the human walked away unresolved.
+// The FINAL segment has no next, so it falls back to the pure single-episode verdict
+// without conjuring abandonment (and without panicking on the missing next).
+func TestSegmentsAbandonByTopicSwitch(t *testing.T) {
+	lines := []string{
+		// seg1: a neutral prompt, no acceptance, no correction → `unknown` alone.
+		`{"type":"user","sessionId":"s","message":{"role":"user","content":"investigate the timeout"}}`,
+		`{"type":"assistant","sessionId":"s","message":{"role":"assistant","content":[` +
+			`{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"x"}}]}}`,
+		// seg2 opens on a MoveNewTask cue → seg1 flips to abandoned; seg2 is last, so
+		// it falls back to pure Classify (its lone new-task move reads `unknown` → no note).
+		`{"type":"user","sessionId":"s","message":{"role":"user","content":"new task: add logging"}}`,
+		`{"type":"assistant","sessionId":"s","message":{"role":"assistant","content":[` +
+			`{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"y"}}]}}`,
+	}
+	out := runSeg(t, lines, "text")
+	for ln := range strings.SplitSeq(out, "\n") {
+		if strings.Contains(ln, "investigate the timeout") && !strings.Contains(ln, "[dialogue:abandoned]") {
+			t.Errorf("seg1 should read abandoned via next-segment topic switch: %q", ln)
+		}
+		// The last segment must NOT gain an abandonment label from a missing next.
+		if strings.Contains(ln, "new task: add logging") && strings.Contains(ln, "[dialogue:") {
+			t.Errorf("last seg must fall back to pure Classify (no note), got: %q", ln)
+		}
+	}
+	if !strings.Contains(out, "[dialogue:abandoned]") {
+		t.Errorf("abandonment-by-topic-switch not rendered:\n%s", out)
+	}
+}
+
 // TestSegmentsPerTaskCost is the step-3 contract (ferret-567): each task carries
 // its input-byte spend and the output bytes its calls pulled in, with results
 // attributed to the OWNING task by tool_use id even when the result lands on a
