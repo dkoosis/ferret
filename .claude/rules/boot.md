@@ -1,10 +1,16 @@
 # Boot
-updated: 2026-06-30
+updated: 2026-07-01
 
 *Project working-memory. Maintained for future-me: current state + live frontier + traps that still bite. Resolved lanes pruned — history lives in beads/PRs.*
 
+## lane: GreatKilldeer
+→ next: **dispatch `ferret-bbp.8`** (cross-episode abandonment wiring; depends on bbp.7's shipped MoveNewTask + inherits new-task recall tuning) — or `bbp.9` (clarify population, makes the shipped MoveClarify mechanism live). Both unblocked.
+✓ shipped bbp.7 (#54, v2 13-move taxonomy) via dispatch — 5 review passes caught a P0 outcome regression + friction-inflation on dk's own turns; filed bbp.8/.9, ferret-ubf.
+‡ a taxonomy split needs a codebase-wide `IsRepairMove`-style predicate audit, ✗ only plan-named call sites — the miss cost a round-4 retrieval.go ripple.
+~ dk: fenced trust-the-loop, spot-checks via a critical-review paste; ends on "next?".
+
 ## State
-- main @ `8672537`, origin synced. PR queue EMPTY.
+- main @ `6f3a4cf`, origin synced (bbp.7 merged #54). PR queue EMPTY.
 - Scorers live in **`internal/score/`** (landmark/quality/conform all there — ratified, design-doc D2). New scorers go here.
 - `/team` = one shared tree + loto (worktrees retired). No concurrent `make check`; primary verifies once at wave end.
 
@@ -12,7 +18,9 @@ updated: 2026-06-30
 
 **ferret-bbp** (epic, in_progress) — User-turn repair/acceptance tagger: read intent from the *human's words*, not just tool sequences. **Deterministic spine COMPLETE** (#49–52): boundary guard → per-segment Outcome → TurnContext/AttributeHop → Hop2 QPP → surfaced on `mine.Finding` (rank/report/out). The **consumer clause** of the retrieval-outcome contract below.
 - ✓ shipped: bbp.1 (compaction-carrier boundary guard) · bbp.2 (per-seg Outcome rollup) · bbp.3 (TurnContext, un-stubbed AttributeHop) · bbp.4 (det. Hop2 QPP scorer, `internal/score/qpp.go`) · bbp.6 (de-island dialogue+hop onto `mine.Finding`, emit seam `cmd/ferret/finding_dialogue.go`)
-- → remaining = the **LLM half**, both `requires_plan` (dk drives, ✗ bare impl): **bbp.5** Hop1 interp-fidelity judge (API-shape + judge-prompt + bias-guard) · **bbp.7** v2 intent-move taxonomy (reject/clarify/constrain), design-time LLM mining. Next move: plan-lane both, or sit with dk on the taxonomy.
+- ✓ **bbp.7 SHIPPED** (#54) — v2 13-move taxonomy (7 outcome-bearing + 6 catalog), carrier pre-filters, behavior-preserving repair→reject split via `IsRepairMove`, `episode.Classify` extended. Split out: **bbp.8** (cross-episode abandonment wiring, depends bbp.7 + owns new-task recall tuning) · **bbp.9** (MoveClarify population — mechanism shipped, prod-inert until a caller sets PriorAgentQuestion).
+- → remaining LLM half: **bbp.5** Hop1 interp-fidelity judge (`requires_plan`, still needs plan; dk drives).
+- spun off the AHI-essay assessment: **bbp.10** (deterministic friction metrics) + **bbp.11** (agency-calibration axis — agent-side initiative, sibling to the user-move taxonomy).
 - bbp regex-first; ✗ emotion detector (dev jargon "kill/dead/braindead" ≠ affect)
 
 Under epic **ferret-kuv** (container, ✗ dispatch): **567** (metrics-engine for a Claude analyst — per-candidate bundle + proposal loop, in_progress), **kuv.3** (tool-for-intent applicability check, in_progress).
@@ -36,4 +44,4 @@ Dry fenced grants, zero corrections → trust-the-loop. Surface deviations, ✗ 
 - read-before-edit/write hookify guard — top ferret-scan burn finding (`Edit!⇝Read` + `Write!⇝Read⇝Write`, ~670k). Build as a hook, log in the ferret fix ledger. Harness-side, not a ferret bead. Done-status unverified.
 
 ## Shipped ledger
-bbp deterministic spine #49–52 (bbp.1/.2/.3/.4/.6) · landmark wave kuv.10/vy7/afm/t5d (#45–47) · sq.2 judge+golden + d28 spec (#41) · kuv.5 quality axes (#44) · kuv.4 conformance (#27) · kuv.2 segmentation · kuv.1 spine (#23) · d01 prompt-text capture (#34) · bbp tagger (#33) · 9 go-bug-audit fixes (#31) · nilaway clear (#48).
+bbp.7 v2 taxonomy (#54) · bbp deterministic spine #49–52 (bbp.1/.2/.3/.4/.6) · landmark wave kuv.10/vy7/afm/t5d (#45–47) · sq.2 judge+golden + d28 spec (#41) · kuv.5 quality axes (#44) · kuv.4 conformance (#27) · kuv.2 segmentation · kuv.1 spine (#23) · d01 prompt-text capture (#34) · bbp tagger (#33) · 9 go-bug-audit fixes (#31) · nilaway clear (#48).
