@@ -526,7 +526,11 @@ func TestEpisodeQPP_SelfRequeryNotChargedToRetrieval(t *testing.T) {
 		shell(2, "trixi get bbb222"),                  // the returned nug was used
 		prompt(3, "yes"),
 	}
-	ep := BuildEpisodes(evs)[0]
+	eps := BuildEpisodes(evs)
+	if len(eps) == 0 {
+		t.Fatal("setup: expected an episode")
+	}
+	ep := eps[0]
 	if !ep.SelfRequery {
 		t.Fatal("setup: expected a self-requery chain")
 	}
