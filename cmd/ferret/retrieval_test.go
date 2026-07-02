@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dkoosis/ferret/internal/dialogue"
 	"github.com/dkoosis/ferret/internal/event"
 	"github.com/dkoosis/ferret/internal/out"
 	"github.com/dkoosis/ferret/internal/score"
@@ -98,6 +99,53 @@ func TestWriteRetrievalTextScorecard(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("scorecard missing %q\n---\n%s", want, got)
 		}
+	}
+}
+
+// TestEpisodeOutcomeLabelSuppressesGoodAbandon proves a good-abandonment doesn't
+// print a self-contradictory "abandoned" beside its "good-abandon" flag: the
+// outcome column blanks (ferret-bbp.13), while a plain abandonment still shows it.
+func TestEpisodeOutcomeLabelSuppressesGoodAbandon(t *testing.T) {
+	good := score.Episode{Outcome: dialogue.OutcomeAbandoned, GoodAbandon: true}
+	if got := episodeOutcomeLabel(good); got != "" {
+		t.Errorf("good-abandon outcome label = %q, want blank", got)
+	}
+	plain := score.Episode{Outcome: dialogue.OutcomeAbandoned}
+	if got := episodeOutcomeLabel(plain); got != dialogue.OutcomeAbandoned {
+		t.Errorf("plain abandonment label = %q, want %q", got, dialogue.OutcomeAbandoned)
+	}
+}
+
+// TestWriteRetrievalTextGoodAbandonRow renders a good-abandon episode and asserts
+// its per-episode row carries the "good-abandon" flag without the contradictory
+// "abandoned" outcome word (the about-lines legitimately mention abandonment, so
+// the check scopes to the episode's own row).
+func TestWriteRetrievalTextGoodAbandonRow(t *testing.T) {
+	eps := []score.Episode{
+		{Session: "s", Query: "goodabandonquery", Queries: 1, Results: 0, EmptyResult: true,
+			Outcome: dialogue.OutcomeAbandoned, GoodAbandon: true, Answerable: false},
+	}
+	var buf bytes.Buffer
+	sink := out.NewSink(&buf, 0, 0)
+	writeRetrievalText(sink, "", score.Aggregate(eps), eps)
+	if err := sink.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var row string
+	for line := range strings.SplitSeq(buf.String(), "\n") {
+		if strings.Contains(line, "goodabandonquery") {
+			row = line
+			break
+		}
+	}
+	if row == "" {
+		t.Fatalf("episode row not found in:\n%s", buf.String())
+	}
+	if !strings.Contains(row, "good-abandon") {
+		t.Errorf("row missing good-abandon flag: %q", row)
+	}
+	if strings.Contains(row, "abandoned") {
+		t.Errorf("row shows contradictory 'abandoned' beside good-abandon: %q", row)
 	}
 }
 
