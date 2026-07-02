@@ -186,6 +186,32 @@ func TestTagMoveContextClarify(t *testing.T) {
 	}
 }
 
+// TestAssistantAskedQuestion covers the CheckQuestion predicate that populates
+// MoveContext.PriorAgentQuestion: a trailing "?" (through closing punctuation) is a
+// question; a mid-turn "?" followed by more work is not; empty is not.
+func TestAssistantAskedQuestion(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{"trailing question", "Which file should I edit?", true},
+		{"trailing through closing paren", "Should I use the first one (foo.go)?)", true},
+		{"trailing whitespace after mark", "Do you want me to proceed?  \n", true},
+		{"mid-turn question then work", "Should I? Actually I'll just do it.", false},
+		{"statement", "I edited the file.", false},
+		{"empty", "", false},
+		{"whitespace only", "   \n", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := AssistantAskedQuestion(tt.text); got != tt.want {
+				t.Errorf("AssistantAskedQuestion(%q) = %v, want %v", tt.text, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestLongPaste covers the structural catalog move: a long turn with list/code
 // markers reads as a paste, but a long composed instruction with a leading cue does
 // not (the cue wins), and a short list is not a paste.

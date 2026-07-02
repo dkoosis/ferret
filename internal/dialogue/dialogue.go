@@ -116,6 +116,20 @@ type MoveContext struct {
 	PriorAgentQuestion bool
 }
 
+// questionTailRe matches a turn whose FINAL sentence is interrogative — a trailing
+// "?" after any closing quote/paren/bracket/whitespace. A "?" buried mid-turn does
+// not count: an assistant that asked then kept working left no open dependence link
+// for the next user turn to fill. Precision-first, per the bbp regex house style.
+var questionTailRe = regexp.MustCompile(`\?["'` + "`" + `)\]\s]*$`)
+
+// AssistantAskedQuestion reports whether an assistant turn ended in a question — the
+// deterministic CheckQuestion tell a caller uses to set MoveContext.PriorAgentQuestion.
+// Borrowed method: ISO 24617-2 CheckQuestion (Bunt 2012) — a question opens a
+// dependence link the next turn answers (→ MoveClarify).
+func AssistantAskedQuestion(text string) bool {
+	return questionTailRe.MatchString(strings.TrimSpace(text))
+}
+
 // Signal is one tagged user turn: where it sat, what it did, and the cue that
 // fired (kept for traceability — every label points at the substring that
 // earned it, so a human validator can audit the matcher cheaply).
