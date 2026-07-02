@@ -75,8 +75,9 @@ const (
 	// INERT for Outcome until a follow-on judge (bbp.7b) lands.
 	MoveConstrain Move = "constrain"
 	// MoveNewTask — a fresh directive / topic switch ("new task:", "moving on to…").
-	// DETECTION only in bbp.7; the cross-episode abandonment-by-topic-switch wiring
-	// that consumes it is ferret-bbp.8. Inert for Outcome here.
+	// TagMove only DETECTS it; the cross-episode abandonment-by-topic-switch verdict
+	// is wired in ClassifyCross (ferret-bbp.8), which the retrieval per-episode path
+	// feeds with the next segment's opening move. Inert for the pure Classify path.
 	MoveNewTask Move = "new-task"
 
 	// --- v2 catalog-only (ferret-bbp.7 Wave 2): tagged for the record, inert for

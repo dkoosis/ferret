@@ -57,13 +57,25 @@ func ClassifyTurns(turns []string) Outcome {
 // count via IsRepairMove — so the split is behavior-preserving — and MoveClarify /
 // MoveMetaCommunication add to the friction tally too (the human had to ask, or
 // steer the agent's communication). The MoveConstrain flag is a LOW-CONFIDENCE
-// candidate (Phase D-b) and stays INERT here; MoveNewTask detection (its
-// abandonment wiring is bbp.8) and the catalog moves hit the default arm.
+// candidate (Phase D-b) and stays INERT here; MoveNewTask and the catalog moves hit
+// the default arm.
 //
-// "Abandoned by topic switch" (a new task with no accept on the prior one) is a
-// cross-episode signal the segmenter sees but a single move slice does not; wiring
-// that in via MoveNewTask is the ∇ follow-on (ferret-bbp.8).
+// Classify is the pure single-episode verdict: it sees only this episode's moves.
+// "Abandoned by topic switch" (the NEXT episode opens a fresh task with no accept on
+// this one) is a cross-episode signal a single move slice cannot see — the caller
+// that knows the next segment's opening move passes it to ClassifyCross instead.
 func Classify(moves []Move) Outcome {
+	return ClassifyCross(moves, false)
+}
+
+// ClassifyCross is Classify with the cross-episode topic-switch signal wired in:
+// nextOpensNewTask reports whether the FOLLOWING segment opened on a fresh task
+// (MoveNewTask). Only the retrieval per-episode path (internal/score) has that
+// adjacency for free; the session-level rollups keep calling Classify. This split
+// keeps the pure verdict available for the flat-slice callers while making the
+// abandonment signal live where the next move is known (the ∇ follow-on wired by
+// ferret-bbp.8).
+func ClassifyCross(moves []Move, nextOpensNewTask bool) Outcome {
 	var accepts, friction int
 	last := MoveNeutral
 	for _, m := range moves {
@@ -81,6 +93,14 @@ func Classify(moves []Move) Outcome {
 	}
 	switch {
 	case accepts == 0 && friction == 0:
+		// No acceptance and no friction reads as `unknown` on its own — but if the
+		// human then opened a fresh task (MoveNewTask) without ever accepting, they
+		// walked away unresolved: abandonment by topic switch. PARADISE task-success
+		// leg (Walker et al. 1997). The len>0 guard keeps an empty episode `unknown`
+		// (nothing to abandon).
+		if nextOpensNewTask && len(moves) > 0 {
+			return OutcomeAbandoned
+		}
 		return OutcomeUnknown
 	case last == MoveAccept:
 		// closed on acceptance: success unless the friction count is high
