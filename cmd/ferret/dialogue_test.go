@@ -66,3 +66,29 @@ func TestRunDialogueFirstTurnNoPredecessor(t *testing.T) {
 		t.Errorf("first turn with no predecessor must not be clarify\n%s", out)
 	}
 }
+
+// TestRunDialogueSkippedTurnClearsPendingQuestion guards the leak Gemini caught on
+// #59: an agent question answered by a SKIPPED genuine user turn (an affirmation)
+// must consume the pending-question flag, so the next unrelated request is not
+// spuriously tagged clarify. A carrier envelope in the same slot would NOT consume
+// it — but an affirmation/control is real user intent that supersedes the question.
+func TestRunDialogueSkippedTurnClearsPendingQuestion(t *testing.T) {
+	root := t.TempDir()
+	writeSpineFixture(t, root, "-Users-dev-proj", "sess-leak.jsonl", []string{
+		`{"type":"user","sessionId":"sess-leak","message":{"role":"user","content":"add retry logic"}}`,
+		`{"type":"assistant","sessionId":"sess-leak","message":{"role":"assistant","content":[` +
+			`{"type":"text","text":"Should I proceed?"}]}}`,
+		// affirmation answers the question but is skipped as a fold-in.
+		`{"type":"user","sessionId":"sess-leak","message":{"role":"user","content":"yes"}}`,
+		// fresh, unrelated request — must NOT inherit the consumed question.
+		`{"type":"user","sessionId":"sess-leak","message":{"role":"user","content":"the second one"}}`,
+	})
+
+	var buf bytes.Buffer
+	if err := runDialogue(&buf, root, "sess-leak", fmtText); err != nil {
+		t.Fatalf("runDialogue: %v", err)
+	}
+	if out := buf.String(); strings.Contains(out, string(dialogue.MoveClarify)) {
+		t.Errorf("skipped affirmation must clear pending question; no turn should be clarify\n%s", out)
+	}
+}

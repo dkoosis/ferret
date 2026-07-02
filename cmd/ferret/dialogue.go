@@ -126,7 +126,14 @@ func tagUserTurn(line []byte, res *dlgResult, moves *[]dialogue.Move, turn *int,
 	if prompt == "" {
 		return
 	}
-	if skip, _, _ := score.ClassifyBoundary(prompt); skip {
+	if skip, kind, _ := score.ClassifyBoundary(prompt); skip {
+		// A skipped genuine user turn (affirmation/control) still answers or
+		// supersedes a pending question — consume the flag so it can't leak to the
+		// next request. A carrier is a system envelope, not user intent: leave the
+		// pending question standing for the real answer.
+		if kind != "carrier" {
+			*priorAgentQuestion = false
+		}
 		return
 	}
 	move, cue := dialogue.TagMoveContext(prompt, dialogue.MoveContext{PriorAgentQuestion: *priorAgentQuestion})
