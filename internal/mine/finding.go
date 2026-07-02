@@ -36,8 +36,69 @@ type Finding struct {
 	Repairs int    // repair-tagged user turns summed across host sessions
 	Accepts int    // accept-tagged user turns summed across host sessions
 
+	// Friction is the deterministic architectural-friction rollup (ferret-bbp.10)
+	// for the host sessions this motif recurs in: failed actions, late preconditions,
+	// ignored constraints, confirmation waste, premature stops, turns-to-goal. Counts
+	// SUM across host sessions and TurnsToGoal takes the worst (longest) path, so a
+	// burn-ranked finding also reads "...and these sessions burned N failed actions
+	// getting there". Zero = no friction signal. Set by AttachDialogue.
+	Friction Friction
+
 	ExStream int // exemplar location
 	ExSeq    int
+}
+
+// Friction is the deterministic friction rollup for a session (or a motif's host
+// sessions, summed). It holds plain counts — no dependency on package score — so
+// the producer (cmd/ferret) converts score.Friction into this at the emit seam,
+// the same decoupling StreamDialogue's canonical strings use. Rates are recovered
+// at render from the Actions / Prompts denominators.
+type Friction struct {
+	Prompts            int  // genuine user turns (rate denominator)
+	Actions            int  // tool + shell events (rate denominator)
+	TurnsToGoal        int  // user turns to the first terminal goal signal (worst-wins across sessions)
+	GoalReached        bool // a terminal goal signal fired in any host session
+	FailedActions      int  // tool/shell events with a fail status
+	LatePreconditions  int  // retries after a failure (precondition surfaced mid-act)
+	IgnoredConstraints int  // constraint turns a later repair contradicted
+	ConfirmationWaste  int  // bare permission-grant turns
+	PrematureStops     int  // continue/finish/do-the-rest prods
+}
+
+// Any reports whether the rollup carries any friction signal — the render gate.
+func (f *Friction) Any() bool {
+	return f.FailedActions > 0 || f.LatePreconditions > 0 || f.IgnoredConstraints > 0 ||
+		f.ConfirmationWaste > 0 || f.PrematureStops > 0 || f.GoalReached
+}
+
+// add folds another session's friction into the aggregate: counts SUM, GoalReached
+// ORs, and TurnsToGoal takes the worst (longest) path — but only among sessions in
+// the winning goal-state. A reached session's turns-to-goal and an unreached
+// session's total-turn cost are different quantities (see internal/score/friction.go),
+// so once ANY session reached the goal the rollup must draw TurnsToGoal from the
+// reached sessions alone; folding an unreached session's larger cost in would render
+// an inflated ttg beside a "goal reached" verdict.
+func (f *Friction) add(o Friction) {
+	f.Prompts += o.Prompts
+	f.Actions += o.Actions
+	f.FailedActions += o.FailedActions
+	f.LatePreconditions += o.LatePreconditions
+	f.IgnoredConstraints += o.IgnoredConstraints
+	f.ConfirmationWaste += o.ConfirmationWaste
+	f.PrematureStops += o.PrematureStops
+	switch {
+	case f.GoalReached && o.GoalReached:
+		if o.TurnsToGoal > f.TurnsToGoal { // both reached — worst path wins
+			f.TurnsToGoal = o.TurnsToGoal
+		}
+	case o.GoalReached: // o reached, f had not — reached sessions own the metric
+		f.TurnsToGoal = o.TurnsToGoal
+	case !f.GoalReached: // neither reached — longest cost is the lower bound
+		if o.TurnsToGoal > f.TurnsToGoal {
+			f.TurnsToGoal = o.TurnsToGoal
+		}
+	}
+	f.GoalReached = f.GoalReached || o.GoalReached
 }
 
 // StreamDialogue is one session's deterministic dialogue + Hop2 rollup, keyed into
@@ -48,10 +109,11 @@ type Finding struct {
 // (dialogue.Outcome / score.QPPGrade) so package mine stays decoupled from those
 // packages; "" in either means the session produced no signal.
 type StreamDialogue struct {
-	Outcome string // dialogue.Outcome for the session ("" = unknown / no signal)
-	Hop2    string // worst score.QPPGrade across the session's retrieval episodes ("" = none)
-	Repairs int    // repair-tagged user turns in the session
-	Accepts int    // accept-tagged user turns in the session
+	Outcome  string   // dialogue.Outcome for the session ("" = unknown / no signal)
+	Hop2     string   // worst score.QPPGrade across the session's retrieval episodes ("" = none)
+	Repairs  int      // repair-tagged user turns in the session
+	Accepts  int      // accept-tagged user turns in the session
+	Friction Friction // deterministic architectural-friction rollup for the session (bbp.10)
 }
 
 // FindingKind is what the motif IS.
@@ -152,6 +214,7 @@ func AttachDialogue(findings []*Finding, c *Corpus, idx map[string]StreamDialogu
 		agg := aggregateDialogue(f, c, idx, maxGap)
 		f.Outcome, f.Hop2 = agg.Outcome, agg.Hop2
 		f.Repairs, f.Accepts = agg.Repairs, agg.Accepts
+		f.Friction = agg.Friction
 	}
 }
 
@@ -169,6 +232,7 @@ func aggregateDialogue(f *Finding, c *Corpus, idx map[string]StreamDialogue, max
 		}
 		agg.Repairs += sd.Repairs
 		agg.Accepts += sd.Accepts
+		agg.Friction.add(sd.Friction)
 		if outcomeSeverity(sd.Outcome) > outcomeSeverity(agg.Outcome) {
 			agg.Outcome = sd.Outcome
 		}

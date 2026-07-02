@@ -275,3 +275,57 @@ func TestFindingsSplitsRoutineBySurprise(t *testing.T) {
 		})
 	}
 }
+
+// TestFrictionAddTurnsToGoal locks the goal-state-aware rollup: once any session
+// reaches the goal, TurnsToGoal is drawn from reached sessions only, so an
+// unreached session's larger total-turn cost can't inflate the rendered ttg
+// beside a "goal reached" verdict (bbp.10 review, PR #58).
+func TestFrictionAddTurnsToGoal(t *testing.T) {
+	tests := []struct {
+		name            string
+		base, other     Friction
+		wantTTG         int
+		wantGoalReached bool
+	}{
+		{
+			name:            "reached folds unreached-longer: reached path wins",
+			base:            Friction{GoalReached: true, TurnsToGoal: 5},
+			other:           Friction{GoalReached: false, TurnsToGoal: 10},
+			wantTTG:         5,
+			wantGoalReached: true,
+		},
+		{
+			name:            "unreached-first folds reached: reached path adopted",
+			base:            Friction{GoalReached: false, TurnsToGoal: 10},
+			other:           Friction{GoalReached: true, TurnsToGoal: 5},
+			wantTTG:         5,
+			wantGoalReached: true,
+		},
+		{
+			name:            "both reached: worst path wins",
+			base:            Friction{GoalReached: true, TurnsToGoal: 5},
+			other:           Friction{GoalReached: true, TurnsToGoal: 8},
+			wantTTG:         8,
+			wantGoalReached: true,
+		},
+		{
+			name:            "neither reached: longest cost is the lower bound",
+			base:            Friction{GoalReached: false, TurnsToGoal: 7},
+			other:           Friction{GoalReached: false, TurnsToGoal: 12},
+			wantTTG:         12,
+			wantGoalReached: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := tt.base
+			f.add(tt.other)
+			if f.TurnsToGoal != tt.wantTTG {
+				t.Errorf("TurnsToGoal = %d, want %d", f.TurnsToGoal, tt.wantTTG)
+			}
+			if f.GoalReached != tt.wantGoalReached {
+				t.Errorf("GoalReached = %v, want %v", f.GoalReached, tt.wantGoalReached)
+			}
+		})
+	}
+}

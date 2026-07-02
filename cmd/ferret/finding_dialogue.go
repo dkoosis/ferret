@@ -83,7 +83,25 @@ func reduceStreamDialogue(evs []event.Event) mine.StreamDialogue {
 		sd.Outcome = string(out)
 	}
 	sd.Hop2 = worstHop2(score.BuildEpisodes(evs))
+	sd.Friction = frictionToMine(score.ComputeFriction(evs))
 	return sd
+}
+
+// frictionToMine converts the score-package friction rollup into the mine-local
+// value the finding carries, keeping package mine decoupled from package score
+// (the same seam as the dialogue.Outcome / QPP grade → string conversions above).
+func frictionToMine(f score.Friction) mine.Friction {
+	return mine.Friction{
+		Prompts:            f.Prompts,
+		Actions:            f.Actions,
+		TurnsToGoal:        f.TurnsToGoal,
+		GoalReached:        f.GoalReached,
+		FailedActions:      f.FailedActions,
+		LatePreconditions:  f.LatePreconditions,
+		IgnoredConstraints: f.IgnoredConstraints,
+		ConfirmationWaste:  f.ConfirmationWaste,
+		PrematureStops:     f.PrematureStops,
+	}
 }
 
 // worstHop2 returns the lowest (worst) Hop2 QPP grade across a session's retrieval
@@ -114,10 +132,39 @@ func reportDialogueNote(f *mine.Finding) string {
 	if f.Repairs > 0 || f.Accepts > 0 {
 		parts = append(parts, fmt.Sprintf("r%d/a%d", f.Repairs, f.Accepts))
 	}
+	parts = append(parts, frictionParts(f.Friction)...)
 	if len(parts) == 0 {
 		return ""
 	}
 	return "  [" + strings.Join(parts, " ") + "]"
+}
+
+// frictionParts renders the deterministic friction rollup (bbp.10) as compact
+// note tokens, emitting only the metrics that fired so a friction-free finding
+// reads unchanged: fail=N (failed actions), late=N (late preconditions), ic=N
+// (ignored constraints), cw=N (confirmation waste), stop=N (premature stops), and
+// ttg=N when a goal was reached (turns-to-goal).
+func frictionParts(fr mine.Friction) []string {
+	var parts []string
+	if fr.FailedActions > 0 {
+		parts = append(parts, fmt.Sprintf("fail=%d", fr.FailedActions))
+	}
+	if fr.LatePreconditions > 0 {
+		parts = append(parts, fmt.Sprintf("late=%d", fr.LatePreconditions))
+	}
+	if fr.IgnoredConstraints > 0 {
+		parts = append(parts, fmt.Sprintf("ic=%d", fr.IgnoredConstraints))
+	}
+	if fr.ConfirmationWaste > 0 {
+		parts = append(parts, fmt.Sprintf("cw=%d", fr.ConfirmationWaste))
+	}
+	if fr.PrematureStops > 0 {
+		parts = append(parts, fmt.Sprintf("stop=%d", fr.PrematureStops))
+	}
+	if fr.GoalReached {
+		parts = append(parts, fmt.Sprintf("ttg=%d", fr.TurnsToGoal))
+	}
+	return parts
 }
 
 // hop2Rank ranks QPP grade strings so the worst (low) wins the per-session reduction.
