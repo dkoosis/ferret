@@ -71,8 +71,13 @@ func (f *Friction) Any() bool {
 		f.ConfirmationWaste > 0 || f.PrematureStops > 0 || f.GoalReached
 }
 
-// add folds another session's friction into the aggregate: counts SUM,
-// TurnsToGoal takes the worst (longest) path, GoalReached ORs.
+// add folds another session's friction into the aggregate: counts SUM, GoalReached
+// ORs, and TurnsToGoal takes the worst (longest) path — but only among sessions in
+// the winning goal-state. A reached session's turns-to-goal and an unreached
+// session's total-turn cost are different quantities (see internal/score/friction.go),
+// so once ANY session reached the goal the rollup must draw TurnsToGoal from the
+// reached sessions alone; folding an unreached session's larger cost in would render
+// an inflated ttg beside a "goal reached" verdict.
 func (f *Friction) add(o Friction) {
 	f.Prompts += o.Prompts
 	f.Actions += o.Actions
@@ -81,8 +86,17 @@ func (f *Friction) add(o Friction) {
 	f.IgnoredConstraints += o.IgnoredConstraints
 	f.ConfirmationWaste += o.ConfirmationWaste
 	f.PrematureStops += o.PrematureStops
-	if o.TurnsToGoal > f.TurnsToGoal {
+	switch {
+	case f.GoalReached && o.GoalReached:
+		if o.TurnsToGoal > f.TurnsToGoal { // both reached — worst path wins
+			f.TurnsToGoal = o.TurnsToGoal
+		}
+	case o.GoalReached: // o reached, f had not — reached sessions own the metric
 		f.TurnsToGoal = o.TurnsToGoal
+	case !f.GoalReached: // neither reached — longest cost is the lower bound
+		if o.TurnsToGoal > f.TurnsToGoal {
+			f.TurnsToGoal = o.TurnsToGoal
+		}
 	}
 	f.GoalReached = f.GoalReached || o.GoalReached
 }
