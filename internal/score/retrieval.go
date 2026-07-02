@@ -239,6 +239,13 @@ func (b *epBuild) addAction(ev *event.Event) {
 // only "before any consumed result").
 func (b *epBuild) consumed() bool { return b.refID != "" || b.advanced }
 
+// topicSwitchedAway reports whether the human closed this episode by opening a
+// fresh task (MoveNewTask) — the cross-episode abandonment tell ClassifyCross reads
+// when the episode never reached acceptance (ferret-bbp.8).
+func (b *epBuild) topicSwitchedAway() bool {
+	return b.hasClose && b.closingMove == dialogue.MoveNewTask
+}
+
 // referencedID scans an event's text fields for the first returned nug id it
 // mentions, returning the id and its 1-based rank in the result set. This is the
 // deterministic "explicit reference" tell (tell 1): a later command, target, or
@@ -265,7 +272,10 @@ func (b *epBuild) finalize() Episode {
 	if b.hasClose {
 		moves = []dialogue.Move{b.closingMove}
 	}
-	outcome := dialogue.Classify(moves)
+	// The closing move IS the next segment's opening turn, so a MoveNewTask close
+	// means the human topic-switched away — ClassifyCross reads that as abandonment
+	// when this episode never reached acceptance (ferret-bbp.8).
+	outcome := dialogue.ClassifyCross(moves, b.topicSwitchedAway())
 
 	coverageGap := empty && b.sawSetNug
 	goodAbandon := empty && !coverageGap && !b.selfRequery && !dialogue.IsRepairMove(b.closingMove)

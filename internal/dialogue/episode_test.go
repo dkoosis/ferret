@@ -34,6 +34,43 @@ func TestClassifyRejectSplitIsBehaviorPreserving(t *testing.T) {
 	}
 }
 
+// TestClassifyCrossTopicSwitch covers the cross-episode abandonment arm: an episode
+// that reached no acceptance and no friction reads `unknown` on its own, but flips
+// to `abandoned` when the caller knows the NEXT segment opened on a fresh task
+// (MoveNewTask) — the human walked away unresolved. PARADISE task-failure leg
+// (ferret-bbp.8). The `nextOpensNewTask` gate only bites the no-accept/no-friction
+// corner; any accept blocks it, and an already-abandoned slice is a no-op.
+func TestClassifyCrossTopicSwitch(t *testing.T) {
+	tests := []struct {
+		name    string
+		moves   []Move
+		nextNew bool
+		want    Outcome
+	}{
+		{"topic-switch after unresolved new-task turn is abandoned",
+			[]Move{MoveNewTask}, true, OutcomeAbandoned},
+		{"same moves, hint off, stays unknown (pure path)",
+			[]Move{MoveNewTask}, false, OutcomeUnknown},
+		{"neutral turn then topic switch is abandoned",
+			[]Move{MoveNeutral}, true, OutcomeAbandoned},
+		{"accept blocks the topic-switch flip",
+			[]Move{MoveAccept}, true, OutcomeSuccess},
+		{"accept after a neutral still blocks the flip",
+			[]Move{MoveNeutral, MoveAccept}, true, OutcomeSuccess},
+		{"already-abandoned repair slice: hint is a no-op",
+			[]Move{MoveRepair}, true, OutcomeAbandoned},
+		{"empty slice never conjures abandonment",
+			nil, true, OutcomeUnknown},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ClassifyCross(tt.moves, tt.nextNew); got != tt.want {
+				t.Errorf("ClassifyCross(%v, %v) = %q, want %q", tt.moves, tt.nextNew, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestClassifyFrictionMoves proves clarify + meta-communication add to the friction
 // tally (a would-be-success episode tips to repair-heavy when they pile up) while
 // the constrain flag, new-task detection, and catalog moves stay inert.

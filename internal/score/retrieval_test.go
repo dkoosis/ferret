@@ -122,6 +122,30 @@ func TestBuildEpisodes(t *testing.T) {
 			},
 			want: Episode{Queries: 1, Results: 30, Oversized: true, ConsumedLoose: true, Answerable: true},
 		},
+		{
+			// Cross-episode abandonment (ferret-bbp.8): the next human turn opens a
+			// fresh task ("new task: …" → MoveNewTask) and this episode never reached
+			// acceptance → the retrieval episode reads `abandoned`, not `unknown`.
+			name: "topic-switch close with no accept is abandoned",
+			evs: []event.Event{
+				getNug(0, "how to lock files", "aaa111"),
+				prompt(1, "new task: refactor the parser"),
+			},
+			want: Episode{Queries: 1, Results: 1, ConsumedLoose: true, Answerable: true,
+				ClosingMove: dialogue.MoveNewTask, Outcome: dialogue.OutcomeAbandoned},
+		},
+		{
+			// Contrast: a plain neutral next turn is NOT a topic switch, so the same
+			// no-accept episode stays `unknown` — pins the flip to MoveNewTask, not to
+			// "no accept" alone.
+			name: "neutral close with no accept stays unknown",
+			evs: []event.Event{
+				getNug(0, "q", "aaa111"),
+				prompt(1, "where do the events live?"),
+			},
+			want: Episode{Queries: 1, Results: 1, ConsumedLoose: true, Answerable: true,
+				ClosingMove: dialogue.MoveNeutral, Outcome: dialogue.OutcomeUnknown},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -502,7 +526,11 @@ func TestEpisodeQPP_SelfRequeryNotChargedToRetrieval(t *testing.T) {
 		shell(2, "trixi get bbb222"),                  // the returned nug was used
 		prompt(3, "yes"),
 	}
-	ep := BuildEpisodes(evs)[0]
+	eps := BuildEpisodes(evs)
+	if len(eps) == 0 {
+		t.Fatal("setup: expected an episode")
+	}
+	ep := eps[0]
 	if !ep.SelfRequery {
 		t.Fatal("setup: expected a self-requery chain")
 	}
