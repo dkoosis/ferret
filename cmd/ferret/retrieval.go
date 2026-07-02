@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/dkoosis/ferret/internal/analyst"
+	"github.com/dkoosis/ferret/internal/dialogue"
 	"github.com/dkoosis/ferret/internal/event"
 	"github.com/dkoosis/ferret/internal/out"
 	"github.com/dkoosis/ferret/internal/score"
@@ -120,8 +121,20 @@ func writeRetrievalText(sink *out.Sink, session string, r score.Rollup, eps []sc
 	sink.Head("episodes (✗ = answerable miss · ! = self-requery · ∅ = empty · gap/abandon = excluded):")
 	for i := range eps {
 		e := eps[i]
-		sink.Row("  %s %-7s %s  %s", episodeMark(e), e.Outcome, episodeFlags(e), truncQuery(e.Query))
+		sink.Row("  %s %-7s %s  %s", episodeMark(e), episodeOutcomeLabel(e), episodeFlags(e), truncQuery(e.Query))
 	}
+}
+
+// episodeOutcomeLabel renders the outcome column. A good-abandonment can carry a
+// raw Outcome==abandoned (the closing move ended the task without acceptance) yet
+// be excluded from scoring as a store-coverage signal — printing "abandoned"
+// beside the "good-abandon" flag reads self-contradictory. Blank the column in
+// that case; the leading · already marks it excluded and the flag names the why.
+func episodeOutcomeLabel(e score.Episode) dialogue.Outcome {
+	if e.GoodAbandon {
+		return ""
+	}
+	return e.Outcome
 }
 
 // episodeMark is the leading glyph: an answerable miss (returned, not served) is
