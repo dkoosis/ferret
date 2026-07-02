@@ -109,7 +109,7 @@ func writeSegmentsText(w io.Writer, res score.Result) error {
 			fmt.Fprintf(bw, "  prompt: %s", truncateRunes(seg.Prompt, spineTextCap))
 		}
 		fmt.Fprint(bw, outcomeNote(*seg))
-		fmt.Fprint(bw, dialogueOutcomeNote(seg))
+		fmt.Fprint(bw, dialogueOutcomeNote(seg, nextOpensNewTask(res.Segments, i)))
 		fmt.Fprintln(bw)
 		for _, p := range seg.Pivots {
 			fmt.Fprintf(bw, "  [pivot] think#%d  cue=%q\n", p.Think, p.Cue)
@@ -145,15 +145,44 @@ func outcomeNote(seg score.Segment) string {
 
 // dialogueOutcomeNote renders a segment's per-EPISODE dialogue Outcome — the
 // PARADISE task-success leg (Walker et al. 1997) — as a trailing note: it tags the
-// segment's user turns with the v1 move tagger and rolls them up via
-// dialogue.ClassifyTurns. OutcomeUnknown (no accept/repair signal in the turns) is
-// silence, mirroring outcomeNote — a per-segment outcome is a hint, never a verdict.
-func dialogueOutcomeNote(seg *score.Segment) string {
-	out := dialogue.ClassifyTurns(segmentUserTurns(seg))
+// segment's user turns with the v1 move tagger and rolls them up via ClassifyCross.
+// nextOpensNewTask carries the cross-episode abandonment tell: when this episode
+// never reached acceptance and the NEXT segment opened on a fresh task, the human
+// walked away unresolved (abandonment by topic switch, ferret-bbp.8). OutcomeUnknown
+// (no accept/repair signal, no topic switch) is silence, mirroring outcomeNote — a
+// per-segment outcome is a hint, never a verdict.
+func dialogueOutcomeNote(seg *score.Segment, nextOpensNewTask bool) string {
+	out := classifyTurnsCross(segmentUserTurns(seg), nextOpensNewTask)
 	if out == dialogue.OutcomeUnknown {
 		return ""
 	}
 	return "  [dialogue:" + string(out) + "]"
+}
+
+// classifyTurnsCross mirrors dialogue.ClassifyTurns but threads the cross-episode
+// topic-switch signal: it TagMoves each raw user turn, then ClassifyCross()es the
+// move sequence with nextOpensNewTask. The pure ClassifyTurns cannot see the next
+// segment's opening move; this per-segment consumer can, so it wires the signal in
+// the same way the retrieval per-episode path does (internal/score, ferret-bbp.8).
+func classifyTurnsCross(turns []string, nextOpensNewTask bool) dialogue.Outcome {
+	moves := make([]dialogue.Move, 0, len(turns))
+	for _, t := range turns {
+		m, _ := dialogue.TagMove(t)
+		moves = append(moves, m)
+	}
+	return dialogue.ClassifyCross(moves, nextOpensNewTask)
+}
+
+// nextOpensNewTask reports whether the segment AFTER segs[i] opened on a fresh task
+// (its opening prompt tags MoveNewTask) — the adjacency the per-segment
+// dialogueOutcomeNote needs to read abandonment by topic switch. The final segment
+// has no next, so it reports false and falls back to the pure single-episode verdict.
+func nextOpensNewTask(segs []score.Segment, i int) bool {
+	if i+1 >= len(segs) {
+		return false
+	}
+	m, _ := dialogue.TagMove(segs[i+1].Prompt)
+	return m == dialogue.MoveNewTask
 }
 
 // segmentUserTurns gathers one segment's genuine user turns in order: the prompt
