@@ -75,8 +75,9 @@ func runDialogue(w io.Writer, root, session, format string) error {
 	res.Session, res.Project, res.Agent = src.Session, src.Project, src.Agent
 	var moves []dialogue.Move
 	turn := 0
+	priorAgentQuestion := false
 	if err := transcript.ReadLines(src.Path, func(line []byte) error {
-		tagUserTurn(line, &res, &moves, &turn)
+		tagUserTurn(line, &res, &moves, &turn, &priorAgentQuestion)
 		return nil
 	}); err != nil {
 		return err
@@ -95,23 +96,48 @@ func runDialogue(w io.Writer, root, session, format string) error {
 // prompt that isn't a fold-in (carrier/control/affirmation), tags it with a Move
 // and appends the signal. Mirrors the segmenter's tolerance: a bad line bumps the
 // decode counter and is dropped.
-func tagUserTurn(line []byte, res *dlgResult, moves *[]dialogue.Move, turn *int) {
+//
+// priorAgentQuestion carries the one cross-turn signal MoveClarify needs: it is set
+// on an assistant turn that ended in a question — the CheckQuestion dependence-link
+// (ISO 24617-2, Bunt 2012) — and consumed by the next genuine user turn, so a real
+// answer-after-agent-question tags MoveClarify. This is the caller that structurally
+// sees assistant turns beside user turns (the events path has no assistant NL).
+func tagUserTurn(line []byte, res *dlgResult, moves *[]dialogue.Move, turn *int, priorAgentQuestion *bool) {
 	var raw transcript.Raw
 	if err := json.Unmarshal(line, &raw); err != nil {
 		res.DecodeErrs++
 		return
 	}
-	if raw.IsMeta || raw.Message == nil || raw.Type != "user" {
+	if raw.IsMeta || raw.Message == nil {
+		return
+	}
+	// An assistant text turn (re)sets the pending-question flag; tool-only assistant
+	// turns carry no text, so they leave a pending question standing for the answer.
+	if raw.Type == "assistant" {
+		if text := score.PromptText(raw.Message.Content); text != "" {
+			*priorAgentQuestion = dialogue.AssistantAskedQuestion(text)
+		}
+		return
+	}
+	if raw.Type != "user" {
 		return
 	}
 	prompt := score.PromptText(raw.Message.Content)
 	if prompt == "" {
 		return
 	}
-	if skip, _, _ := score.ClassifyBoundary(prompt); skip {
+	if skip, kind, _ := score.ClassifyBoundary(prompt); skip {
+		// A skipped genuine user turn (affirmation/control) still answers or
+		// supersedes a pending question — consume the flag so it can't leak to the
+		// next request. A carrier is a system envelope, not user intent: leave the
+		// pending question standing for the real answer.
+		if kind != "carrier" {
+			*priorAgentQuestion = false
+		}
 		return
 	}
-	move, cue := dialogue.TagMove(prompt)
+	move, cue := dialogue.TagMoveContext(prompt, dialogue.MoveContext{PriorAgentQuestion: *priorAgentQuestion})
+	*priorAgentQuestion = false // consumed: the human has now answered (or superseded) the question
 	res.Signals = append(res.Signals, dialogue.Signal{
 		Turn: *turn, Move: move, Cue: cue,
 		Text: truncateRunes(prompt, dialogueCap),
