@@ -1,16 +1,17 @@
 # Boot
-updated: 2026-07-01
+updated: 2026-07-02
 
 *Project working-memory. Maintained for future-me: current state + live frontier + traps that still bite. Resolved lanes pruned — history lives in beads/PRs.*
 
 ## lane: GreatKilldeer
-→ next: **dispatch `ferret-bbp.8`** (cross-episode abandonment wiring; depends on bbp.7's shipped MoveNewTask + inherits new-task recall tuning) — or `bbp.9` (clarify population, makes the shipped MoveClarify mechanism live). Both unblocked.
-✓ shipped bbp.7 (#54, v2 13-move taxonomy) via dispatch — 5 review passes caught a P0 outcome regression + friction-inflation on dk's own turns; filed bbp.8/.9, ferret-ubf.
-‡ a taxonomy split needs a codebase-wide `IsRepairMove`-style predicate audit, ✗ only plan-named call sites — the miss cost a round-4 retrieval.go ripple.
-~ dk: fenced trust-the-loop, spot-checks via a critical-review paste; ends on "next?".
+→ next: **design round — `helped` adjudicator.** Table set 2026-07-02, brief → `~/Projects/dk/Project/ferret/specs/helped-adjudicator-design.md` (options, 3 fresh lit nugs, 4 decisions dk must make; lean = staged Hop1-style). dk drives. After the round: mint the consumer bead (ingest→join→emit, buildable against the golden fixture, ✗ block on tx-dii8m). Also open: `ferret-bbp.11` (P3).
+✓ merged bbp.9 (#59), bbp.10 (#58), bbp.12 (#57), bbp.13 (#56) — clarify population + deterministic friction metrics + abandonment-by-topic-switch wiring + GoodAbandon-label suppression.
+‡ bbp.9 clarify is live ONLY on the `ferret dialogue` session path — the retrieval/Finding path still can't fire clarify (events carry no assistant NL). Separate wiring step if wanted.
+‡ bbp.8 was prose-only — never minted. **bbp.5 SHIPPED** (#53, `internal/analyst/hop1.go`) — staged Hop1 interp-fidelity judge (deterministic floor → Q3 coverage judge). Earlier boots called it unplanned; wrong. The abandonment wiring landed as bbp.12.
+~ dk: fenced trust-the-loop, spot-checks via critical-review paste; ends on "next?".
 
 ## State
-- main @ `6f3a4cf`, origin synced (bbp.7 merged #54). PR queue EMPTY.
+- main @ `60f79a4`, origin synced (bbp.9/.10/.12/.13 merged #56–59). PR queue EMPTY.
 - Scorers live in **`internal/score/`** (landmark/quality/conform all there — ratified, design-doc D2). New scorers go here.
 - `/team` = one shared tree + loto (worktrees retired). No concurrent `make check`; primary verifies once at wave end.
 
@@ -18,16 +19,18 @@ updated: 2026-07-01
 
 **ferret-bbp** (epic, in_progress) — User-turn repair/acceptance tagger: read intent from the *human's words*, not just tool sequences. **Deterministic spine COMPLETE** (#49–52): boundary guard → per-segment Outcome → TurnContext/AttributeHop → Hop2 QPP → surfaced on `mine.Finding` (rank/report/out). The **consumer clause** of the retrieval-outcome contract below.
 - ✓ shipped: bbp.1 (compaction-carrier boundary guard) · bbp.2 (per-seg Outcome rollup) · bbp.3 (TurnContext, un-stubbed AttributeHop) · bbp.4 (det. Hop2 QPP scorer, `internal/score/qpp.go`) · bbp.6 (de-island dialogue+hop onto `mine.Finding`, emit seam `cmd/ferret/finding_dialogue.go`)
-- ✓ **bbp.7 SHIPPED** (#54) — v2 13-move taxonomy (7 outcome-bearing + 6 catalog), carrier pre-filters, behavior-preserving repair→reject split via `IsRepairMove`, `episode.Classify` extended. Split out: **bbp.8** (cross-episode abandonment wiring, depends bbp.7 + owns new-task recall tuning) · **bbp.9** (MoveClarify population — mechanism shipped, prod-inert until a caller sets PriorAgentQuestion).
-- → remaining LLM half: **bbp.5** Hop1 interp-fidelity judge (`requires_plan`, still needs plan; dk drives).
-- spun off the AHI-essay assessment: **bbp.10** (deterministic friction metrics) + **bbp.11** (agency-calibration axis — agent-side initiative, sibling to the user-move taxonomy).
+- ✓ **bbp.7 SHIPPED** (#54) — v2 13-move taxonomy (7 outcome-bearing + 6 catalog), carrier pre-filters, behavior-preserving repair→reject split via `IsRepairMove`, `episode.Classify` extended.
+- ✓ **bbp.9 SHIPPED** (#59) — MoveClarify populated on the `ferret dialogue` path (AssistantAskedQuestion → PriorAgentQuestion); retrieval/Finding path still clarify-inert (no assistant NL in events).
+- ✓ **bbp.10/.12/.13 SHIPPED** (#58/57/56) — deterministic friction metrics over segments · abandonment-by-topic-switch wired into per-segment dialogueOutcomeNote · GoodAbandon self-contradictory-label suppression in retrieval CLI.
+- ✓ **bbp.5 SHIPPED** (#53) — staged Hop1 judge: deterministic floor, paid LLM (results-blind Q3 coverage judge, AgentRewardBench bias guards) only on floor-undecidable episodes; grades joinable with Hop2 QPP.
+- → **remaining, unminted:** contract-consumer plumbing (sidecar-stream ingest → segment join → outcome emit w/ `judge_fingerprint`) + the `helped` adjudicator design (composes episode tells + read-linkage + segment outcome; ✗ same thing as Hop1). Open bead under this epic: **bbp.11** (agency-calibration axis — agent-side initiative, sibling to the user-move taxonomy, P3).
 - bbp regex-first; ✗ emotion detector (dev jargon "kill/dead/braindead" ≠ affect)
 
 Under epic **ferret-kuv** (container, ✗ dispatch): **567** (metrics-engine for a Claude analyst — per-candidate bundle + proposal loop, in_progress), **kuv.3** (tool-for-intent applicability check, in_progress).
 
 **Retrieval-outcome contract (trixi⇄ferret)** — drafted 2026-06-29 → `~/Projects/dk/Project/trixi/specs/retrieval-outcome-contract-design.md`. The validation seam:
 `trixi/observe.2.1` emits retrieval-event JSONL (producer) → `ferret/bbp` joins to task segments + adjudicates outcome (consumer) → `search-loop.4` reads back via interrupted-time-series (reader).
-Decided calls: `schema_version`/record · sidecar JSONL not the CC transcript · per-task-segment grain (store fine, roll up) · `config_fingerprint` as ITS segment-key · key = `(session_id, agent_id, ts)`, carry `agent_type`. Out of scope: `observe.2.2` (Q3 prompt→query, upstream). **ferret's side of this contract = the bbp epic.**
+Decided calls: `schema_version`/record · sidecar JSONL not the CC transcript · per-task-segment grain (store fine, roll up) · `config_fingerprint` as ITS segment-key · key = `(session_id, agent_id, ts)`, carry `agent_type`. **Ratified 2026-07-02** (Trixi feedback round): `gate` on search rows · `kind: search|read` rows w/ `search_ref` FK · `judge_fingerprint` on ferret's outcome record (ours — carries into Hop1 judge design) · golden fixture as contract test (ferret vendors it; build ingest against the fixture, ✗ trixi's SQLite interim — producer conformance = `tx-dii8m`). Out of scope: `observe.2.2` (Q3 prompt→query, upstream). **ferret's side of this contract = the bbp epic.**
 
 ## Live traps
 - **agent_id/agent_type are the ONLY parent↔subagent discriminator** — `session_id` + `transcript_path` are SHARED (claude-code-guide-confirmed). Anything keying retrieval/attribution per-agent MUST carry `agent_id` (it's Trap 2 in the contract; bbp.3 TurnContext attribution rides on it).
@@ -44,4 +47,4 @@ Dry fenced grants, zero corrections → trust-the-loop. Surface deviations, ✗ 
 - read-before-edit/write hookify guard — top ferret-scan burn finding (`Edit!⇝Read` + `Write!⇝Read⇝Write`, ~670k). Build as a hook, log in the ferret fix ledger. Harness-side, not a ferret bead. Done-status unverified.
 
 ## Shipped ledger
-bbp.7 v2 taxonomy (#54) · bbp deterministic spine #49–52 (bbp.1/.2/.3/.4/.6) · landmark wave kuv.10/vy7/afm/t5d (#45–47) · sq.2 judge+golden + d28 spec (#41) · kuv.5 quality axes (#44) · kuv.4 conformance (#27) · kuv.2 segmentation · kuv.1 spine (#23) · d01 prompt-text capture (#34) · bbp tagger (#33) · 9 go-bug-audit fixes (#31) · nilaway clear (#48).
+bbp.13 GoodAbandon-label suppress (#56) · bbp.12 abandonment-by-topic-switch (#57) · bbp.10 det friction metrics (#58) · bbp.9 clarify population (#59) · bbp.7 v2 taxonomy (#54) · bbp deterministic spine #49–52 (bbp.1/.2/.3/.4/.6) · landmark wave kuv.10/vy7/afm/t5d (#45–47) · sq.2 judge+golden + d28 spec (#41) · kuv.5 quality axes (#44) · kuv.4 conformance (#27) · kuv.2 segmentation · kuv.1 spine (#23) · d01 prompt-text capture (#34) · bbp tagger (#33) · 9 go-bug-audit fixes (#31) · nilaway clear (#48).
