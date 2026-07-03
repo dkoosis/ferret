@@ -233,6 +233,50 @@ func TestSearchValidation(t *testing.T) {
 	}
 }
 
+// TestSearchReportsDecodeErrors covers the decode-errs=%d header branch: a
+// corpus with one malformed JSONL line must be tolerated (search proceeds
+// over the rest of the transcript) while the bad line is tallied and surfaced
+// in the header, per runSearch's decode-broken-lines-are-tolerated contract.
+func TestSearchReportsDecodeErrors(t *testing.T) {
+	root := t.TempDir()
+	writeSpineFixture(t, root, "-Users-dev-proj", "sess-h.jsonl", []string{
+		`{"type":"user","sessionId":"sess-h","message":{"role":"user","content":"MATCH good line"}}`,
+		`not valid json at all`,
+		`{"type":"user","sessionId":"sess-h","message":{"role":"user","content":"MATCH after the break"}}`,
+	})
+
+	var buf bytes.Buffer
+	if err := runSearch(&buf, root, "MATCH", searchOpts{format: "text", limit: 0, context: 0}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "decode-errs=1") {
+		t.Errorf("expected header to report decode-errs=1\n%s", out)
+	}
+	if !strings.Contains(out, "hits=2") {
+		t.Errorf("expected the two well-formed matches to still be found\n%s", out)
+	}
+}
+
+// TestSearchNoDecodeErrorsOmitsHeaderSuffix covers the zero-count case: a
+// clean corpus must not print a decode-errs suffix at all (writeSearchText
+// only emits it when decodeErrs > 0).
+func TestSearchNoDecodeErrorsOmitsHeaderSuffix(t *testing.T) {
+	root := t.TempDir()
+	writeSpineFixture(t, root, "-Users-dev-proj", "sess-i.jsonl", []string{
+		`{"type":"user","sessionId":"sess-i","message":{"role":"user","content":"MATCH clean"}}`,
+	})
+
+	var buf bytes.Buffer
+	if err := runSearch(&buf, root, "MATCH", searchOpts{format: "text", limit: 0, context: 0}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "decode-errs") {
+		t.Errorf("clean corpus must not print decode-errs suffix\n%s", out)
+	}
+}
+
 func TestSearchNoMatch(t *testing.T) {
 	root := t.TempDir()
 	writeSpineFixture(t, root, "-Users-dev-proj", "sess-g.jsonl", []string{
