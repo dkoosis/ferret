@@ -204,6 +204,14 @@ var CLI struct {
 		Format  string `help:"Output format: text|json." default:"text" name:"format"`
 	} `cmd:"" help:"Tag user turns: per-turn repair/accept moves + PARADISE outcome rollup (regex-first; v1)."`
 
+	Search struct {
+		Query   string `arg:"" help:"Literal substring to find (case-sensitive; regex/case-fold are follow-ups)." name:"query"`
+		Root    string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
+		Format  string `help:"Output format: text|json." default:"text" name:"format"`
+		Limit   int    `help:"Max hits (0 = unlimited)." default:"20" name:"limit"`
+		Context int    `help:"Entries (turn blocks) of context before/after each hit." default:"2" name:"context"`
+	} `cmd:"" help:"Find a literal string across all transcripts: hits show session + surrounding turns, capped at --limit."`
+
 	Candidates struct {
 		Session     string `help:"Session ID prefix. Omit for corpus-recurrence mode (rank task-shapes across all sessions)." name:"session"`
 		Root        string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
@@ -309,6 +317,7 @@ func main() {
 				"  ferret spine    --session PREFIX [--root DIR]\n"+
 				"  ferret segments --session PREFIX [--root DIR] [--format text|json]\n"+
 				"  ferret dialogue --session PREFIX [--root DIR] [--format text|json]\n"+
+				"  ferret search   QUERY [--root DIR] [--limit 20] [--context 2] [--format text|json]   (literal substring; case-sensitive)\n"+
 				"  ferret candidates [--session PREFIX | (corpus) --min-sessions 2] [--root DIR] [--top 10] [--format text|json]\n"+
 				"  ferret conformance [--spec FILE] [--format text|json]   (reads stdin if no --spec)\n"+
 				"  ferret landmark  [--spec FILE | --session PREFIX [--root DIR]] [--data DIR] [--format text|json]   (milestone progress; spec reads stdin if no --spec)\n"+
@@ -351,6 +360,8 @@ func main() {
 		err = cmdSegments()
 	case "dialogue":
 		err = cmdDialogue()
+	case "search <query>":
+		err = cmdSearch()
 	case "candidates":
 		err = cmdCandidates()
 	case "conformance":
