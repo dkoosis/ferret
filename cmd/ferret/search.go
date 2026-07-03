@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/dkoosis/ferret/internal/out"
 	"github.com/dkoosis/ferret/internal/transcript"
@@ -102,7 +103,9 @@ func cmdSearch() error {
 // can honestly signal how many were withheld. Matching is a case-sensitive
 // substring test over each turn-block's plain-text rendering (prompt, assistant
 // text, thinking, tool call, tool result) — the same block decomposition the
-// spine uses, reusing its helpers. Decode-broken lines are tolerated and tallied.
+// spine uses, reusing its helpers. Decode-broken lines are tolerated and tallied;
+// a transcript that fails to read is skipped with a stderr note (one bad file must
+// not kill a corpus-wide search).
 func runSearch(w io.Writer, root, query string, opts searchOpts) error {
 	srcs, err := transcript.Walk(root)
 	if err != nil {
@@ -120,7 +123,8 @@ func runSearch(w io.Writer, root, query string, opts searchOpts) error {
 		}
 		entries, pending, derr, serr := scanTranscript(src, query, remaining, &total)
 		if serr != nil {
-			return serr
+			fmt.Fprintf(os.Stderr, "ferret: search: %s: %v (skipped)\n", src.Path, serr)
+			continue
 		}
 		decodeErrs += derr
 		for _, idx := range pending {
@@ -200,6 +204,15 @@ func (s *searchScan) feed(line []byte) {
 func (s *searchScan) block(lineType string, blk *transcript.Block) {
 	kind, text, ok := blockEntry(lineType, blk)
 	if !ok {
+		return
+	}
+	if s.remaining == 0 {
+		// Hit cap already spent before this transcript: no hit here can be
+		// accepted, so no entry can ever serve as context — just keep the
+		// honest total.
+		if strings.Contains(text, s.query) {
+			*s.total++
+		}
 		return
 	}
 	e := scannedEntry{kind: kind, text: truncateRunes(text, searchCtxCap), line: s.lineNo}
@@ -286,23 +299,34 @@ func snippet(text, query string) string {
 }
 
 // trimHead keeps the last searchSnipRadius runes of s, returning a … marker when
-// it dropped any.
+// it dropped any. It walks rune boundaries in place — s can be a multi-megabyte
+// tool result, and a []rune copy of it would cost 4× its bytes per hit.
 func trimHead(s string) (marker, kept string) {
-	r := []rune(s)
-	if len(r) <= searchSnipRadius {
+	total := utf8.RuneCountInString(s)
+	if total <= searchSnipRadius {
 		return "", s
 	}
-	return "…", string(r[len(r)-searchSnipRadius:])
+	skip := total - searchSnipRadius
+	for i := range s {
+		if skip == 0 {
+			return "…", s[i:]
+		}
+		skip--
+	}
+	return "", s
 }
 
 // trimTail keeps the first searchSnipRadius runes of s, returning a … marker when
-// it dropped any.
+// it dropped any. Same in-place rune walk as trimHead, for the same reason.
 func trimTail(s string) (kept, marker string) {
-	r := []rune(s)
-	if len(r) <= searchSnipRadius {
-		return s, ""
+	n := 0
+	for i := range s {
+		if n == searchSnipRadius {
+			return s[:i], "…"
+		}
+		n++
 	}
-	return string(r[:searchSnipRadius]), "…"
+	return s, ""
 }
 
 // contextLines clamps [lo,hi) to the entry slice and maps the window to ctxLines.
