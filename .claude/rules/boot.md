@@ -4,11 +4,10 @@ updated: 2026-07-03
 *Project working-memory. Maintained for future-me: current state + live frontier + traps that still bite. Resolved lanes pruned — history lives in beads/PRs.*
 
 ## lane: GreatKilldeer
-→ next: **design round — `helped` adjudicator.** Brief → `~/Projects/dk/Project/ferret/specs/helped-adjudicator-design.md` (4 decisions, dk drives — he was mid-read). After: mint consumer bead (ingest→join→emit vs golden fixture). Also open: bbp.11 (P3).
-✓ ferret-7c8 shipped via dispatch — PR #60 (`ferret search`, literal grep + context); ferret-blz (decode-errs tests) followed via #61, both closed. SR north-star answer still unrecorded in `plans/ferret-7c8/final-state.md`.
+→ next: **design round — `helped` adjudicator.** Brief → `~/Projects/dk/Project/ferret/specs/helped-adjudicator-design.md` (4 decisions, dk drives — he was mid-read). After: mint consumer bead (ingest→join→emit vs golden fixture). Also open: bbp.11 (P3). SR north-star answer still unrecorded in `plans/ferret-7c8/final-state.md`.
+✓ #61 merged (ferret-blz decode-errs tests; Gemini no-findings) · repo swept clean — PRs/branches/worktrees/stashes/beads.
 ‡ vault daemon truncates streamed in-place writes to KG plan dir — write tmp + `mv` only.
-‡ dispatch plan-gate (`Agent mode:"plan"`) routes ExitPlanMode to the dispatcher session, not dk — rehearsal banner + SR are the real human gates.
-~ dk terse-approve, split attention (design brief open); ends on "next?".
+~ dk one-line autonomous grant, zero corrections; ends on "next?".
 
 ## State
 - main @ `3230cce`, origin synced. PR queue EMPTY — #60 (ferret-7c8 `ferret search`, all 3 Gemini fixes) + #61 (ferret-blz decode-errs tests) merged 2026-07-03. Branches/worktrees/stashes pruned.
