@@ -1,17 +1,17 @@
 # Boot
-updated: 2026-07-02
+updated: 2026-07-03
 
 *Project working-memory. Maintained for future-me: current state + live frontier + traps that still bite. Resolved lanes pruned — history lives in beads/PRs.*
 
 ## lane: GreatKilldeer
-→ next: **design round — `helped` adjudicator.** Table set 2026-07-02, brief → `~/Projects/dk/Project/ferret/specs/helped-adjudicator-design.md` (options, 3 fresh lit nugs, 4 decisions dk must make; lean = staged Hop1-style). dk drives. After the round: mint the consumer bead (ingest→join→emit, buildable against the golden fixture, ✗ block on tx-dii8m). Also open: `ferret-bbp.11` (P3).
-✓ merged bbp.9 (#59), bbp.10 (#58), bbp.12 (#57), bbp.13 (#56) — clarify population + deterministic friction metrics + abandonment-by-topic-switch wiring + GoodAbandon-label suppression.
-‡ bbp.9 clarify is live ONLY on the `ferret dialogue` session path — the retrieval/Finding path still can't fire clarify (events carry no assistant NL). Separate wiring step if wanted.
-‡ bbp.8 was prose-only — never minted. **bbp.5 SHIPPED** (#53, `internal/analyst/hop1.go`) — staged Hop1 interp-fidelity judge (deterministic floor → Q3 coverage judge). Earlier boots called it unplanned; wrong. The abandonment wiring landed as bbp.12.
-~ dk: fenced trust-the-loop, spot-checks via critical-review paste; ends on "next?".
+→ next: **design round — `helped` adjudicator.** Brief → `~/Projects/dk/Project/ferret/specs/helped-adjudicator-design.md` (4 decisions, dk drives — he was mid-read). After: mint consumer bead (ingest→join→emit vs golden fixture). Also open: bbp.11 (P3).
+✓ ferret-7c8 shipped via dispatch — PR #60 (`ferret search`, literal grep + context); ferret-blz (decode-errs tests) followed via #61, both closed. SR north-star answer still unrecorded in `plans/ferret-7c8/final-state.md`.
+‡ vault daemon truncates streamed in-place writes to KG plan dir — write tmp + `mv` only.
+‡ dispatch plan-gate (`Agent mode:"plan"`) routes ExitPlanMode to the dispatcher session, not dk — rehearsal banner + SR are the real human gates.
+~ dk terse-approve, split attention (design brief open); ends on "next?".
 
 ## State
-- main @ `60f79a4`, origin synced (bbp.9/.10/.12/.13 merged #56–59). PR queue EMPTY.
+- main @ `3230cce`, origin synced. PR queue EMPTY — #60 (ferret-7c8 `ferret search`, all 3 Gemini fixes) + #61 (ferret-blz decode-errs tests) merged 2026-07-03. Branches/worktrees/stashes pruned.
 - Scorers live in **`internal/score/`** (landmark/quality/conform all there — ratified, design-doc D2). New scorers go here.
 - `/team` = one shared tree + loto (worktrees retired). No concurrent `make check`; primary verifies once at wave end.
 
