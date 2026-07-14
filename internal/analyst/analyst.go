@@ -30,6 +30,8 @@ package analyst
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"strings"
 )
 
@@ -122,6 +124,18 @@ func BuildPrompt(spine string) (system, user string) {
 
 var errNoJSON = errors.New("analyst: model response contained no JSON object")
 
+// ErrTruncatedResponse marks a model response that was cut off at the output
+// token cap: the JSON is well-formed-but-incomplete, so it decodes to an
+// unexpected EOF. Prior hardening (ferret-001) fixed OVER-capture of trailing
+// prose; this is the UNDER-capture case. The analyst is the one money-path
+// boundary — the API call is already billed by the time we parse — so a
+// truncation must surface as a distinct, actionable error (the session is too
+// large to adjudicate in one call), not a bare decode failure that reads like
+// malformed output. Exported so callers can errors.Is it and, e.g., retry with a
+// split session. complete() also raises it from the SDK's max_tokens stop reason
+// (the authoritative signal) before parsing.
+var ErrTruncatedResponse = errors.New("analyst: model response truncated at the output token cap (session too large to adjudicate in one call)")
+
 // decodeFirstObject decodes the FIRST complete JSON object in a model response
 // into v, tolerating ```json fences and surrounding prose (a guardrail in case
 // the model ignores "JSON only"). It finds the first '{' and streams one object
@@ -139,7 +153,18 @@ func decodeFirstObject(resp string, v any) error {
 	if start < 0 {
 		return errNoJSON
 	}
-	return json.NewDecoder(strings.NewReader(s[start:])).Decode(v)
+	// A truncated (max_tokens) response is well-formed JSON cut mid-stream, so the
+	// decoder stops at an unexpected EOF. Translate that into the typed
+	// ErrTruncatedResponse — a bare io.ErrUnexpectedEOF reads like malformed model
+	// output when the real cause is the output cap and the paid call is salvageable
+	// intelligence for the operator (split the session and re-run).
+	if err := json.NewDecoder(strings.NewReader(s[start:])).Decode(v); err != nil {
+		if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+			return fmt.Errorf("%w: %w", ErrTruncatedResponse, err)
+		}
+		return err
+	}
+	return nil
 }
 
 // ParseFindings extracts the Result.Findings array from a model response.

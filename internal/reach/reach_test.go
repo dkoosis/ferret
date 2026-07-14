@@ -234,6 +234,22 @@ func asstToolLine(ts, name, input string) string {
 	return `{"type":"assistant","timestamp":"` + ts + `","message":{"role":"assistant","content":[{"type":"tool_use","name":"` + name + `","input":` + input + `}]}}`
 }
 
+// asstToolIDLine is asstToolLine with an explicit tool_use id (so a following
+// tool_result carrier can be matched to it in RU-watch tests).
+func asstToolIDLine(ts, name, id string) string {
+	return `{"type":"assistant","timestamp":"` + ts + `","message":{"role":"assistant","content":[{"type":"tool_use","id":"` + id + `","name":"` + name + `","input":{}}]}}`
+}
+
+// asstTextLine is an assistant turn carrying prose (the RU "was it used?" surface).
+func asstTextLine(ts, text string) string {
+	return `{"type":"assistant","timestamp":"` + ts + `","message":{"role":"assistant","content":[{"type":"text","text":` + jsonStr(text) + `}]}}`
+}
+
+// resultLine is a user-role tool_result carrier bearing the retrieved content.
+func resultLine(ts, toolUseID, content string) string {
+	return `{"type":"user","timestamp":"` + ts + `","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"` + toolUseID + `","content":` + content + `}]}}`
+}
+
 func scanLines(t *testing.T, win Window, lines []string) []Opportunity {
 	t.Helper()
 	dir := t.TempDir()

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -305,5 +306,61 @@ func TestAnnotationArrow(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("Arrow(baseline=%d, current=%d) = %q, want %q", base.BaselineBurn, tc.current, got, tc.want)
 		}
+	}
+}
+
+// TestLoadOverCapLine: a valid entry whose line exceeds the old 1 MiB scanner
+// cap must load, not hard-error the whole ledger (ferret-isz #2). A user --note
+// can push one line past any fixed token limit; the uncapped reader loads it
+// like the events codec's uncapped decode does.
+func TestLoadOverCapLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fixes.jsonl")
+	small := Entry{Motif: "a", Fix: "x", AddedAt: time.Now(), BaselineBurn: 1}
+	big := Entry{Motif: "b", Fix: "y", Note: strings.Repeat("z", 2<<20), AddedAt: time.Now(), BaselineBurn: 2}
+	for _, e := range []Entry{small, big} {
+		if err := Append(path, e); err != nil {
+			t.Fatalf("Append(%q): %v", e.Motif, err)
+		}
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load over-cap ledger: %v", err) // pre-fix: bufio.ErrTooLong here
+	}
+	if len(got) != 2 || got[1].Motif != "b" || len(got[1].Note) != 2<<20 {
+		t.Errorf("over-cap entry lost: got %d entries, last note len %d", len(got), len(got[len(got)-1].Note))
+	}
+}
+
+// TestConcurrentAppend: N goroutines each Append a >1 MiB-note entry to one
+// ledger; every entry must round-trip through Load with no torn line
+// (ferret-isz #3). The flock in Append serializes the writers so two
+// over-threshold appends cannot splice into one corrupt record.
+func TestConcurrentAppend(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fixes.jsonl")
+	const n = 16
+	note := strings.Repeat("q", 1<<20+512) // over the pipe/fs atomic-append threshold
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := range n {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			e := Entry{Motif: MotifKey([]string{"m", string(rune('a' + i))}), Fix: "f", Note: note, AddedAt: time.Now(), BaselineBurn: i}
+			errs <- Append(path, e)
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent Append: %v", err)
+		}
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load after concurrent appends: %v", err) // pre-fix: torn mid-ledger line
+	}
+	if len(got) != n {
+		t.Errorf("Load returned %d entries, want %d (torn or lost append)", len(got), n)
 	}
 }
