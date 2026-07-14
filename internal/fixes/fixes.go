@@ -154,6 +154,32 @@ func ParseMotif(raw string) []string {
 // codec's truncated-trailing-record tolerance. A corrupt line with valid entries
 // AFTER it is genuine mid-ledger corruption and stays a hard error: silently
 // treating it as "no fixes" would erase the loop's memory without warning.
+// readNonEmptyLines returns every non-blank line from r with NO token cap,
+// splitting only on '\n'. It uses an uncapped bufio.Reader rather than a
+// bufio.Scanner because a user --note can push one JSON line past any fixed
+// token cap, and Scanner surfaces bufio.ErrTooLong before Load's trailing-
+// salvage loop can run — a single over-cap line would then hard-error the whole
+// ledger and defeat the salvage guarantee. This matches the events codec's
+// uncapped json.Decoder (codec.go), so oversized lines load like any other. A
+// final unterminated line (a torn append) is returned before the io.EOF, so
+// Load's salvage path still sees it.
+func readNonEmptyLines(r io.Reader) ([]string, error) {
+	var lines []string
+	br := bufio.NewReader(r)
+	for {
+		line, err := br.ReadString('\n')
+		if s := strings.TrimSpace(line); s != "" {
+			lines = append(lines, s)
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return lines, nil
+			}
+			return nil, err
+		}
+	}
+}
+
 func Load(path string) ([]Entry, error) {
 	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -164,15 +190,8 @@ func Load(path string) ([]Entry, error) {
 	}
 	defer f.Close()
 
-	var lines []string
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
-	for sc.Scan() {
-		if line := strings.TrimSpace(sc.Text()); line != "" {
-			lines = append(lines, line)
-		}
-	}
-	if err := sc.Err(); err != nil {
+	lines, err := readNonEmptyLines(f)
+	if err != nil {
 		return nil, err
 	}
 
@@ -200,6 +219,13 @@ func Append(path string, e Entry) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
+	// Serialize concurrent appends so two over-threshold writes can't interleave
+	// into one torn ledger line (ferret-isz). lockLedger also creates the dir.
+	release, lerr := lockLedger(path)
+	if lerr != nil {
+		return lerr
+	}
+	defer release()
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return err
