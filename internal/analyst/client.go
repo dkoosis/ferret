@@ -128,6 +128,15 @@ func complete(ctx context.Context, cfg Config, system, user string) (model, text
 		return "", "", Usage{}, fmt.Errorf("analyst: messages call failed: %w", err)
 	}
 
+	// max_tokens is the authoritative truncation signal — the response is
+	// well-formed-but-incomplete and parsing it would fail with a bare decode
+	// error. Surface the typed error here, before parsing, so every mode
+	// (adjudicate, propose, relevance, coverage) reports the paid call hit the
+	// %d-token cap rather than silently discarding it as malformed (ferret-e6s).
+	if resp.StopReason == anthropic.StopReasonMaxTokens {
+		return "", "", usageFrom(resp.Usage), fmt.Errorf("%w (cap=%d)", ErrTruncatedResponse, maxTokens)
+	}
+
 	// Thinking blocks precede the text block; collect the text content.
 	var b strings.Builder
 	for i := range resp.Content {

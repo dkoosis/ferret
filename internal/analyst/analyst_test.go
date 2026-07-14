@@ -85,6 +85,22 @@ func TestParseFindingsNoJSONIsTyped(t *testing.T) {
 	}
 }
 
+// TestParseFindingsTruncatedIsTyped: a response cut mid-array (the max_tokens
+// under-capture case, ferret-e6s) must decode to the typed ErrTruncatedResponse,
+// not a bare io.ErrUnexpectedEOF — the paid call hit the output cap, and the
+// operator needs that named so they can split the session and re-run.
+func TestParseFindingsTruncatedIsTyped(t *testing.T) {
+	// Well-formed JSON object opened, one finding started, then cut off.
+	truncated := `{"findings":[{"task":"find def","call":"rg func X","fit":"mismatch","why":"symbol look`
+	if _, err := ParseFindings(truncated); !errors.Is(err, ErrTruncatedResponse) {
+		t.Errorf("err = %v; want ErrTruncatedResponse", err)
+	}
+	// Proposals and relevance share decodeFirstObject, so they inherit the guard.
+	if _, err := ParseProposals(truncated); !errors.Is(err, ErrTruncatedResponse) {
+		t.Errorf("ParseProposals err = %v; want ErrTruncatedResponse", err)
+	}
+}
+
 func TestResultMismatches(t *testing.T) {
 	r := Result{Findings: []Finding{
 		{Fit: FitMismatch, ToolUsed: "rg", Better: "snipe"},
