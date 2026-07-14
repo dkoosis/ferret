@@ -12,6 +12,7 @@
 package reach
 
 import (
+	"bytes"
 	"encoding/json"
 	"regexp"
 	"strings"
@@ -259,6 +260,9 @@ func ScanSource(src transcript.Source, win Window) ([]Opportunity, int, error) {
 }
 
 func (s *scanner) feed(line []byte) {
+	if len(bytes.TrimSpace(line)) == 0 {
+		return // blank/whitespace line (common JSONL trailer): not a decode error
+	}
 	var raw transcript.Raw
 	if err := json.Unmarshal(line, &raw); err != nil {
 		s.decodeErrs++
@@ -347,16 +351,16 @@ func parseTS(s string) time.Time {
 	if s == "" {
 		return time.Time{}
 	}
-	t, err := time.Parse(time.RFC3339, s)
+	t, err := time.Parse(time.RFC3339Nano, s) // superset: parses plain + fractional
 	if err != nil {
-		if t, err = time.Parse(time.RFC3339Nano, s); err != nil {
-			return time.Time{}
-		}
+		return time.Time{}
 	}
 	return t
 }
 
 func truncate(s string, n int) string {
+	s = strings.ReplaceAll(s, "\r", "")
+	s = strings.ReplaceAll(s, "\n", " ") // keep the scorecard row single-lined
 	s = strings.TrimSpace(s)
 	if len(s) <= n {
 		return s
