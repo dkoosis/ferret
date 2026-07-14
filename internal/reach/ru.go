@@ -53,8 +53,7 @@ var ruStopwords = map[string]bool{
 	"about": true, "there": true, "these": true, "those": true, "their": true,
 	"which": true, "where": true, "would": true, "could": true, "should": true,
 	"being": true, "other": true, "after": true, "before": true, "still": true,
-	"first": true, "because": true, "between": true, "into": true, "with": true,
-	"that": true, "this": true, "have": true, "from": true, "were": true,
+	"first": true, "because": true, "between": true,
 }
 
 // adjudicateRU grades one store-reach from the transcript: the retrieved content
@@ -102,14 +101,55 @@ func isEmptyResult(result string) bool {
 }
 
 // idHit reports whether any distinctive id/ref in the result reappears verbatim
-// in the (lowercased) prose.
+// in the (lowercased) prose. Hyphenated matches that are really common compounds
+// (tool-use, git-log, read-only) are dropped — see commonHyphenWord — so an id
+// hit stays a decisive USED tell and doesn't fire on shared dev jargon.
 func idHit(result, proseLower string) bool {
 	for _, id := range idRe.FindAllString(strings.ToLower(result), -1) {
+		if commonHyphenWord(id) {
+			continue
+		}
 		if strings.Contains(proseLower, id) {
 			return true
 		}
 	}
 	return false
+}
+
+// idHyphenStop are the post-hyphen words that make a compound (tool-USE,
+// read-ONLY, single-WRITER) match idRe's slug alternative while carrying no id
+// signal. Real slug ids either bear a digit in the suffix (tx-qw86, ferret-p2a)
+// or have a non-word suffix (ferret-aay, ferret-isz), so they survive this set.
+// Tunable — RU ships as a gauge at tiny n; extend as false hits surface.
+var idHyphenStop = map[string]bool{
+	"use": true, "log": true, "in": true, "out": true, "up": true, "on": true,
+	"off": true, "only": true, "op": true, "id": true, "ids": true, "ref": true,
+	"based": true, "driven": true, "aware": true, "facing": true, "bound": true,
+	"wide": true, "side": true, "level": true, "time": true, "series": true,
+	"safe": true, "free": true, "prone": true, "ready": true, "gated": true,
+	"locked": true, "checked": true, "formed": true, "oriented": true,
+	"specific": true, "related": true, "priority": true, "writer": true,
+	"reader": true, "first": true, "last": true, "line": true, "list": true,
+	"party": true, "new": true, "old": true, "close": true, "open": true,
+	"end": true, "key": true, "hoc": true, "depth": true, "node": true,
+	"path": true, "case": true, "mode": true, "hint": true, "step": true,
+	"wise": true, "like": true, "made": true, "held": true, "sync": true,
+}
+
+// commonHyphenWord reports whether a hyphenated idRe match is really a common
+// compound word, not a slug id: its suffix carries no digit (real slugs like
+// tx-qw86 do) and is a frequent dev-prose word. No-digit slug ids (ferret-aay,
+// ferret-isz) survive — their suffix is not a word.
+func commonHyphenWord(id string) bool {
+	i := strings.LastIndexByte(id, '-')
+	if i < 0 {
+		return false // hex id, not hyphenated
+	}
+	suffix := id[i+1:]
+	if strings.ContainsAny(suffix, "0123456789") {
+		return false // digit-bearing suffix = real slug id
+	}
+	return idHyphenStop[suffix]
 }
 
 // termOverlap counts distinct content terms from the result that reappear in the
@@ -142,21 +182,21 @@ func wordSet(lower string) map[string]bool {
 // resultText flattens a tool_result payload (a JSON string, or an array of
 // {type,text} content blocks as MCP tools emit) into plain text for grading.
 func resultText(raw json.RawMessage) string {
-	raw = json.RawMessage(strings.TrimSpace(string(raw)))
-	if len(raw) == 0 {
+	s := strings.TrimSpace(string(raw))
+	if s == "" {
 		return ""
 	}
-	switch raw[0] {
+	switch s[0] {
 	case '"':
-		var s string
-		if json.Unmarshal(raw, &s) == nil {
-			return s
+		var str string
+		if json.Unmarshal([]byte(s), &str) == nil {
+			return str
 		}
 	case '[':
 		var blocks []struct {
 			Text string `json:"text"`
 		}
-		if json.Unmarshal(raw, &blocks) == nil {
+		if json.Unmarshal([]byte(s), &blocks) == nil {
 			var parts []string
 			for _, b := range blocks {
 				if b.Text != "" {
@@ -166,5 +206,5 @@ func resultText(raw json.RawMessage) string {
 			return strings.Join(parts, " ")
 		}
 	}
-	return string(raw)
+	return s
 }

@@ -71,6 +71,24 @@ func TestAdjudicateRU(t *testing.T) {
 			gotResult: true,
 			want:      RUInconclusive,
 		},
+		{
+			// A hyphenated dev-jargon term shared by result and prose must NOT
+			// count as an id citation (regression: idRe once matched tool-use).
+			name:      "shared-hyphenated-jargon-is-not-an-id-hit",
+			result:    "the reach harness wraps each block in a tool-use envelope",
+			prose:     "let me just wire the tool-use path and move on",
+			gotResult: true,
+			want:      RUUnused,
+		},
+		{
+			// A real bead id with a no-digit suffix still reads as a decisive
+			// USED citation (ferret-aay must survive the jargon filter).
+			name:      "no-digit-bead-id-cited-is-used",
+			result:    "filed as ferret-aay: the reach resolution-window bug",
+			prose:     "yes, ferret-aay covers that one — nothing to add here",
+			gotResult: true,
+			want:      RUUsed,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
