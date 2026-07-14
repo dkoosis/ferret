@@ -277,6 +277,17 @@ var CLI struct {
 			Format string `help:"Output format: text|json." default:"text" name:"format"`
 		} `cmd:"" help:"List recorded fixes."`
 	} `cmd:"" help:"Fix ledger: record motif→fix, then 'report --since-fixes' computes burn-delta."`
+
+	Reach struct {
+		Root     string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
+		Since    string `help:"Window start YYYY-MM-DD (default: 7 days ago)." name:"since"`
+		Until    string `help:"Window end YYYY-MM-DD, inclusive (default: today)." name:"until"`
+		Project  string `help:"Only projects whose slug contains this substring." name:"project"`
+		Session  string `help:"Only sessions matching this prefix/substring." name:"session"`
+		Format   string `help:"Output format: text|json|md (md = ledger-appendable block)." default:"text" name:"format"`
+		Limit    int    `help:"Max opportunity rows (0 = unlimited)." default:"0" name:"limit"`
+		MaxBytes int    `help:"Max output bytes, text only (0 = unlimited)." default:"0" name:"max-bytes"`
+	} `cmd:"" help:"Reach-rate: at recall opportunities in a date window, did Claude reach the trixi store FIRST (store) vs grep/gh/none. Keystone metric for tx-qw86; transcript-only (Phase 1)."`
 }
 
 func main() {
@@ -326,7 +337,8 @@ func main() {
 				"  ferret quality    [--session PREFIX] [--format text|json]   (per-task axes; corpus pass^k consistency)\n"+
 				"  ferret adjudicate  --session PREFIX [--model ID] [--emit-prompt] [--propose] [--top 10] [--format text|json]\n"+
 				"  ferret fixes add  --motif \"Edit!,Read\" --fix \"hookify read-before-edit\" [--note ...]\n"+
-				"  ferret fixes list [--format json]\n\n"+
+				"  ferret fixes list [--format json]\n"+
+				"  ferret reach    [--since Y-M-D] [--until Y-M-D] [--project SUBSTR] [--format text|json|md]   (recall-opportunity reach-rate)\n\n"+
 				"common: --data DIR (default ~/.ferret)  --format text|json  --limit N  --max-bytes N\n"+
 				"lenses: coarse | tool | target | exact",
 		),
@@ -380,6 +392,8 @@ func main() {
 		err = cmdFixesAdd()
 	case "fixes list":
 		err = cmdFixesList()
+	case "reach":
+		err = cmdReach()
 	default:
 		k.Fatalf("unknown command %q", k.Command())
 	}
@@ -941,8 +955,10 @@ func cmdRank() error {
 		for _, b := range mine.Buckets {
 			rows := make([]jc, 0, len(byBucket[b]))
 			for _, card := range byBucket[b] {
-				rows = append(rows, jc{corpus.Tokens(card.IDs), card.Support, card.Bits,
-					card.Score, card.Folded, card.Variants, exemplar(corpus, card.ExStream, card.ExSeq)})
+				rows = append(rows, jc{
+					corpus.Tokens(card.IDs), card.Support, card.Bits,
+					card.Score, card.Folded, card.Variants, exemplar(corpus, card.ExStream, card.ExSeq),
+				})
 			}
 			buckets[b] = rows
 		}

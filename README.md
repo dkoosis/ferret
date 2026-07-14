@@ -21,9 +21,26 @@ ferret report   [--kind routine|friction|loop|noise] # findings → action verb,
 ferret surprise [--lens tool]                         # per-session predictability (low=scriptable, high=thrash)
 ferret graph    [--loops] [--format mermaid|dot]      # transition graph
 ferret tokens   --session PREFIX                      # one session's token stream (lens debugger)
+ferret reach    [--since Y-M-D] [--until Y-M-D]       # recall-opportunity reach-rate (memory keystone)
 ```
 
 Everything takes `--data DIR` (default `~/.ferret`), `--format json`, `--limit`, `--max-bytes`. Truncation is never silent.
+
+## Reach-rate (memory keystone metric)
+
+`ferret reach` mechanizes the memory-recall autopsy for epic **tx-qw86** ("Memory where the action is"). It reads raw transcripts (not the events artifact), finds **recall-opportunity** moments — dk asking what's already known/decided/built (the always-loaded `recall.md` triggers: *do you remember · did we · I thought we · where do we stand · don't we already · what did we decide*) plus tx-vtea re-orientation asides (*where are we · I forget · remind me*) — and classifies what the agent reached for **first**: the trixi store (`get_nug`, `trixi search`/`get`), `bd` beads, grep/rg/Read, gh/git forensics, or nothing.
+
+**Reach-rate = store-first reaches / opportunities**, every rate printed with its `n`. Weekly reports feed a rolling 3-week judgment window (single-week deltas are noise at tens of opportunities/week).
+
+```
+ferret reach --since 2026-07-03 --until 2026-07-05          # a fixed window (text scorecard)
+ferret reach --format md --limit 20                        # trailing 7d, one ledger-appendable block
+ferret reach --project trixi --format json                 # scoped, machine-readable
+```
+
+Default window is the trailing 7 days, so the weekly cadence is a bare `ferret reach --format md` appended to the Inquiry ledger — loop/cron-able, e.g. a weekly `launchd`/cron entry or `/loop 7d ferret reach --format md`.
+
+Phase 1 is transcript-only (no telemetry). The Phase-2 **RU** column (was the reached result actually *used*?) joins trixi's `retrieval_events` telemetry (tx-kji6) onto these opportunities — the seam is `reach.JoinTelemetry`, a no-op until Phase 2.
 
 ## Lenses
 
