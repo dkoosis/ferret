@@ -164,12 +164,20 @@ func Load(path string) ([]Entry, error) {
 	}
 	defer f.Close()
 
-	// Read with an uncapped bufio.Reader rather than a bufio.Scanner: a user
-	// --note can push one JSON line past any fixed token cap, and Scanner surfaces
-	// bufio.ErrTooLong BEFORE the trailing-salvage loop below runs, so a single
-	// over-cap line would hard-error the whole ledger and defeat the salvage
-	// guarantee. ReadString has no token limit, matching the events codec's
-	// uncapped json.Decoder (codec.go), so oversized lines load like any other.
+	lines, err := readLedgerLines(f)
+	if err != nil {
+		return nil, err
+	}
+	return parseLedger(path, lines)
+}
+
+// readLedgerLines returns every non-blank line of the ledger. It uses an uncapped
+// bufio.Reader rather than a bufio.Scanner: a user --note can push one JSON line
+// past any fixed token cap, and Scanner surfaces bufio.ErrTooLong before the
+// trailing-salvage loop in parseLedger runs, so a single over-cap line would
+// hard-error the whole ledger and defeat the salvage guarantee. ReadString has no
+// token limit, matching the events codec's uncapped json.Decoder (codec.go).
+func readLedgerLines(f *os.File) ([]string, error) {
 	var lines []string
 	r := bufio.NewReader(f)
 	for {
@@ -179,12 +187,17 @@ func Load(path string) ([]Entry, error) {
 		}
 		if rerr != nil {
 			if errors.Is(rerr, io.EOF) {
-				break // ReadString returned the final unterminated line above
+				return lines, nil // ReadString returned the final unterminated line above
 			}
 			return nil, rerr
 		}
 	}
+}
 
+// parseLedger unmarshals each line into an Entry. A corrupt TRAILING line is
+// salvaged with a stderr warning; a corrupt line with valid entries after it is
+// genuine mid-ledger corruption and stays a hard error (see Load's contract).
+func parseLedger(path string, lines []string) ([]Entry, error) {
 	out := make([]Entry, 0, len(lines))
 	for i, line := range lines {
 		var e Entry
