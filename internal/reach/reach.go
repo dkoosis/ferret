@@ -72,6 +72,15 @@ func (o Opportunity) Reached() bool { return o.Reach == ReachStore }
 
 const textCap = 140
 
+// reachWindowTurns bounds how many assistant turns an opportunity stays open
+// waiting for a retrieval. Recall answers arrive promptly — the agent reaches (or
+// answers from context) in its first turn or two — so an opportunity that goes
+// this many assistant turns with no retrieval is resolved as ReachNone. Without
+// the bound, a retrieval in a later, unrelated turn (after intervening affirmation
+// or carrier turns that don't close the arc) was misattributed to the opportunity,
+// skewing the reach-rate (ferret-aay).
+const reachWindowTurns = 2
+
 // --- opportunity detection (recall.md triggers, verbatim) -------------------
 
 // cuePattern binds a compiled regex to the human-legible cue it detects.
@@ -240,6 +249,7 @@ type scanner struct {
 	project, session string
 	win              Window
 	open             bool
+	turnsOpen        int // assistant turns the current opportunity has waited (ferret-aay)
 	cur              Opportunity
 	found            []Opportunity
 	lastTS           time.Time
@@ -282,8 +292,9 @@ func (s *scanner) feed(line []byte) {
 		s.decodeErrs++
 		return
 	}
-	if raw.IsMeta || raw.Message == nil {
-		return
+	if raw.IsMeta || raw.IsSidechain || raw.Message == nil {
+		return // sidechain = an inlined subagent turn, not dk — every sibling
+		// consumer (mine.stream, event.build) filters it too (ferret-48l).
 	}
 	if ts := parseTS(raw.Timestamp); !ts.IsZero() {
 		s.lastTS = ts
@@ -327,6 +338,7 @@ func (s *scanner) feedUser(raw transcript.Raw) {
 		return
 	}
 	s.open = true
+	s.turnsOpen = 0
 	s.cur = Opportunity{
 		Session:   s.session,
 		Project:   s.project,
@@ -364,6 +376,13 @@ func (s *scanner) feedAssistant(raw transcript.Raw) {
 			s.found = append(s.found, s.cur)
 		}
 		return
+	}
+	// No retrieval this assistant turn. Bound the wait: after reachWindowTurns
+	// turns the recall arc has moved on, so a later retrieval is unrelated —
+	// resolve as ReachNone rather than misattribute it (ferret-aay).
+	s.turnsOpen++
+	if s.turnsOpen >= reachWindowTurns {
+		s.closeOpen()
 	}
 }
 

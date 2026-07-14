@@ -215,6 +215,56 @@ func sourceFor(path string) transcript.Source {
 	return transcript.Source{Path: path, Project: "proj", Session: "sess"}
 }
 
+// TestScanSource_SidechainTurnsIgnored — an inlined subagent (isSidechain) turn
+// is not dk: a recall-shaped sidechain prompt opens no opportunity and a
+// sidechain retrieval resolves none (ferret-48l).
+func TestScanSource_SidechainTurnsIgnored(t *testing.T) {
+	win := Window{Since: time.Date(2026, 7, 3, 0, 0, 0, 0, time.UTC), Until: time.Date(2026, 7, 5, 23, 59, 59, 0, time.UTC)}
+	sidechainRecall := `{"type":"user","isSidechain":true,"timestamp":"2026-07-04T10:00:00Z","message":{"role":"user","content":[{"type":"text","text":"did we decide on the prefix?"}]}}`
+	lines := []string{
+		sidechainRecall,
+		asstToolLine("2026-07-04T10:00:05Z", "Read", ""),
+	}
+	if opps := scanLines(t, win, lines); len(opps) != 0 {
+		t.Fatalf("sidechain recall must open no opportunity, got %+v", opps)
+	}
+}
+
+// TestScanSource_WindowBoundsResolution — a recall question answered from context
+// (no retrieval), then an affirmation, then an unrelated retrieval past the
+// window: the late retrieval must NOT be attributed; the opportunity resolves
+// ReachNone (ferret-aay: bound the once-unbounded resolution window).
+func TestScanSource_WindowBoundsResolution(t *testing.T) {
+	win := Window{Since: time.Date(2026, 7, 3, 0, 0, 0, 0, time.UTC), Until: time.Date(2026, 7, 5, 23, 59, 59, 0, time.UTC)}
+	lines := []string{
+		userLine("2026-07-04T10:00:00Z", "did we decide on the prefix?"),
+		asstTextLine("2026-07-04T10:00:05Z", "Yes, we settled on cp earlier."), // turn 1, no retrieval
+		userLine("2026-07-04T10:00:10Z", "go"),                                 // affirmation, arc stays open
+		asstTextLine("2026-07-04T10:00:15Z", "On it, wiring the flag now."),    // turn 2, no retrieval → close ReachNone
+		asstToolLine("2026-07-04T10:00:20Z", "Read", ""),                       // turn 3 retrieval, unrelated
+	}
+	opps := scanLines(t, win, lines)
+	if len(opps) != 1 || opps[0].Reach != ReachNone {
+		t.Fatalf("late retrieval must not attribute; got %+v, want 1 opp ReachNone", opps)
+	}
+}
+
+// TestScanSource_RetrievalWithinWindowAttributes — a retrieval that arrives inside
+// the window (turn 2 here, after a no-retrieval turn 1) still resolves the
+// opportunity, so the bound doesn't drop prompt reaches.
+func TestScanSource_RetrievalWithinWindowAttributes(t *testing.T) {
+	win := Window{Since: time.Date(2026, 7, 3, 0, 0, 0, 0, time.UTC), Until: time.Date(2026, 7, 5, 23, 59, 59, 0, time.UTC)}
+	lines := []string{
+		userLine("2026-07-04T10:00:00Z", "did we decide on the prefix?"),
+		asstTextLine("2026-07-04T10:00:05Z", "Let me check."), // turn 1, no retrieval
+		asstToolLine("2026-07-04T10:00:10Z", "Read", ""),      // turn 2 retrieval, within window
+	}
+	opps := scanLines(t, win, lines)
+	if len(opps) != 1 || opps[0].Reach != ReachGrep {
+		t.Fatalf("within-window retrieval must attribute; got %+v, want 1 opp ReachGrep", opps)
+	}
+}
+
 func jsonStr(s string) string {
 	b, err := json.Marshal(s)
 	if err != nil {
