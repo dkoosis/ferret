@@ -59,13 +59,3 @@ func Rollup(opps []Opportunity, win Window, decodeErrs int) Report {
 	r.Opportunities = opps
 	return r
 }
-
-// JoinTelemetry is the Phase-2 (tx-kji6) seam: the RU column joins trixi's
-// retrieval_events telemetry onto these opportunities to answer "was the reached
-// result actually used?". Phase 1 is transcript-only and leaves this unwired —
-// the hand autopsy proved opportunity + reach mining needs no telemetry. When
-// tx-kji6's rows are available, a joiner keyed on (session, ts-window) attaches a
-// used verdict to each store-reached Opportunity here; the transcript side owns
-// the RU judgment, trixi only supplies the rows (see the bead's 2026-07-11
-// telemetry recipe). Intentionally a no-op until Phase 2 lands.
-func JoinTelemetry(r *Report) { _ = r }

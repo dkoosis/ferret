@@ -112,7 +112,6 @@ func runReach(root, project, session string, win reach.Window) (reach.Report, er
 	}
 	sort.SliceStable(all, func(i, j int) bool { return all[i].Timestamp.Before(all[j].Timestamp) })
 	rep := reach.Rollup(all, win, decodeErrs)
-	reach.JoinTelemetry(&rep) // Phase-2 seam (tx-kji6): no-op in Phase 1
 	return rep, nil
 }
 

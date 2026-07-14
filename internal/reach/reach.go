@@ -7,8 +7,8 @@
 //
 // Phase 1 is transcript-only (this package): the hand autopsy proved that
 // opportunity + reach mining needs no telemetry. The Phase-2 RU column (was the
-// retrieved result actually used?) joins trixi's retrieval_events telemetry
-// (tx-kji6) onto these opportunities — see the JoinTelemetry seam in report.go.
+// retrieved result actually used?) will join trixi's retrieval_events telemetry
+// (tx-kji6) onto each store-reached Opportunity, keyed on (session, ts-window).
 package reach
 
 import (
@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/dkoosis/ferret/internal/score"
 	"github.com/dkoosis/ferret/internal/shellnorm"
@@ -159,9 +160,7 @@ func classifyReachBlock(blk *transcript.Block) (Reach, string) {
 	case strings.HasPrefix(name, "mcp__trixi__"):
 		// set_nug/query_metrics/signal/del_nug: writes or non-recall — not a reach.
 		return ReachNone, ""
-	case name == "Grep" || name == "Glob":
-		return ReachGrep, name
-	case name == "Read" || name == "NotebookRead":
+	case name == "Grep" || name == "Glob" || name == "Read" || name == "NotebookRead":
 		return ReachGrep, name
 	case name == "WebSearch" || name == "WebFetch":
 		return ReachGh, name
@@ -362,16 +361,9 @@ func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	// trim on a rune boundary
-	for n > 0 && !utf8ValidCut(s, n) {
+	// trim back to a rune boundary (n < len(s) here, so the index is safe)
+	for n > 0 && !utf8.RuneStart(s[n]) {
 		n--
 	}
 	return s[:n] + "…"
-}
-
-func utf8ValidCut(s string, n int) bool {
-	if n >= len(s) {
-		return true
-	}
-	return s[n]&0xC0 != 0x80 // not a UTF-8 continuation byte
 }
