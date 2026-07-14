@@ -6,9 +6,11 @@
 // the keystone metric for epic tx-qw86 ("Memory where the action is").
 //
 // Phase 1 is transcript-only (this package): the hand autopsy proved that
-// opportunity + reach mining needs no telemetry. The Phase-2 RU column (was the
-// retrieved result actually used?) will join trixi's retrieval_events telemetry
-// (tx-kji6) onto each store-reached Opportunity, keyed on (session, ts-window).
+// opportunity + reach mining needs no telemetry. Phase 2 adds the RU column (was
+// the retrieved result actually used?) — also transcript-based per dk's
+// 2026-07-13 ratification: reuse the same opportunity-mining pass, read use off
+// the following turns, defer the tx-kji6 live-telemetry join until reach rises
+// and the transcript verdict proves noisy. See ru.go.
 package reach
 
 import (
@@ -61,6 +63,7 @@ type Opportunity struct {
 	Text      string    `json:"text"`  // the user turn, truncated
 	Reach     Reach     `json:"reach"` // what fired first
 	FiredTool string    `json:"firedTool,omitempty"`
+	RU        RU        `json:"ru,omitempty"` // Phase-2 usefulness verdict (store reaches only)
 }
 
 // Reached reports whether the store answered this opportunity (the reach-rate
@@ -241,6 +244,16 @@ type scanner struct {
 	found            []Opportunity
 	lastTS           time.Time
 	decodeErrs       int
+
+	// RU watch: after a store reach fires we hold the opportunity open (not yet
+	// appended) and keep collecting its retrieved result + the agent's following
+	// prose until the next user boundary, then grade usefulness (Phase 2).
+	watching  bool
+	watchID   string // tool_use id of the store reach — matches its tool_result
+	gotResult bool
+	result    strings.Builder // retrieved nug content
+	prose     strings.Builder // agent text/thinking after the reach
+	fellBack  bool            // agent reached another channel after the store reach
 }
 
 // ScanSource tags every recall opportunity in one transcript and resolves each
@@ -255,7 +268,8 @@ func ScanSource(src transcript.Source, win Window) ([]Opportunity, int, error) {
 	if err != nil {
 		return nil, s.decodeErrs, err
 	}
-	s.closeOpen() // EOF closes a still-open opportunity as unanswered
+	s.finishWatch() // EOF grades a store reach still under RU watch
+	s.closeOpen()   // EOF closes a still-open opportunity as unanswered
 	return s.found, s.decodeErrs, nil
 }
 
@@ -286,6 +300,9 @@ func (s *scanner) feed(line []byte) {
 // carrier (no prompt text) or a fold-in (carrier/control/affirmation) leaves an
 // open opportunity standing — the agent's response arc is still in progress.
 func (s *scanner) feedUser(raw transcript.Raw) {
+	if s.watching {
+		s.captureResult(raw.Message.Content) // tool_result carrier may hold the retrieved nug
+	}
 	prompt := score.PromptText(raw.Message.Content)
 	if prompt == "" {
 		return // tool_result carrier: not a boundary
@@ -293,7 +310,9 @@ func (s *scanner) feedUser(raw transcript.Raw) {
 	if skip, _, _ := score.ClassifyBoundary(prompt); skip {
 		return // carrier/control/affirmation: continues the arc, opens nothing
 	}
-	// A genuine user turn closes any open opportunity (its arc ended) …
+	// A genuine user turn ends the arc: grade a watched store reach, close any
+	// open opportunity …
+	s.finishWatch()
 	s.closeOpen()
 	// … and may open a new one.
 	cue, class, ok := Classify(prompt)
@@ -323,18 +342,28 @@ func (s *scanner) feedUser(raw transcript.Raw) {
 // in this assistant turn. Non-retrieval blocks are skipped; the opportunity stays
 // open across turns until a retrieval action fires or a new user boundary closes it.
 func (s *scanner) feedAssistant(raw transcript.Raw) {
+	if s.watching {
+		s.collectWatch(raw.Message.Content)
+		return
+	}
 	if !s.open {
 		return
 	}
 	for i := range raw.Message.Content {
 		blk := &raw.Message.Content[i]
-		if r, tool := classifyReachBlock(blk); r.isRetrieval() {
-			s.cur.Reach = r
-			s.cur.FiredTool = tool
-			s.found = append(s.found, s.cur)
-			s.open = false
-			return
+		r, tool := classifyReachBlock(blk)
+		if !r.isRetrieval() {
+			continue
 		}
+		s.cur.Reach = r
+		s.cur.FiredTool = tool
+		s.open = false
+		if r == ReachStore {
+			s.beginWatch(blk.ID) // hold open: grade RU once the arc plays out
+		} else {
+			s.found = append(s.found, s.cur)
+		}
+		return
 	}
 }
 
@@ -343,6 +372,70 @@ func (s *scanner) closeOpen() {
 		s.found = append(s.found, s.cur) // Reach stays ReachNone
 		s.open = false
 	}
+}
+
+// beginWatch enters RU-watch on the store reach just resolved: the opportunity
+// is held (not appended) while we collect its result and following prose.
+func (s *scanner) beginWatch(toolID string) {
+	s.watching = true
+	s.watchID = toolID
+	s.gotResult = false
+	s.result.Reset()
+	s.prose.Reset()
+	s.fellBack = false
+}
+
+// captureResult grabs the retrieved nug from the store reach's tool_result,
+// matched by tool_use_id (or the first result seen when the id is absent, as in
+// hand-built fixtures).
+func (s *scanner) captureResult(blocks transcript.Blocks) {
+	if s.gotResult {
+		return
+	}
+	for i := range blocks {
+		b := &blocks[i]
+		if b.Type != "tool_result" {
+			continue
+		}
+		if s.watchID != "" && b.ToolUseID != s.watchID {
+			continue
+		}
+		s.result.WriteString(resultText(b.Content))
+		s.gotResult = true
+		return
+	}
+}
+
+// collectWatch folds one assistant turn after the store reach into the RU
+// evidence: its text/thinking accrues to the prose we read use from, and any
+// further retrieval action marks a fallback (the store result went unused).
+func (s *scanner) collectWatch(blocks transcript.Blocks) {
+	for i := range blocks {
+		b := &blocks[i]
+		switch b.Type {
+		case "text":
+			s.prose.WriteByte(' ')
+			s.prose.WriteString(b.Text)
+		case "thinking":
+			s.prose.WriteByte(' ')
+			s.prose.WriteString(b.Thinking)
+		case "tool_use":
+			if r, _ := classifyReachBlock(b); r.isRetrieval() {
+				s.fellBack = true
+			}
+		}
+	}
+}
+
+// finishWatch grades the watched store reach and appends it. No-op when not
+// watching.
+func (s *scanner) finishWatch() {
+	if !s.watching {
+		return
+	}
+	s.cur.RU = adjudicateRU(s.result.String(), s.prose.String(), s.gotResult, s.fellBack)
+	s.found = append(s.found, s.cur)
+	s.watching = false
 }
 
 // parseTS decodes a transcript RFC3339 timestamp, returning the zero time on any
