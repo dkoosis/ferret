@@ -164,16 +164,25 @@ func Load(path string) ([]Entry, error) {
 	}
 	defer f.Close()
 
+	// Read with an uncapped bufio.Reader rather than a bufio.Scanner: a user
+	// --note can push one JSON line past any fixed token cap, and Scanner surfaces
+	// bufio.ErrTooLong BEFORE the trailing-salvage loop below runs, so a single
+	// over-cap line would hard-error the whole ledger and defeat the salvage
+	// guarantee. ReadString has no token limit, matching the events codec's
+	// uncapped json.Decoder (codec.go), so oversized lines load like any other.
 	var lines []string
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
-	for sc.Scan() {
-		if line := strings.TrimSpace(sc.Text()); line != "" {
-			lines = append(lines, line)
+	r := bufio.NewReader(f)
+	for {
+		line, rerr := r.ReadString('\n')
+		if s := strings.TrimSpace(line); s != "" {
+			lines = append(lines, s)
 		}
-	}
-	if err := sc.Err(); err != nil {
-		return nil, err
+		if rerr != nil {
+			if errors.Is(rerr, io.EOF) {
+				break // ReadString returned the final unterminated line above
+			}
+			return nil, rerr
+		}
 	}
 
 	out := make([]Entry, 0, len(lines))
@@ -200,6 +209,13 @@ func Append(path string, e Entry) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
+	// Serialize concurrent appends so two over-threshold writes can't interleave
+	// into one torn ledger line (ferret-isz). lockLedger also creates the dir.
+	release, lerr := lockLedger(path)
+	if lerr != nil {
+		return lerr
+	}
+	defer release()
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return err
