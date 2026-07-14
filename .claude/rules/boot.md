@@ -4,13 +4,14 @@ updated: 2026-07-03
 *Project working-memory. Maintained for future-me: current state + live frontier + traps that still bite. Resolved lanes pruned — history lives in beads/PRs.*
 
 ## lane: GreatKilldeer
-→ next: **design round — `helped` adjudicator.** Brief → `~/Projects/dk/Project/ferret/specs/helped-adjudicator-design.md` (4 decisions, dk drives — he was mid-read). After: mint consumer bead (ingest→join→emit vs golden fixture). Also open: bbp.11 (P3). SR north-star answer still unrecorded in `plans/ferret-7c8/final-state.md`.
-✓ #61 merged (ferret-blz decode-errs tests; Gemini no-findings) · repo swept clean — PRs/branches/worktrees/stashes/beads.
-‡ vault daemon truncates streamed in-place writes to KG plan dir — write tmp + `mv` only.
+→ next: **design round — `helped` adjudicator.** Brief → `~/Projects/dk/Project/ferret/specs/helped-adjudicator-design.md` (4 decisions, dk drives — mid-read). After: mint consumer bead (ingest→join→emit vs golden fixture). Also open: bbp.11 (P3).
+✓ #62 merged (ferret-p2a reach harness `ferret reach`; 3 Gemini fixes accepted). p2a closed. PR queue EMPTY.
+‡ vault daemon truncates streamed writes to KG plan dir — write tmp + `mv`.
+‡ Gemini GitHub reviewer sunsets 2026-07-17 — line up a replacement.
 ~ dk one-line autonomous grant, zero corrections; ends on "next?".
 
 ## State
-- main @ `3230cce`, origin synced. PR queue EMPTY — #60 (ferret-7c8 `ferret search`, all 3 Gemini fixes) + #61 (ferret-blz decode-errs tests) merged 2026-07-03. Branches/worktrees/stashes pruned.
+- main @ `f0bd8f0`, origin synced. PR queue EMPTY — #62 (ferret-p2a reach harness) merged 2026-07-13. Branches/worktrees/stashes pruned.
 - Scorers live in **`internal/score/`** (landmark/quality/conform all there — ratified, design-doc D2). New scorers go here.
 - `/team` = one shared tree + loto (worktrees retired). No concurrent `make check`; primary verifies once at wave end.
 
