@@ -225,7 +225,10 @@ func RunCoverage(ctx context.Context, cfg Config, episode, prompt, query string)
 	system, user := BuildCoveragePrompt(prompt, query)
 	_, text, usage, err := complete(ctx, cfg, system, user)
 	if err != nil {
-		return CoverageResult{}, Usage{}, err
+		// Preserve usage: complete() returns real token counts on a max_tokens
+		// truncation (ErrTruncatedResponse), and Hop1 bills that paid call — so
+		// dropping it to Usage{} would undercount the burn (PR #64 review).
+		return CoverageResult{}, usage, err
 	}
 	res, err := ParseCoverage(text)
 	if err != nil {

@@ -1,9 +1,44 @@
 package analyst
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 )
+
+// maxTokensDoer stubs the Anthropic transport with a well-formed Messages
+// response whose stop_reason is max_tokens and whose usage carries real token
+// counts — the truncation case complete() turns into ErrTruncatedResponse.
+type maxTokensDoer struct{}
+
+func (maxTokensDoer) Do(req *http.Request) (*http.Response, error) {
+	body := `{"id":"msg_1","type":"message","role":"assistant","model":"claude",` +
+		`"content":[{"type":"text","text":"{\"grade\""}],"stop_reason":"max_tokens",` +
+		`"usage":{"input_tokens":420,"output_tokens":8000}}`
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(bytes.NewBufferString(body)),
+	}, nil
+}
+
+// TestRunCoveragePreservesUsageOnTruncation pins the PR #64 fix: when a coverage
+// judge call truncates at max_tokens, RunCoverage must return the paid call's
+// real token usage (not Usage{}), so analyst.Hop1's burn accounting stays honest.
+func TestRunCoveragePreservesUsageOnTruncation(t *testing.T) {
+	cfg := Config{APIKey: "sk-test", HTTPClient: maxTokensDoer{}}
+	_, usage, err := RunCoverage(context.Background(), cfg, "ep-1", "prompt text", "query text")
+	if !errors.Is(err, ErrTruncatedResponse) {
+		t.Fatalf("err = %v; want ErrTruncatedResponse", err)
+	}
+	if usage.InputTokens == 0 && usage.OutputTokens == 0 {
+		t.Errorf("usage dropped on truncation: %+v; want the call's real token counts", usage)
+	}
+}
 
 func TestBuildRelevancePromptIncludesIntentQueryAndCandidates(t *testing.T) {
 	system, user := BuildRelevancePrompt(

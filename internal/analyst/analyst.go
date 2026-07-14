@@ -134,7 +134,7 @@ var errNoJSON = errors.New("analyst: model response contained no JSON object")
 // malformed output. Exported so callers can errors.Is it and, e.g., retry with a
 // split session. complete() also raises it from the SDK's max_tokens stop reason
 // (the authoritative signal) before parsing.
-var ErrTruncatedResponse = errors.New("analyst: model response truncated at the output token cap (session too large to adjudicate in one call)")
+var ErrTruncatedResponse = errors.New("analyst: model response truncated at the output token cap (input too large for one call)")
 
 // decodeFirstObject decodes the FIRST complete JSON object in a model response
 // into v, tolerating ```json fences and surrounding prose (a guardrail in case
