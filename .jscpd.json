@@ -1,0 +1,8 @@
+{
+  "gitignore": true,
+  "ignore": [
+    "**/.sandbox/**",
+    "**/node_modules/**",
+    "**/testdata/**"
+  ]
+}
