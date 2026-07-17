@@ -2,6 +2,8 @@ module github.com/dkoosis/ferret
 
 go 1.26.3
 
+toolchain go1.26.5
+
 require (
 	github.com/alecthomas/kong v1.15.0
 	github.com/anthropics/anthropic-sdk-go v1.50.2
