@@ -77,8 +77,8 @@ func cmdSearch() error {
 	if strings.TrimSpace(cmd.Query) == "" {
 		return errSearchQueryRequired
 	}
-	if cmd.Format != fmtText && cmd.Format != fmtJSON {
-		return fmt.Errorf("%w: %q (want text|json)", errBadFormat, cmd.Format)
+	if err := validateFormat(cmd.Format); err != nil {
+		return err
 	}
 	if cmd.Context < 0 {
 		return errSearchBadContext
