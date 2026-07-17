@@ -38,16 +38,12 @@ func cmdDialogue() error {
 	if strings.TrimSpace(cmd.Session) == "" {
 		return errSpineSessionRequired
 	}
-	if cmd.Format != fmtText && cmd.Format != fmtJSON {
-		return fmt.Errorf("%w: %q (want text|json)", errBadFormat, cmd.Format)
+	if err := validateFormat(cmd.Format); err != nil {
+		return err
 	}
-	root := cmd.Root
-	if root == "" {
-		r, err := defaultRoot()
-		if err != nil {
-			return err
-		}
-		root = r
+	root, err := resolveRoot(cmd.Root)
+	if err != nil {
+		return err
 	}
 	return runDialogue(os.Stdout, root, cmd.Session, cmd.Format)
 }

@@ -99,6 +99,25 @@ func defaultRoot() (string, error) {
 	return filepath.Join(home, ".claude", "projects"), nil
 }
 
+// resolveRoot returns root unchanged, or the default transcript root when the
+// flag is empty. The transcript-family subcommands (spine/segment/dialogue/…)
+// share this --root resolution.
+func resolveRoot(root string) (string, error) {
+	if root != "" {
+		return root, nil
+	}
+	return defaultRoot()
+}
+
+// validateFormat rejects any --format outside the text|json pair the
+// transcript-family subcommands render.
+func validateFormat(format string) error {
+	if format != fmtText && format != fmtJSON {
+		return fmt.Errorf("%w: %q (want text|json)", errBadFormat, format)
+	}
+	return nil
+}
+
 // CommonFlags are shared across all analysis subcommands.
 type CommonFlags struct {
 	Data     string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`

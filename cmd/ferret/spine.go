@@ -40,13 +40,9 @@ func cmdSpine() error {
 	if strings.TrimSpace(cmd.Session) == "" {
 		return errSpineSessionRequired
 	}
-	root := cmd.Root
-	if root == "" {
-		r, err := defaultRoot()
-		if err != nil {
-			return err
-		}
-		root = r
+	root, err := resolveRoot(cmd.Root)
+	if err != nil {
+		return err
 	}
 	return spine(os.Stdout, root, cmd.Session)
 }
