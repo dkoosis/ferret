@@ -51,16 +51,12 @@ type qualitySpec map[int]qualityTaskSpec
 // piped spec the reference-free axes are emitted unchanged.
 func cmdQuality() error {
 	cmd := &CLI.Quality
-	if cmd.Format != fmtText && cmd.Format != fmtJSON {
-		return fmt.Errorf("%w: %q (want text|json)", errBadFormat, cmd.Format)
+	if err := validateFormat(cmd.Format); err != nil {
+		return err
 	}
-	root := cmd.Root
-	if root == "" {
-		r, err := defaultRoot()
-		if err != nil {
-			return err
-		}
-		root = r
+	root, err := resolveRoot(cmd.Root)
+	if err != nil {
+		return err
 	}
 	if strings.TrimSpace(cmd.Session) != "" {
 		spec, err := readPipedQualitySpec()

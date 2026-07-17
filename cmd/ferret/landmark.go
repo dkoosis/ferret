@@ -51,17 +51,13 @@ type landmarkSpec struct {
 // corpus at --data fills uniqueness weights (uniform fallback if absent).
 func cmdLandmark() error {
 	cmd := &CLI.Landmark
-	if cmd.Format != fmtText && cmd.Format != fmtJSON {
-		return fmt.Errorf("%w: %q (want text|json)", errBadFormat, cmd.Format)
+	if err := validateFormat(cmd.Format); err != nil {
+		return err
 	}
 	if strings.TrimSpace(cmd.Session) != "" {
-		root := cmd.Root
-		if root == "" {
-			r, err := defaultRoot()
-			if err != nil {
-				return err
-			}
-			root = r
+		root, err := resolveRoot(cmd.Root)
+		if err != nil {
+			return err
 		}
 		return landmarkSession(os.Stdout, root, cmd.Session, cmd.Data, cmd.Format)
 	}

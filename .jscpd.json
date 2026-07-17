@@ -3,6 +3,7 @@
   "ignore": [
     "**/.sandbox/**",
     "**/node_modules/**",
-    "**/testdata/**"
+    "**/testdata/**",
+    "**/*_test.go"
   ]
 }

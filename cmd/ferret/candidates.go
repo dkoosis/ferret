@@ -152,16 +152,12 @@ func segCallCount(seg score.Segment) int {
 // root the same way spine/segments do.
 func cmdCandidates() error {
 	cmd := &CLI.Candidates
-	if cmd.Format != fmtText && cmd.Format != fmtJSON {
-		return fmt.Errorf("%w: %q (want text|json)", errBadFormat, cmd.Format)
+	if err := validateFormat(cmd.Format); err != nil {
+		return err
 	}
-	root := cmd.Root
-	if root == "" {
-		r, err := defaultRoot()
-		if err != nil {
-			return err
-		}
-		root = r
+	root, err := resolveRoot(cmd.Root)
+	if err != nil {
+		return err
 	}
 	// No --session → corpus-recurrence mode (Phase 2, kuv.12): rank task-shapes
 	// that recur across many sessions. --session → Phase 1 per-session ranking.

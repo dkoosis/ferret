@@ -86,13 +86,9 @@ func cmdSearch() error {
 	if cmd.Limit < 0 {
 		return errSearchBadLimit
 	}
-	root := cmd.Root
-	if root == "" {
-		r, err := defaultRoot()
-		if err != nil {
-			return err
-		}
-		root = r
+	root, err := resolveRoot(cmd.Root)
+	if err != nil {
+		return err
 	}
 	return runSearch(os.Stdout, root, cmd.Query,
 		searchOpts{format: cmd.Format, limit: cmd.Limit, context: cmd.Context})
