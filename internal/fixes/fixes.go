@@ -157,7 +157,7 @@ func ParseMotif(raw string) []string {
 func Load(path string) ([]Entry, error) {
 	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return []Entry{}, nil
 	}
 	if err != nil {
 		return nil, err
