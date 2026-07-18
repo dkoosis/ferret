@@ -4,11 +4,11 @@ updated: 2026-07-03
 *Project working-memory. Maintained for future-me: current state + live frontier + traps that still bite. Resolved lanes pruned — history lives in beads/PRs.*
 
 ## lane: GreatKilldeer
-→ next: **design round — `helped` adjudicator.** Brief → `~/Projects/dk/Project/ferret/specs/helped-adjudicator-design.md` (4 decisions, dk drives — mid-read). After: mint consumer bead (ingest→join→emit vs golden fixture). Also open: bbp.11 (P3).
-✓ #62 merged (ferret-p2a reach harness `ferret reach`; 3 Gemini fixes accepted). p2a closed. PR queue EMPTY.
+→ next: **design round — `helped` adjudicator.** Brief → `~/Projects/dk/Project/ferret/specs/helped-adjudicator-design.md` (4 decisions, dk drives — mid-read). After: mint consumer bead (ingest→join→emit vs golden fixture). Open: bbp.11 (P3); ferret-frr (P2, parked — boundary-helper extraction out of `score`).
+✓ assessed external arch review → 1/7 accepted (filed ferret-frr); rejected the speculative session-timeline restructure.
 ‡ vault daemon truncates streamed writes to KG plan dir — write tmp + `mv`.
-‡ Gemini GitHub reviewer sunsets 2026-07-17 — line up a replacement.
-~ dk one-line autonomous grant, zero corrections; ends on "next?".
+‡ arch reviews recycle a "duplicate substrate" claim — but shellnorm already centralizes shell parse; don't re-accept F5-shaped findings.
+~ dk terse ship-mode: one-line grants, ends on "next?".
 
 ## State
 - main @ `f0bd8f0`, origin synced. PR queue EMPTY — #62 (ferret-p2a reach harness) merged 2026-07-13. Branches/worktrees/stashes pruned.
