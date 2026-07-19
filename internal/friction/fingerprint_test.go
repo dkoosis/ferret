@@ -94,6 +94,15 @@ func TestFingerprint(t *testing.T) {
 			"<path>",
 		},
 		{
+			// A long pure-decimal run (byte offset, big line no.) is a number, not
+			// a hash: it must reach reNumber → <n>, so a 6- and 7-digit instance of
+			// the same friction fingerprint identically instead of forking across
+			// the reHex/reNumber boundary.
+			"long pure-decimal run masks as number not hash",
+			"read 1234567 bytes at offset 999999",
+			"read <n> bytes at offset <n>",
+		},
+		{
 			"pure-alpha single-slash slug is NOT masked",
 			"openai/ferret",
 			"openai/ferret",

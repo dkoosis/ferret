@@ -48,7 +48,7 @@ func Fingerprint(raw string) string {
 	s = reUUID.ReplaceAllString(s, "<uuid>")
 	s = rePath.ReplaceAllString(s, "${1}<path>")
 	s = maskRefs(s)
-	s = reHex.ReplaceAllString(s, "<hash>")
+	s = maskHex(s)
 	s = reNumber.ReplaceAllString(s, "<n>")
 	s = strings.ToLower(s)
 	s = strings.Join(strings.Fields(s), " ")
@@ -79,6 +79,33 @@ func maskRefs(s string) string {
 	})
 }
 
+// maskHex masks a long hex run (git SHA, content hash, object id) to <hash>, but
+// ONLY when the run carries at least one hex LETTER (a-f). A run of ≥7 pure
+// decimal digits is not a hash — it is a big number (byte offset, port, line no.)
+// and is left for the later reNumber pass, so a 6-digit and a 7-digit instance of
+// the same friction both normalize to <n> and fingerprint identically. Without
+// this guard they would fork across the reHex/reNumber boundary (a missed
+// recurrence).
+func maskHex(s string) string {
+	return reHex.ReplaceAllStringFunc(s, func(tok string) string {
+		if hasHexLetter(tok) {
+			return "<hash>"
+		}
+		return tok // pure-decimal run: leave it for reNumber
+	})
+}
+
+// hasHexLetter reports whether s contains an ASCII hex letter (a-f/A-F).
+func hasHexLetter(s string) bool {
+	for i := range len(s) {
+		c := s[i]
+		if (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') {
+			return true
+		}
+	}
+	return false
+}
+
 // isPlainAlpha reports whether s is one or more ASCII letters only — no digit,
 // dot, dash, or underscore. Such a segment carries no run-to-run volatility.
 func isPlainAlpha(s string) bool {
@@ -106,9 +133,11 @@ var (
 	// reUUID masks canonical UUIDs (session/agent/request ids).
 	reUUID = regexp.MustCompile(`\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b`)
 
-	// reHex masks long hex runs: git SHAs, content hashes, object ids. The ≥7
-	// floor keeps short hex-looking words (e.g. "added", "beef") from masking,
-	// while catching abbreviated 7-char git SHAs and up.
+	// reHex matches long hex-or-digit runs: git SHAs, content hashes, object ids.
+	// The ≥7 floor keeps short hex-looking words (e.g. "added", "beef") from
+	// matching, while catching abbreviated 7-char git SHAs and up. maskHex then
+	// gates each match on a hex letter, so pure-decimal runs fall through to
+	// reNumber rather than masking as <hash>.
 	reHex = regexp.MustCompile(`\b[0-9a-fA-F]{7,}\b`)
 
 	// rePath masks filesystem paths without over- or under-masking. A path masks

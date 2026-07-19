@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strings"
 
 	"github.com/dkoosis/ferret/internal/friction"
 	"github.com/dkoosis/ferret/internal/out"
@@ -58,23 +59,31 @@ func cmdRecurrence() error {
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
 	defer sink.Close()
 	sink.Head("friction-recurrence matches=%d (known signatures=%d, learned=%d, file %s)", len(matches), len(sigs), learned, sigPath)
-	for _, m := range matches {
+	for i := range matches {
+		m := &matches[i]
 		label := m.Label
 		if label == "" {
 			label = "(unlabeled)"
 		}
-		sink.Row("occ#%d  %s#%d  %s  [%s]  %s",
-			m.Occurrence, m.Session, m.Seq, label, m.Fingerprint, truncRaw(m.Raw))
+		if !sink.Row("occ#%d  %s#%d  %s  [%s]  %s",
+			m.Occurrence, m.Session, m.Seq, label, m.Fingerprint, truncRaw(m.Raw)) {
+			break // row cap reached; stop formatting further rows
+		}
 	}
 	return nil
 }
 
 // truncRaw caps the exemplar so one match row stays a single line under the AX
-// output caps; the full raw is available in --format json.
+// output caps; the full raw is available in --format json. Newlines collapse to
+// spaces (single-line invariant) and truncation is by rune, never mid-codepoint,
+// so a multibyte exemplar never emits a malformed UTF-8 tail.
 func truncRaw(s string) string {
 	const limit = 80
-	if len(s) <= limit {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	r := []rune(s)
+	if len(r) <= limit {
 		return s
 	}
-	return s[:limit] + "…"
+	return string(r[:limit]) + "…"
 }
