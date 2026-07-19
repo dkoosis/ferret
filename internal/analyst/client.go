@@ -10,6 +10,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/dkoosis/keyring"
 )
 
 // DefaultModel is the analyst's working model.
@@ -35,6 +36,46 @@ const maxTokens = 8000
 // default, so per-app metering isn't defeated by a stray bare key in the env.
 const envAPIKey = "FERRET_ANTHROPIC_API_KEY" //nolint:gosec // G101: env var NAME, not a credential
 
+// Keychain coordinates, per the keyring convention: service = app, account =
+// provider. The macOS keychain is the primary credential source; envAPIKey is
+// the fallback, so headless runs (cron/launchd) and Linux both work without
+// activate.sh plumbing.
+const (
+	keychainService = "ferret"
+	keychainAccount = "anthropic"
+)
+
+// readKeychain is a test seam: tests replace it so they never touch the
+// developer's real keychain (a stored ferret/anthropic item would otherwise
+// leak into every "no key set" test). Production never reassigns it.
+var readKeychain = func() (string, error) {
+	store, err := keyring.New(keychainService)
+	if err != nil {
+		return "", err
+	}
+	return store.Get(keychainAccount)
+}
+
+// resolveKey resolves the credential: explicit Config.APIKey, then the
+// keychain, then the environment. A keychain that CONFIRMS absence (or has no
+// backend, i.e. Linux) falls through to env; a keychain that could not be
+// read (locked, denied, timed out) is a hard error — never silently
+// downgraded to the environment. An empty result with nil error means "no
+// key anywhere" and is the caller's ErrNoAPIKey case.
+func resolveKey(cfg Config) (string, error) {
+	if cfg.APIKey != "" {
+		return cfg.APIKey, nil
+	}
+	k, err := readKeychain()
+	switch {
+	case err == nil && k != "":
+		return k, nil
+	case err != nil && !errors.Is(err, keyring.ErrNotFound) && !errors.Is(err, keyring.ErrUnsupported):
+		return "", fmt.Errorf("analyst: reading API key from keychain: %w", err)
+	}
+	return os.Getenv(envAPIKey), nil
+}
+
 // Config drives one adjudication call.
 type Config struct {
 	Model  string // model ID; empty → DefaultModel
@@ -53,12 +94,15 @@ type Config struct {
 // ErrNoAPIKey signals the run cannot proceed because no credential is set. The
 // caller surfaces it with the --emit-prompt escape hatch (assemble the prompt,
 // skip the network) so the pipeline is exercisable before a key is wired up.
-var ErrNoAPIKey = errors.New("analyst: no API key (set FERRET_ANTHROPIC_API_KEY, or use --emit-prompt to assemble the prompt without calling the model)")
+var ErrNoAPIKey = errors.New("analyst: no API key (store one in the keychain under service \"ferret\" account \"anthropic\", set FERRET_ANTHROPIC_API_KEY, or use --emit-prompt to assemble the prompt without calling the model)")
 
-// HasAPIKey reports whether a credential is available from cfg or the
-// environment — lets the command choose between a live run and --emit-prompt.
+// HasAPIKey reports whether a credential is available from cfg, the keychain,
+// or the environment — lets the command choose between a live run and
+// --emit-prompt. An unreadable (locked/denied) keychain reports false here;
+// the actual call surfaces the read error with its cause.
 func (c Config) HasAPIKey() bool {
-	return c.APIKey != "" || os.Getenv(envAPIKey) != ""
+	k, err := resolveKey(c)
+	return err == nil && k != ""
 }
 
 func (c Config) model() string {
@@ -101,7 +145,11 @@ func usageFrom(u anthropic.Usage) Usage {
 // relevance, coverage) — the modes differ only in prompt assembly and response
 // parsing, not in how the model is called.
 func complete(ctx context.Context, cfg Config, system, user string) (model, text string, usage Usage, err error) {
-	if !cfg.HasAPIKey() {
+	key, err := resolveKey(cfg)
+	if err != nil {
+		return "", "", Usage{}, err
+	}
+	if key == "" {
 		return "", "", Usage{}, ErrNoAPIKey
 	}
 	// Operator deadline: bound the whole call (all retries) so a wedged/throttled
@@ -111,18 +159,10 @@ func complete(ctx context.Context, cfg Config, system, user string) (model, text
 		ctx, cancel = context.WithTimeout(ctx, cfg.Timeout)
 		defer cancel()
 	}
-	var opts []option.RequestOption
-	// Resolve the key ourselves and pass it explicitly — HasAPIKey already gated,
-	// so exactly one of cfg.APIKey / env is set. Passing it via WithAPIKey (rather
-	// than letting the SDK read its own ANTHROPIC_API_KEY default) is what keeps
-	// per-app metering intact under the renamed var.
-	key := cfg.APIKey
-	if key == "" {
-		key = os.Getenv(envAPIKey)
-	}
-	if key != "" {
-		opts = append(opts, option.WithAPIKey(key))
-	}
+	// The key is passed explicitly via WithAPIKey (rather than letting the SDK
+	// read its own ANTHROPIC_API_KEY default) so per-app metering isn't defeated
+	// by a stray bare key in the env.
+	opts := []option.RequestOption{option.WithAPIKey(key)}
 	if cfg.HTTPClient != nil {
 		opts = append(opts, option.WithHTTPClient(cfg.HTTPClient))
 	}
