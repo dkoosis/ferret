@@ -7,6 +7,7 @@ toolchain go1.26.5
 require (
 	github.com/alecthomas/kong v1.15.0
 	github.com/anthropics/anthropic-sdk-go v1.50.2
+	github.com/dkoosis/keyring v0.0.0-20260719165344-60d14739868b
 	mvdan.cc/sh/v3 v3.13.1
 )
 
