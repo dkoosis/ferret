@@ -128,21 +128,21 @@ func TestConfigModelDefault(t *testing.T) {
 }
 
 func TestConfigHasAPIKey(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("FERRET_ANTHROPIC_API_KEY", "")
 	if (Config{}).HasAPIKey() {
 		t.Error("HasAPIKey() = true with no key set")
 	}
 	if !(Config{APIKey: "sk-x"}).HasAPIKey() {
 		t.Error("HasAPIKey() = false with explicit key")
 	}
-	t.Setenv("ANTHROPIC_API_KEY", "sk-env")
+	t.Setenv("FERRET_ANTHROPIC_API_KEY", "sk-env")
 	if !(Config{}).HasAPIKey() {
 		t.Error("HasAPIKey() = false with env key")
 	}
 }
 
 func TestRunWithoutKeyReturnsErrNoAPIKey(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("FERRET_ANTHROPIC_API_KEY", "")
 	if _, err := Run(t.Context(), Config{}, "sess", "spine"); !errors.Is(err, ErrNoAPIKey) {
 		t.Errorf("Run() err = %v; want ErrNoAPIKey", err)
 	}

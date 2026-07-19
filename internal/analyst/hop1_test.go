@@ -14,7 +14,7 @@ import (
 // false) — if the floor regressed and let the call through, complete() would
 // return ErrNoAPIKey and the assertion would fail.
 func TestHop1FloorsOnSelfRequery(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("FERRET_ANTHROPIC_API_KEY", "")
 	got, err := Hop1(context.Background(), Config{}, "ep1", score.Episode{SelfRequery: true, Prompt: "find x", Query: "x"})
 	if err != nil {
 		t.Fatalf("Hop1: unexpected err %v", err)
@@ -25,7 +25,7 @@ func TestHop1FloorsOnSelfRequery(t *testing.T) {
 }
 
 func TestHop1FloorsOnRetryMotif(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("FERRET_ANTHROPIC_API_KEY", "")
 	got, err := Hop1(context.Background(), Config{}, "ep1", score.Episode{RetryMotif: true, Prompt: "find x", Query: "x"})
 	if err != nil {
 		t.Fatalf("Hop1: unexpected err %v", err)
@@ -38,7 +38,7 @@ func TestHop1FloorsOnRetryMotif(t *testing.T) {
 // TestHop1NoSignalWhenPromptEmpty: a clean episode with no captured opening
 // prompt has nothing to judge — no grade, no call, no error.
 func TestHop1NoSignalWhenPromptEmpty(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("FERRET_ANTHROPIC_API_KEY", "")
 	got, err := Hop1(context.Background(), Config{}, "ep1", score.Episode{Prompt: "", Query: "x"})
 	if err != nil {
 		t.Fatalf("Hop1: unexpected err %v", err)
@@ -52,7 +52,7 @@ func TestHop1NoSignalWhenPromptEmpty(t *testing.T) {
 // prompt is the escalation case — it must reach the judge, so with no key it
 // surfaces ErrNoAPIKey unchanged (the --emit-prompt escape hatch is the CLI's).
 func TestHop1WithoutAPIKeyReturnsErrNoAPIKey(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("FERRET_ANTHROPIC_API_KEY", "")
 	_, err := Hop1(context.Background(), Config{}, "ep1", score.Episode{Prompt: "find the loto rules", Query: "loto"})
 	if !errors.Is(err, ErrNoAPIKey) {
 		t.Errorf("err = %v, want ErrNoAPIKey", err)
