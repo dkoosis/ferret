@@ -1,6 +1,8 @@
 package friction
 
 import (
+	"sort"
+
 	"github.com/dkoosis/ferret/internal/event"
 )
 
@@ -97,11 +99,32 @@ func (d *Detector) Observe(e event.Event) (MatchRecord, bool) {
 	}, true
 }
 
+// Signatures returns every fingerprint the detector currently knows — seeded
+// plus those learned from the observed stream — as a slice sorted by fingerprint
+// for deterministic output. The CLI persists this back to the signatures file so
+// a fingerprint first seen in one run is a KNOWN signature in the next, making
+// cross-run recurrence (occurrence 2 in a later process) reachable.
+func (d *Detector) Signatures() []Signature {
+	out := make([]Signature, 0, len(d.counts))
+	for fp := range d.counts {
+		out = append(out, Signature{Fingerprint: fp, Label: d.labels[fp]})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Fingerprint < out[j].Fingerprint })
+	return out
+}
+
 // Scan runs the detector over a whole event slice in order and returns every
 // match record (2nd+ occurrences). It is the batch entry point the CLI uses; the
 // streaming Observe is exposed for callers that fold matches into another pass.
 func Scan(known []Signature, events []event.Event) []MatchRecord {
 	d := NewDetector(known)
+	return d.ScanInto(events)
+}
+
+// ScanInto runs the detector over events in order, returning every match record.
+// Unlike Scan it uses an existing detector so the caller can inspect the learned
+// registry afterward (Signatures) to persist it. Order-sensitive, single-pass.
+func (d *Detector) ScanInto(events []event.Event) []MatchRecord {
 	var out []MatchRecord
 	for i := range events {
 		if m, ok := d.Observe(events[i]); ok {
@@ -112,20 +135,27 @@ func Scan(known []Signature, events []event.Event) []MatchRecord {
 }
 
 // FrictionText extracts the raw string to fingerprint from an event, reporting
-// false when the event is not a friction event. A friction event is a FAILED
-// action (Status fail or cfail) — the deterministic, regex-first friction signal
-// already in the event model. We deliberately do not read prompt sentiment:
-// dev jargon ("kill the process", "dead code") is style, not friction, so this
-// is a status gate, never an affect detector.
+// false when the event is not a friction event. A friction event is a
+// definitively FAILED action (Status fail) — the deterministic, regex-first
+// friction signal already in the event model. We deliberately do not read prompt
+// sentiment: dev jargon ("kill the process", "dead code") is style, not friction,
+// so this is a status gate, never an affect detector.
+//
+// StatusCFail (a compound shell chain whose FAILING SEGMENT IS UNKNOWN) is
+// deliberately EXCLUDED. A cfail event's Action/Detail describes the whole chain,
+// so treating it as friction would record — and later flag — commands that
+// actually SUCCEEDED within the chain, a false recurrence. Scoping the friction
+// to the failing segment is impossible here (cfail means the segment is unknown
+// by definition); ingestion splits compound chains into per-segment events
+// elsewhere, so a genuinely-failing segment already surfaces as its own fail. The
+// conservative choice is to gate on fail only.
 //
 // The text joins the normalized Action with the most specific volatile context
 // available — the raw command segment (Detail) for a shell failure, else the
 // Target (a path/symbol) for a tool failure — so Fingerprint can mask the
 // volatile part and leave the invariant shape of the failure.
 func FrictionText(e event.Event) (string, bool) {
-	switch e.Status {
-	case event.StatusFail, event.StatusCFail:
-	default:
+	if e.Status != event.StatusFail {
 		return "", false
 	}
 	if e.Action == "" && e.Detail == "" && e.Target == "" {

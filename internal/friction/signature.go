@@ -59,3 +59,63 @@ func LoadSignatures(path string) ([]Signature, error) {
 		}
 	}
 }
+
+// AppendSignatures appends signatures to the JSONL file, creating the file and
+// its parent dir on first use (a corpus can be scanned before any signature has
+// been recorded). Append-only mirrors the fix ledger: the file grows, never
+// rewrites, so a hand-curated label on an existing line is never clobbered. The
+// write is flushed and fsync'd so a recorded signature survives a crash. An empty
+// slice is a no-op.
+func AppendSignatures(path string, sigs []Signature) error {
+	if len(sigs) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	w := bufio.NewWriter(f)
+	for _, s := range sigs {
+		b, mErr := json.Marshal(s)
+		if mErr != nil {
+			return errors.Join(mErr, f.Close())
+		}
+		if _, wErr := w.Write(append(b, '\n')); wErr != nil {
+			return errors.Join(wErr, f.Close())
+		}
+	}
+	if err := w.Flush(); err != nil {
+		return errors.Join(err, f.Close())
+	}
+	if err := f.Sync(); err != nil {
+		return errors.Join(err, f.Close())
+	}
+	return f.Close()
+}
+
+// PersistLearned appends the fingerprints in learned that are not already in
+// known to the signatures file, so a signature first seen this run is a KNOWN
+// signature next run — the durability that makes cross-run recurrence (occurrence
+// 2 in a later process) reachable. It is the delta of learned − known by
+// fingerprint; labels ride along. Returns the count appended.
+func PersistLearned(path string, known, learned []Signature) (int, error) {
+	seen := make(map[string]bool, len(known))
+	for _, s := range known {
+		seen[s.Fingerprint] = true
+	}
+	var newSigs []Signature
+	for _, s := range learned {
+		if s.Fingerprint == "" || seen[s.Fingerprint] {
+			continue
+		}
+		seen[s.Fingerprint] = true // dedupe within learned too
+		newSigs = append(newSigs, s)
+	}
+	if err := AppendSignatures(path, newSigs); err != nil {
+		return 0, err
+	}
+	return len(newSigs), nil
+}

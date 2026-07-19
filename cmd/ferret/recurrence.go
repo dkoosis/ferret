@@ -36,18 +36,28 @@ func cmdRecurrence() error {
 	if err != nil {
 		return err
 	}
-	matches := friction.Scan(sigs, events)
+	det := friction.NewDetector(sigs)
+	matches := det.ScanInto(events)
+
+	// Persist signatures learned this run so a fingerprint first seen now is a
+	// KNOWN signature next run — this is what makes cross-run recurrence
+	// (occurrence 2 in a later process) reachable rather than lost at exit.
+	learned, err := friction.PersistLearned(sigPath, sigs, det.Signatures())
+	if err != nil {
+		return err
+	}
 
 	if c.format == fmtJSON {
 		return out.JSON(os.Stdout, map[string]any{
 			"matches":    matches,
 			"signatures": len(sigs),
+			"learned":    learned,
 			keyTotal:     len(matches),
 		})
 	}
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
 	defer sink.Close()
-	sink.Head("friction-recurrence matches=%d (known signatures=%d, file %s)", len(matches), len(sigs), sigPath)
+	sink.Head("friction-recurrence matches=%d (known signatures=%d, learned=%d, file %s)", len(matches), len(sigs), learned, sigPath)
 	for _, m := range matches {
 		label := m.Label
 		if label == "" {

@@ -23,9 +23,9 @@ func TestFrictionText(t *testing.T) {
 			"go_test go test ./internal/mine", true,
 		},
 		{
-			"compound-fail counts as friction",
+			"compound-fail (cfail) is excluded — failing segment unknown",
 			event.Event{Action: "make_check", Detail: "make check", Status: event.StatusCFail},
-			"make_check make check", true,
+			"", false,
 		},
 		{
 			"failed tool falls back to target",
@@ -79,18 +79,39 @@ func TestDetectorFlagsSecondOccurrence(t *testing.T) {
 // TestSeededSignatureFlagsFirstFreshEvent proves a pre-seeded known signature is
 // treated as already-seen: its FIRST fresh sighting is occurrence 2 (a repeat).
 func TestSeededSignatureFlagsFirstFreshEvent(t *testing.T) {
-	seed := Signature{Fingerprint: Fingerprint("git_checkout git checkout -b feature/x"), Label: "branch-flip"}
+	seed := Signature{Fingerprint: Fingerprint("go_test go test /Users/a/mine"), Label: "test loop"}
 	d := NewDetector([]Signature{seed})
 
-	m, ok := d.Observe(failShell(1, "sessC", "git_checkout", "git checkout -b feature/other"))
+	m, ok := d.Observe(failShell(1, "sessC", "go_test", "go test /Users/b/score"))
 	if !ok {
 		t.Fatal("a seeded signature's first fresh sighting must be flagged")
 	}
 	if m.Occurrence != 2 {
 		t.Errorf("Occurrence = %d, want 2", m.Occurrence)
 	}
-	if m.Label != "branch-flip" {
+	if m.Label != "test loop" {
 		t.Errorf("Label = %q, want carried from seed", m.Label)
+	}
+}
+
+// TestSignaturesReturnsSeededAndLearned proves the registry the CLI persists
+// includes both seeded fingerprints and those learned from the stream, so the
+// learned corpus is durable across runs (Bug 1).
+func TestSignaturesReturnsSeededAndLearned(t *testing.T) {
+	seed := Signature{Fingerprint: "seeded-fp", Label: "known"}
+	d := NewDetector([]Signature{seed})
+	d.Observe(failShell(1, "s", "go_test", "go test /Users/a/mine")) // learns a new fp
+
+	sigs := d.Signatures()
+	got := make(map[string]string, len(sigs))
+	for _, s := range sigs {
+		got[s.Fingerprint] = s.Label
+	}
+	if _, ok := got["seeded-fp"]; !ok {
+		t.Error("Signatures() dropped the seeded fingerprint")
+	}
+	if _, ok := got[Fingerprint("go_test go test /Users/a/mine")]; !ok {
+		t.Error("Signatures() dropped the learned fingerprint")
 	}
 }
 

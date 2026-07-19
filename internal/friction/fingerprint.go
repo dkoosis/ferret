@@ -46,7 +46,7 @@ func Fingerprint(raw string) string {
 	s = reQuoted.ReplaceAllString(s, "<str>")
 	s = reTimestamp.ReplaceAllString(s, "<ts>")
 	s = reUUID.ReplaceAllString(s, "<uuid>")
-	s = rePath.ReplaceAllString(s, "<path>")
+	s = rePath.ReplaceAllString(s, "${1}<path>")
 	s = reHex.ReplaceAllString(s, "<hash>")
 	s = reNumber.ReplaceAllString(s, "<n>")
 	s = strings.ToLower(s)
@@ -71,13 +71,22 @@ var (
 	// while catching abbreviated 7-char git SHAs and up.
 	reHex = regexp.MustCompile(`\b[0-9a-fA-F]{7,}\b`)
 
-	// rePath masks filesystem paths — a multi-segment slash-joined token, with
-	// or without a leading /, ./, ../, or ~/. The trailing (?:/[\w.\-]+)+ forces
-	// at least one interior slash, so a bare filename like "gates.go" is kept
-	// (it can be part of the signature) while "internal/score/gates.go",
-	// "/Users/x/repo", and "fix/branch-name" all mask. Path text is per-repo,
-	// per-checkout volatile and must never fork a signature.
-	rePath = regexp.MustCompile(`(?:~|\.{0,2})?/?[\w.\-]+(?:/[\w.\-]+)+`)
+	// rePath masks filesystem paths without over- or under-masking. A path masks
+	// only when it is unambiguously a path — either ANCHORED (leading /, ./, ../,
+	// ~/, or a Windows drive C:/ or C:\) or DEEP (an unanchored token with ≥2
+	// interior slashes, e.g. internal/score/gates.go). A bare single-slash
+	// identifier pair like "openai/ferret" is NOT a path and is kept, so
+	// "openai/ferret" and "openai/gym" fingerprint DIFFERENTLY instead of both
+	// collapsing to <path> (a false recurrence).
+	//
+	// Group 1 captures the boundary char (start, whitespace, or a small punct set)
+	// preceding the path and is restored on replace ("${1}<path>"): RE2 has no
+	// lookbehind, so consuming+restoring the boundary is how we require the path's
+	// leading slash to START a token rather than sit mid-word — without it the
+	// absolute-path branch would match the interior slash of "openai/ferret".
+	// Windows drive paths (C:/Users/x) match whole, drive letter included, so they
+	// mask fully rather than leaving a "c:" residue.
+	rePath = regexp.MustCompile(`(^|[\s"'=,(])((?:[A-Za-z]:[\\/]|~/|\.{1,2}/|/)[\w.\-]+(?:[\\/][\w.\-]+)*|[\w.\-]+(?:/[\w.\-]+){2,})`)
 
 	// reNumber masks any remaining standalone number (line numbers, ports,
 	// byte counts, exit codes, durations). Run last so it does not eat digits

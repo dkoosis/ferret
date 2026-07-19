@@ -75,6 +75,26 @@ func TestFingerprint(t *testing.T) {
 			"exit code 137 killed",
 			"exit code <n> killed",
 		},
+		{
+			"unix absolute path masks",
+			"/Users/x/foo.go",
+			"<path>",
+		},
+		{
+			"windows drive path masks fully (no c: residue)",
+			"C:/Users/x/foo.go",
+			"<path>",
+		},
+		{
+			"windows backslash path masks",
+			`C:\Users\x\foo.go`,
+			"<path>",
+		},
+		{
+			"bare single-slash identifier pair is NOT a path",
+			"openai/ferret",
+			"openai/ferret",
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -90,10 +110,25 @@ func TestFingerprint(t *testing.T) {
 // fingerprint. If these diverge, a known signature never re-matches and the
 // detector is useless.
 func TestFingerprintStableAcrossSessions(t *testing.T) {
-	a := Fingerprint("git_checkout git checkout -b fix/ferret-5jb /Users/a/repo @ f0bd8f0")
-	b := Fingerprint("git_checkout git checkout -b fix/ferret-9xy /Users/b/other @ cca7bf4")
+	a := Fingerprint("go_test go test /Users/a/ferret/internal/mine @ f0bd8f0")
+	b := Fingerprint("go_test go test /Users/b/other/internal/mine @ cca7bf4")
 	if a != b {
 		t.Errorf("same friction shape produced different fingerprints:\n a=%q\n b=%q", a, b)
+	}
+}
+
+// TestFingerprintPathBoundaries guards Bug 2: a bare single-slash identifier
+// pair must NOT collapse to <path> (that would flag a false recurrence between
+// "openai/ferret" and "openai/gym"), while genuine filesystem paths — unix
+// absolute and Windows drive — must mask fully.
+func TestFingerprintPathBoundaries(t *testing.T) {
+	if Fingerprint("openai/ferret") == Fingerprint("openai/gym") {
+		t.Error("distinct repo slugs collapsed to one fingerprint (over-masking)")
+	}
+	for _, p := range []string{"/Users/x/foo.go", "C:/Users/x/foo.go", `C:\Users\x\foo.go`} {
+		if got := Fingerprint(p); got != "<path>" {
+			t.Errorf("Fingerprint(%q) = %q, want %q (under-masking)", p, got, "<path>")
+		}
 	}
 }
 
