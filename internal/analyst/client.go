@@ -29,10 +29,16 @@ const DefaultModel = "claude-sonnet-4-6"
 // hundreds; 8000 stays well under the SDK's non-streaming HTTP-timeout band.
 const maxTokens = 8000
 
+// envAPIKey is the app-scoped env var ferret reads its Anthropic credential from,
+// per the <APP>_<PROVIDER>_API_KEY standard (nug metered-per-app-api-keys). The
+// key is passed to the SDK explicitly, never via the SDK's own ANTHROPIC_API_KEY
+// default, so per-app metering isn't defeated by a stray bare key in the env.
+const envAPIKey = "FERRET_ANTHROPIC_API_KEY" //nolint:gosec // G101: env var NAME, not a credential
+
 // Config drives one adjudication call.
 type Config struct {
 	Model  string // model ID; empty → DefaultModel
-	APIKey string // explicit key; empty → ANTHROPIC_API_KEY from the environment
+	APIKey string // explicit key; empty → FERRET_ANTHROPIC_API_KEY from the environment
 	// Timeout is an operator deadline bounding the WHOLE call (across the SDK's
 	// internal retries), applied via context.WithTimeout. The SDK already caps
 	// each attempt (~10min for MaxTokens=8000) and retries ~3×, so a wedged or
@@ -47,12 +53,12 @@ type Config struct {
 // ErrNoAPIKey signals the run cannot proceed because no credential is set. The
 // caller surfaces it with the --emit-prompt escape hatch (assemble the prompt,
 // skip the network) so the pipeline is exercisable before a key is wired up.
-var ErrNoAPIKey = errors.New("analyst: no API key (set ANTHROPIC_API_KEY, or use --emit-prompt to assemble the prompt without calling the model)")
+var ErrNoAPIKey = errors.New("analyst: no API key (set FERRET_ANTHROPIC_API_KEY, or use --emit-prompt to assemble the prompt without calling the model)")
 
 // HasAPIKey reports whether a credential is available from cfg or the
 // environment — lets the command choose between a live run and --emit-prompt.
 func (c Config) HasAPIKey() bool {
-	return c.APIKey != "" || os.Getenv("ANTHROPIC_API_KEY") != ""
+	return c.APIKey != "" || os.Getenv(envAPIKey) != ""
 }
 
 func (c Config) model() string {
@@ -106,8 +112,16 @@ func complete(ctx context.Context, cfg Config, system, user string) (model, text
 		defer cancel()
 	}
 	var opts []option.RequestOption
-	if cfg.APIKey != "" {
-		opts = append(opts, option.WithAPIKey(cfg.APIKey))
+	// Resolve the key ourselves and pass it explicitly — HasAPIKey already gated,
+	// so exactly one of cfg.APIKey / env is set. Passing it via WithAPIKey (rather
+	// than letting the SDK read its own ANTHROPIC_API_KEY default) is what keeps
+	// per-app metering intact under the renamed var.
+	key := cfg.APIKey
+	if key == "" {
+		key = os.Getenv(envAPIKey)
+	}
+	if key != "" {
+		opts = append(opts, option.WithAPIKey(key))
 	}
 	if cfg.HTTPClient != nil {
 		opts = append(opts, option.WithHTTPClient(cfg.HTTPClient))

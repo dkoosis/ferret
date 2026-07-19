@@ -107,7 +107,7 @@ func TestProposeResultActionable(t *testing.T) {
 }
 
 func TestRunProposeWithoutKeyReturnsErrNoAPIKey(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("FERRET_ANTHROPIC_API_KEY", "")
 	if _, err := RunPropose(t.Context(), Config{}, "sess", "{}", "spine"); !errors.Is(err, ErrNoAPIKey) {
 		t.Errorf("RunPropose() err = %v; want ErrNoAPIKey", err)
 	}
