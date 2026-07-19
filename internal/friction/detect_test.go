@@ -10,6 +10,10 @@ func failShell(seq int, session, cmd, detail string) event.Event {
 	return event.Event{Seq: seq, Session: session, Kind: event.KindShell, Action: cmd, Detail: detail, Status: event.StatusFail}
 }
 
+func cfailShell(seq int, session, cmd, detail string) event.Event {
+	return event.Event{Seq: seq, Session: session, Kind: event.KindShell, Action: cmd, Detail: detail, Status: event.StatusCFail}
+}
+
 func TestFrictionText(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -23,9 +27,9 @@ func TestFrictionText(t *testing.T) {
 			"go_test go test ./internal/mine", true,
 		},
 		{
-			"compound-fail (cfail) is excluded — failing segment unknown",
-			event.Event{Action: "make_check", Detail: "make check", Status: event.StatusCFail},
-			"", false,
+			"compound-fail (cfail) IS friction — a failed compound Bash call surfaces only as cfail (build.go:197)",
+			event.Event{Action: "go_test", Detail: "go test ./...", Status: event.StatusCFail},
+			"go_test go test ./...", true,
 		},
 		{
 			"failed tool falls back to target",
@@ -112,6 +116,24 @@ func TestSignaturesReturnsSeededAndLearned(t *testing.T) {
 	}
 	if _, ok := got[Fingerprint("go_test go test /Users/a/mine")]; !ok {
 		t.Error("Signatures() dropped the learned fingerprint")
+	}
+}
+
+// TestCFailChainRecurs proves a failed compound Bash chain — which build.go:197
+// stamps as cfail on EVERY segment — reaches the detector and recurs. Two runs of
+// "go test ./... && go build ./..." (two cfail events each) recur across sessions.
+func TestCFailChainRecurs(t *testing.T) {
+	events := []event.Event{
+		cfailShell(1, "sA", "go_test", "go test ./..."),   // 1st sighting
+		cfailShell(2, "sA", "go_build", "go build ./..."), // distinct, 1st sighting
+		cfailShell(3, "sB", "go_test", "go test ./..."),   // recurrence → flag
+	}
+	got := Scan(nil, events)
+	if len(got) != 1 {
+		t.Fatalf("cfail chain must recur (1 match), got %d", len(got))
+	}
+	if got[0].Occurrence != 2 || got[0].Session != "sB" {
+		t.Errorf("match = %+v, want occurrence 2 in session sB", got[0])
 	}
 }
 

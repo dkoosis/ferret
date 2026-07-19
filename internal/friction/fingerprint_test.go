@@ -1,6 +1,9 @@
 package friction
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFingerprint(t *testing.T) {
 	cases := []struct {
@@ -91,9 +94,14 @@ func TestFingerprint(t *testing.T) {
 			"<path>",
 		},
 		{
-			"bare single-slash identifier pair is NOT a path",
+			"pure-alpha single-slash slug is NOT masked",
 			"openai/ferret",
 			"openai/ferret",
+		},
+		{
+			"volatile single-slash branch ref masks",
+			"git checkout -b fix/ferret-5jb",
+			"git checkout -b <path>",
 		},
 	}
 	for _, c := range cases {
@@ -117,8 +125,8 @@ func TestFingerprintStableAcrossSessions(t *testing.T) {
 	}
 }
 
-// TestFingerprintPathBoundaries guards Bug 2: a bare single-slash identifier
-// pair must NOT collapse to <path> (that would flag a false recurrence between
+// TestFingerprintPathBoundaries guards Bug 2: a pure-alpha single-slash slug must
+// NOT collapse to <path> (that would flag a false recurrence between
 // "openai/ferret" and "openai/gym"), while genuine filesystem paths — unix
 // absolute and Windows drive — must mask fully.
 func TestFingerprintPathBoundaries(t *testing.T) {
@@ -129,6 +137,22 @@ func TestFingerprintPathBoundaries(t *testing.T) {
 		if got := Fingerprint(p); got != "<path>" {
 			t.Errorf("Fingerprint(%q) = %q, want %q (under-masking)", p, got, "<path>")
 		}
+	}
+}
+
+// TestFingerprintBranchRefStable is the restored branch-name stability contract:
+// the same friction on two different branches (volatile single-slash refs) must
+// fingerprint identically, or a recurrence across branches is missed. A
+// recurrence detector favors recall, so a ref carrying a volatility marker
+// (digits/dash) masks to <path>.
+func TestFingerprintBranchRefStable(t *testing.T) {
+	a := Fingerprint("git_checkout git checkout -b fix/ferret-5jb")
+	b := Fingerprint("git_checkout git checkout -b fix/ferret-9xy")
+	if a != b {
+		t.Errorf("same friction on two branches produced different fingerprints:\n a=%q\n b=%q", a, b)
+	}
+	if !strings.Contains(a, "<path>") {
+		t.Errorf("branch ref was not masked: %q", a)
 	}
 }
 

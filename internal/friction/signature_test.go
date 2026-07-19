@@ -71,31 +71,82 @@ func TestLoadThenDetect(t *testing.T) {
 	}
 }
 
-// TestPersistLearnedAppendsDelta proves PersistLearned writes only the
-// fingerprints not already known, and that they round-trip back through Load.
-func TestPersistLearnedAppendsDelta(t *testing.T) {
+// TestPersistLearnedUnionDedup proves PersistLearned writes the deduped union of
+// on-disk and learned, counts only the newly-added fingerprints, and round-trips.
+func TestPersistLearnedUnionDedup(t *testing.T) {
 	p := filepath.Join(t.TempDir(), SigFileName)
-	known := []Signature{{Fingerprint: "already-known"}}
+	if err := os.WriteFile(p, []byte(`{"fingerprint":"already-known"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	learned := []Signature{
-		{Fingerprint: "already-known"}, // skip: already known
+		{Fingerprint: "already-known"}, // skip: already on disk
 		{Fingerprint: "new-a", Label: "a"},
 		{Fingerprint: "new-a"}, // skip: dup within learned
 		{Fingerprint: "new-b"},
 		{Fingerprint: ""}, // skip: empty
 	}
-	n, err := PersistLearned(p, known, learned)
+	n, err := PersistLearned(p, learned)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if n != 2 {
-		t.Fatalf("appended %d, want 2 (new-a, new-b)", n)
+		t.Fatalf("added %d, want 2 (new-a, new-b)", n)
 	}
 	got, err := LoadSignatures(p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0].Fingerprint != "new-a" || got[0].Label != "a" || got[1].Fingerprint != "new-b" {
-		t.Errorf("persisted set = %+v, want [new-a(a) new-b]", got)
+	if len(got) != 3 { // already-known + new-a + new-b, sorted
+		t.Fatalf("persisted %d signatures, want 3: %+v", len(got), got)
+	}
+}
+
+// TestPersistLearnedTwiceNoDuplicate is the Bug-1 corruption guard: persisting
+// the SAME learned signature twice must leave exactly ONE line, not two — the
+// whole-file rewrite + on-disk dedup makes a duplicate impossible.
+func TestPersistLearnedTwiceNoDuplicate(t *testing.T) {
+	p := filepath.Join(t.TempDir(), SigFileName)
+	learned := []Signature{{Fingerprint: "fp-x", Label: "x"}}
+
+	n1, err := PersistLearned(p, learned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n2, err := PersistLearned(p, learned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n1 != 1 || n2 != 0 {
+		t.Errorf("added counts = %d,%d want 1,0", n1, n2)
+	}
+	got, err := LoadSignatures(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Errorf("file has %d lines after two persists, want 1 (no duplicate): %+v", len(got), got)
+	}
+}
+
+// TestPersistLearnedRepairsMissingTrailingNewline is the other Bug-1 guard: a
+// pre-existing file whose last line has no trailing newline must load cleanly
+// after a persist (a blind append would have fused two JSON objects onto one
+// unparseable line).
+func TestPersistLearnedRepairsMissingTrailingNewline(t *testing.T) {
+	p := filepath.Join(t.TempDir(), SigFileName)
+	// No trailing newline on the seed line.
+	if err := os.WriteFile(p, []byte(`{"fingerprint":"seed"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PersistLearned(p, []Signature{{Fingerprint: "added"}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadSignatures(p)
+	if err != nil {
+		t.Fatalf("file did not load cleanly after persist: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("loaded %d signatures, want 2 (seed + added): %+v", len(got), got)
 	}
 }
 
@@ -117,7 +168,7 @@ func TestCrossRunRecurrence(t *testing.T) {
 	if len(matches1) != 0 {
 		t.Fatalf("run 1 must flag nothing (first sighting), got %d", len(matches1))
 	}
-	if _, err := PersistLearned(p, run1Sigs, d1.Signatures()); err != nil {
+	if _, err := PersistLearned(p, d1.Signatures()); err != nil {
 		t.Fatal(err)
 	}
 

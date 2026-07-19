@@ -135,27 +135,31 @@ func (d *Detector) ScanInto(events []event.Event) []MatchRecord {
 }
 
 // FrictionText extracts the raw string to fingerprint from an event, reporting
-// false when the event is not a friction event. A friction event is a
-// definitively FAILED action (Status fail) — the deterministic, regex-first
-// friction signal already in the event model. We deliberately do not read prompt
-// sentiment: dev jargon ("kill the process", "dead code") is style, not friction,
-// so this is a status gate, never an affect detector.
+// false when the event is not a friction event. A friction event is a FAILED
+// action — either StatusFail (a single failed action) OR StatusCFail. We
+// deliberately do not read prompt sentiment: dev jargon ("kill the process",
+// "dead code") is style, not friction, so this is a status gate, never an affect
+// detector.
 //
-// StatusCFail (a compound shell chain whose FAILING SEGMENT IS UNKNOWN) is
-// deliberately EXCLUDED. A cfail event's Action/Detail describes the whole chain,
-// so treating it as friction would record — and later flag — commands that
-// actually SUCCEEDED within the chain, a false recurrence. Scoping the friction
-// to the failing segment is impossible here (cfail means the segment is unknown
-// by definition); ingestion splits compound chains into per-segment events
-// elsewhere, so a genuinely-failing segment already surfaces as its own fail. The
-// conservative choice is to gate on fail only.
+// StatusCFail is INCLUDED, and it must be. internal/event/build.go:197 stamps
+// EVERY segment of a failed compound Bash call as cfail (pinned by
+// build_test.go:224 — "go test ./... && go build ./..." yields two events, both
+// cfail), never fail. So a failed compound shell call surfaces ONLY as cfail: if
+// we gated on fail alone, that whole class of real failures would never reach the
+// detector. Each cfail segment is fingerprinted by its own normalized command,
+// which is stable across runs — that stability is the recurrence key. The known
+// cost is that a segment which actually succeeded inside the failing chain still
+// contributes a signature; a recurrence detector favors recall over precision, so
+// we accept that over losing the failure entirely.
 //
 // The text joins the normalized Action with the most specific volatile context
 // available — the raw command segment (Detail) for a shell failure, else the
 // Target (a path/symbol) for a tool failure — so Fingerprint can mask the
 // volatile part and leave the invariant shape of the failure.
 func FrictionText(e event.Event) (string, bool) {
-	if e.Status != event.StatusFail {
+	switch e.Status {
+	case event.StatusFail, event.StatusCFail:
+	default:
 		return "", false
 	}
 	if e.Action == "" && e.Detail == "" && e.Target == "" {

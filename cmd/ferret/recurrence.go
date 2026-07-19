@@ -42,7 +42,7 @@ func cmdRecurrence() error {
 	// Persist signatures learned this run so a fingerprint first seen now is a
 	// KNOWN signature next run — this is what makes cross-run recurrence
 	// (occurrence 2 in a later process) reachable rather than lost at exit.
-	learned, err := friction.PersistLearned(sigPath, sigs, det.Signatures())
+	learned, err := friction.PersistLearned(sigPath, det.Signatures())
 	if err != nil {
 		return err
 	}

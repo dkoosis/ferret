@@ -47,11 +47,51 @@ func Fingerprint(raw string) string {
 	s = reTimestamp.ReplaceAllString(s, "<ts>")
 	s = reUUID.ReplaceAllString(s, "<uuid>")
 	s = rePath.ReplaceAllString(s, "${1}<path>")
+	s = maskRefs(s)
 	s = reHex.ReplaceAllString(s, "<hash>")
 	s = reNumber.ReplaceAllString(s, "<n>")
 	s = strings.ToLower(s)
 	s = strings.Join(strings.Fields(s), " ")
 	return s
+}
+
+// maskRefs masks a VOLATILE single-slash reference — a git branch or temp name
+// like "fix/ferret-5jb" or "tmp/build.4" — to <path>, so the same friction on two
+// branches fingerprints identically (a recurrence detector favors recall). It
+// runs AFTER rePath, so anchored and ≥2-slash paths are already <path> and every
+// remaining slash is a lone one.
+//
+// The precision knob: a single-slash a/b is masked UNLESS both segments are pure
+// ASCII letters. "openai/ferret" and "openai/gym" (pure-alpha repo slugs) stay
+// literal and so fingerprint DIFFERENTLY; "fix/ferret-5jb" (a digit/dash-bearing
+// ref) masks. This is the one rule that satisfies both required cases at once.
+// Its limit: a pure-alpha branch like "feature/main" is indistinguishable from a
+// repo slug by text alone and stays literal — an accepted precision tradeoff,
+// since the volatility markers (digits, -, _, .) catch the branch names that
+// actually vary run-to-run.
+func maskRefs(s string) string {
+	return reRef.ReplaceAllStringFunc(s, func(tok string) string {
+		left, right, ok := strings.Cut(tok, "/")
+		if ok && isPlainAlpha(left) && isPlainAlpha(right) {
+			return tok // repo slug / English word-pair: keep, so they stay distinct
+		}
+		return "<path>"
+	})
+}
+
+// isPlainAlpha reports whether s is one or more ASCII letters only — no digit,
+// dot, dash, or underscore. Such a segment carries no run-to-run volatility.
+func isPlainAlpha(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := range len(s) {
+		c := s[i]
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') {
+			return false
+		}
+	}
+	return true
 }
 
 var (
@@ -87,6 +127,12 @@ var (
 	// Windows drive paths (C:/Users/x) match whole, drive letter included, so they
 	// mask fully rather than leaving a "c:" residue.
 	rePath = regexp.MustCompile(`(^|[\s"'=,(])((?:[A-Za-z]:[\\/]|~/|\.{1,2}/|/)[\w.\-]+(?:[\\/][\w.\-]+)*|[\w.\-]+(?:/[\w.\-]+){2,})`)
+
+	// reRef matches a lone single-slash word/word token (branch, temp name, or
+	// repo slug). maskRefs decides mask-vs-keep per token; the word boundaries
+	// keep it from firing inside a larger token. Runs after rePath, so multi-slash
+	// paths are already masked and only single-slash refs remain.
+	reRef = regexp.MustCompile(`\b[\w.\-]+/[\w.\-]+\b`)
 
 	// reNumber masks any remaining standalone number (line numbers, ports,
 	// byte counts, exit codes, durations). Run last so it does not eat digits

@@ -2,12 +2,14 @@ package friction
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -60,62 +62,135 @@ func LoadSignatures(path string) ([]Signature, error) {
 	}
 }
 
-// AppendSignatures appends signatures to the JSONL file, creating the file and
-// its parent dir on first use (a corpus can be scanned before any signature has
-// been recorded). Append-only mirrors the fix ledger: the file grows, never
-// rewrites, so a hand-curated label on an existing line is never clobbered. The
-// write is flushed and fsync'd so a recorded signature survives a crash. An empty
-// slice is a no-op.
-func AppendSignatures(path string, sigs []Signature) error {
-	if len(sigs) == 0 {
-		return nil
+// PersistLearned makes the learned corpus durable so a fingerprint first seen
+// this run is a KNOWN signature next run — the durability that makes cross-run
+// recurrence (occurrence 2 in a later process) reachable.
+//
+// It rewrites the WHOLE file atomically (temp + fsync + rename, mirroring
+// cmd/gen-corpus writeAtomic) from the deduped union of what is ON DISK NOW and
+// the learned set. Deduping against the freshly-reloaded file — not the caller's
+// stale in-memory view — is what prevents duplicate lines when two runs persist:
+// each run re-reads, unions, and replaces, so the file can never accumulate a
+// repeated fingerprint (worst case under concurrency is a lost update, never
+// corruption). Rewriting whole also repairs a pre-existing file that lacked a
+// trailing newline, which a blind append would have fused into an unparseable
+// line. Existing labels win over learned ones (curated text is never clobbered).
+// Returns the count of fingerprints newly added to the file.
+func PersistLearned(path string, learned []Signature) (int, error) {
+	onDisk, err := LoadSignatures(path)
+	if err != nil {
+		return 0, err
 	}
+	labels, added := mergeSignatures(onDisk, learned)
+	if added == 0 && len(onDisk) == len(labels) {
+		// No new fingerprints and the on-disk set is already dedup-clean
+		// (parsed fine above): leave the file untouched.
+		return 0, nil
+	}
+	if err := writeSignaturesAtomic(path, sortedSignatures(labels)); err != nil {
+		return 0, err
+	}
+	return added, nil
+}
+
+// mergeSignatures folds learned into the on-disk set, keyed by fingerprint, and
+// returns the fp→label map plus the count of fingerprints not previously on disk.
+// Empty fingerprints are dropped; an existing (curated) label is never clobbered
+// by a learned one, though a missing label is filled.
+func mergeSignatures(onDisk, learned []Signature) (labels map[string]string, added int) {
+	labels = make(map[string]string, len(onDisk)+len(learned))
+	for _, s := range onDisk {
+		if s.Fingerprint != "" {
+			labels[s.Fingerprint] = s.Label
+		}
+	}
+	for _, s := range learned {
+		if s.Fingerprint == "" {
+			continue
+		}
+		existing, ok := labels[s.Fingerprint]
+		if !ok {
+			labels[s.Fingerprint] = s.Label
+			added++
+			continue
+		}
+		if existing == "" && s.Label != "" {
+			labels[s.Fingerprint] = s.Label // fill a missing label, don't clobber
+		}
+	}
+	return labels, added
+}
+
+// sortedSignatures renders the fp→label map as a slice sorted by fingerprint for
+// a deterministic on-disk file order.
+func sortedSignatures(labels map[string]string) []Signature {
+	fps := make([]string, 0, len(labels))
+	for fp := range labels {
+		fps = append(fps, fp)
+	}
+	sort.Strings(fps)
+	sigs := make([]Signature, len(fps))
+	for i, fp := range fps {
+		sigs[i] = Signature{Fingerprint: fp, Label: labels[fp]}
+	}
+	return sigs
+}
+
+// writeSignaturesAtomic writes the full signature set to path atomically: a temp
+// file in the same dir, fsync'd and renamed into place, then the parent dir
+// fsync'd so the rename survives a crash. Mirrors cmd/gen-corpus writeAtomic
+// (that helper lives in package main and is not importable). A same-dir temp
+// keeps the rename atomic (no cross-device copy).
+func writeSignaturesAtomic(path string, sigs []Signature) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	var buf bytes.Buffer
+	for _, s := range sigs {
+		b, err := json.Marshal(s)
+		if err != nil {
+			return err
+		}
+		buf.Write(b)
+		buf.WriteByte('\n')
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return err
 	}
-	w := bufio.NewWriter(f)
-	for _, s := range sigs {
-		b, mErr := json.Marshal(s)
-		if mErr != nil {
-			return errors.Join(mErr, f.Close())
+	tmp := f.Name()
+	renamed := false
+	defer func() {
+		if !renamed {
+			_ = f.Close()
+			_ = os.Remove(tmp)
 		}
-		if _, wErr := w.Write(append(b, '\n')); wErr != nil {
-			return errors.Join(wErr, f.Close())
-		}
-	}
-	if err := w.Flush(); err != nil {
-		return errors.Join(err, f.Close())
+	}()
+	if _, err := f.Write(buf.Bytes()); err != nil {
+		return err
 	}
 	if err := f.Sync(); err != nil {
-		return errors.Join(err, f.Close())
+		return err
 	}
-	return f.Close()
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	renamed = true
+	return syncDir(filepath.Dir(path))
 }
 
-// PersistLearned appends the fingerprints in learned that are not already in
-// known to the signatures file, so a signature first seen this run is a KNOWN
-// signature next run — the durability that makes cross-run recurrence (occurrence
-// 2 in a later process) reachable. It is the delta of learned − known by
-// fingerprint; labels ride along. Returns the count appended.
-func PersistLearned(path string, known, learned []Signature) (int, error) {
-	seen := make(map[string]bool, len(known))
-	for _, s := range known {
-		seen[s.Fingerprint] = true
+// syncDir fsyncs a directory so a just-published rename within it is durable.
+// A package var so a test can observe/override it. Mirrors event/codec.go.
+var syncDir = func(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
 	}
-	var newSigs []Signature
-	for _, s := range learned {
-		if s.Fingerprint == "" || seen[s.Fingerprint] {
-			continue
-		}
-		seen[s.Fingerprint] = true // dedupe within learned too
-		newSigs = append(newSigs, s)
+	if err := d.Sync(); err != nil {
+		return errors.Join(err, d.Close())
 	}
-	if err := AppendSignatures(path, newSigs); err != nil {
-		return 0, err
-	}
-	return len(newSigs), nil
+	return d.Close()
 }
