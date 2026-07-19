@@ -91,3 +91,41 @@ func TestIsVCS(t *testing.T) {
 		}
 	}
 }
+
+// TestShellClass pins the exported string-facing shell classifier — the single
+// source internal/reach projects its reach channels onto. It must agree with the
+// coarse event lens's KindShell branch (same table + IsVCS gate) so the two never
+// drift.
+func TestShellClass(t *testing.T) {
+	cases := []struct {
+		cmd     string
+		wantCls string
+		wantOK  bool
+	}{
+		{"rg", ClassSearch, true},
+		{"grep", ClassSearch, true},
+		{"ag", ClassSearch, true}, // migrated in from reach's old grepCmds
+		{"cat", ClassRead, true},
+		{"wc", ClassRead, true},
+		{"git_log", ClassVCS, true},    // family gate: read-only member
+		{"git_commit", ClassVCS, true}, // family gate: mutating member too
+		{"gh_pr", ClassVCS, true},
+		{"make", "build", true},
+		{"trixi_search", "", false}, // not in lens's general taxonomy
+		{"", "", false},
+	}
+	for _, c := range cases {
+		gotCls, gotOK := ShellClass(c.cmd)
+		if gotCls != c.wantCls || gotOK != c.wantOK {
+			t.Errorf("ShellClass(%q) = (%q,%v), want (%q,%v)", c.cmd, gotCls, gotOK, c.wantCls, c.wantOK)
+		}
+		// Agreement with the coarse event lens: when ShellClass classifies, the
+		// coarse lens must emit the same token for the equivalent shell event.
+		if c.wantOK {
+			tok, ok := (coarse{}).Token(&event.Event{Kind: event.KindShell, Action: c.cmd})
+			if !ok || tok != c.wantCls {
+				t.Errorf("coarse lens drift for %q: token=(%q,%v), ShellClass=%q", c.cmd, tok, ok, c.wantCls)
+			}
+		}
+	}
+}

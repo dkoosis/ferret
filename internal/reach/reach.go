@@ -21,6 +21,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/dkoosis/ferret/internal/lens"
 	"github.com/dkoosis/ferret/internal/shellnorm"
 	"github.com/dkoosis/ferret/internal/transcript"
 	"github.com/dkoosis/ferret/internal/turn"
@@ -152,11 +153,32 @@ var bdReadSub = map[string]bool{
 	"bd_comments": true, "bd_dep": true, "bd_epic": true, "bd_memories": true,
 }
 
-// grepCmds are filesystem/code-search reaches (normalized base command).
-var grepCmds = map[string]bool{
-	"rg": true, "grep": true, "egrep": true, "fgrep": true, "ripgrep": true,
-	"fd": true, "find": true, "cat": true, "ls": true, "bat": true, "eza": true,
-	"head": true, "tail": true, "ag": true, "ferret": true, "tree": true, "dtree": true,
+// reachLocalGrep are retrieval CLIs this project's transcripts carry that lens's
+// general shell taxonomy doesn't model (project-own tools). The generic
+// search/read commands (rg, grep, cat, ls, …) deliberately live ONLY in
+// lens.coarseShell now — reach projects them via lens.ShellClass so the two never
+// drift. Keep this to genuine gaps in lens, not a parallel copy of its taxonomy.
+var reachLocalGrep = map[string]bool{
+	"ferret": true,
+}
+
+// reachExcludeShell narrows lens's coarse read/search class where reach-rate
+// semantics intentionally differ from lens. wc/jq are coarse "read" for lens
+// analysis, but they are local text-munging, not retrieval reaches — counting
+// them as reaches would flip a compound turn like `wc -l notes.txt && trixi
+// search "x"` from ReachStore to ReachGrep, moving the store-first numerator.
+// The command lists stay single-sourced in lens; this is only the projection.
+var reachExcludeShell = map[string]bool{
+	"wc": true, "jq": true,
+}
+
+// gitForensic is the read-only git subset reach counts as external forensics (a
+// reach). It NARROWS lens.IsVCS's VCS family: git writes (commit/push) and
+// status/diff are not reaches and fall through to none. lens.IsVCS's own doc
+// mandates this consumer-side narrowing — there is no parallel FAMILY list here,
+// only this read subset.
+var gitForensic = map[string]bool{
+	"git_log": true, "git_grep": true, "git_show": true, "git_blame": true,
 }
 
 // classifyReachBlock maps one assistant tool_use block to a Reach. Non-retrieval
@@ -202,19 +224,40 @@ func classifyBash(blk *transcript.Block) (Reach, string) {
 }
 
 // classifyShellCmd maps a shellnorm-normalized command (base or base_subcommand,
-// e.g. "trixi_search", "bd_show", "git_log") to a Reach.
+// e.g. "trixi_search", "bd_show", "git_log") to a Reach. reach-specific channels
+// (store/beads + this project's own retrieval CLIs) are matched first; the generic
+// read/search/vcs families then PROJECT off lens.ShellClass — lens is the single
+// source, so a search tool added there buckets here without a second edit.
 func classifyShellCmd(cmd string) (Reach, string) {
 	switch {
 	case cmd == "trixi_search" || cmd == "trixi_get":
 		return ReachStore, cmd
 	case bdReadSub[cmd]:
 		return ReachBeads, cmd
-	case grepCmds[cmd] || cmd == "snipe" || strings.HasPrefix(cmd, "snipe_"):
+	case cmd == "snipe" || strings.HasPrefix(cmd, "snipe_") || reachLocalGrep[cmd]:
 		return ReachGrep, cmd
-	case strings.HasPrefix(cmd, "gh_"):
-		return ReachGh, cmd
-	case cmd == "git_log" || cmd == "git_grep" || cmd == "git_show" || cmd == "git_blame":
-		return ReachGh, cmd
+	}
+	// Project reach's channels onto lens's single-source coarse class.
+	cls, ok := lens.ShellClass(cmd)
+	if !ok {
+		return ReachNone, ""
+	}
+	switch cls {
+	case lens.ClassRead, lens.ClassSearch:
+		if reachExcludeShell[cmd] {
+			// reach-rate semantics intentionally differ from lens coarse class
+			// here — wc/jq are local text-munging, not retrieval reaches.
+			return ReachNone, ""
+		}
+		return ReachGrep, cmd
+	case lens.ClassVCS:
+		// lens.IsVCS is the FAMILY gate (true for git_commit/push/status too).
+		// reach counts only read-forensics as a reach: gh subcommands + the git
+		// read subcommands. Bare "gh", git writes, and status fall through to none.
+		if strings.HasPrefix(cmd, "gh_") || gitForensic[cmd] {
+			return ReachGh, cmd
+		}
+		return ReachNone, ""
 	default:
 		return ReachNone, ""
 	}
