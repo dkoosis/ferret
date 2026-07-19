@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dkoosis/ferret/internal/lens"
 	"github.com/dkoosis/ferret/internal/transcript"
 )
 
@@ -76,13 +77,40 @@ func TestClassifyShellCmd(t *testing.T) {
 		{"gh_api", ReachGh},
 		{"git_log", ReachGh},
 		{"git_grep", ReachGh},
-		{"git_commit", ReachNone},
+		{"git_commit", ReachNone}, // VCS family but a write, not a reach
+		{"git_status", ReachNone}, // VCS family, read-only but not forensics
+		{"gh", ReachNone},         // VCS family; only gh_ subcommands are a reach
 		{"make", ReachNone},
 		{"go_build", ReachNone},
+		// search/read commands now single-source from lens.coarseShell — these
+		// exercise the projection, not a reach-local list.
+		{"cat", ReachGrep},
+		{"ls", ReachGrep},
+		{"fgrep", ReachGrep},
+		{"ag", ReachGrep},
+		{"ferret", ReachGrep}, // project-own CLI, reach-local gap
+		{"unknown_cmd", ReachNone},
 	}
 	for _, tt := range tests {
 		if got, _ := classifyShellCmd(tt.cmd); got != tt.want {
 			t.Errorf("classifyShellCmd(%q) = %q, want %q", tt.cmd, got, tt.want)
+		}
+	}
+}
+
+// TestClassifyShellCmd_TracksLens is the drift guard: every generic
+// search/read/vcs command lens classifies must map to the corresponding reach
+// channel through the projection — no parallel hand-maintained list. If a future
+// search tool is added to lens.coarseShell, reach buckets it as ReachGrep for
+// free; this test fails if the projection is bypassed by a re-listed copy.
+func TestClassifyShellCmd_TracksLens(t *testing.T) {
+	for _, cmd := range []string{"rg", "grep", "fd", "find", "egrep", "cat", "bat", "head", "tail", "ls", "eza", "wc", "jq"} {
+		cls, ok := lens.ShellClass(cmd)
+		if !ok || (cls != lens.ClassRead && cls != lens.ClassSearch) {
+			t.Fatalf("test premise broken: lens.ShellClass(%q) = (%q,%v)", cmd, cls, ok)
+		}
+		if got, _ := classifyShellCmd(cmd); got != ReachGrep {
+			t.Errorf("classifyShellCmd(%q) = %q, want ReachGrep (lens class %q)", cmd, got, cls)
 		}
 	}
 }
