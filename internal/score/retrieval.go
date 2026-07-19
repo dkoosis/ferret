@@ -50,6 +50,12 @@ type Episode struct {
 	Queries int    `json:"queries"`          // get_nug calls in the chain — Q2 reformulation depth
 	Results int    `json:"results"`          // size of the served (last query's) result set
 
+	// ResultIDs is the served (last query's) candidate set, ranked, projected for
+	// the JSON emit — the ranked ids the Results count alone drops. It is the
+	// gold-marking target for downstream recall-eval fixtures (trixi-bot gg-zhj):
+	// pure passthrough of event.Results, no new tracing.
+	ResultIDs []ResultHit `json:"resultIds,omitempty"`
+
 	SelfRequery bool `json:"selfRequery,omitempty"` // ≥2 get_nug calls before a consumed result — Q1 / HopInterp tell
 	RetryMotif  bool `json:"retryMotif,omitempty"`  // a following action carried event.Retry (bd_show!→bd_show / retry-after-failure) — a HopInterp tell, kept SEPARATE from SelfRequery so RU's FirstTry leg stays the get_nug-chain-only signal
 	EmptyResult bool `json:"emptyResult,omitempty"` // served set was empty — R3a / HopRetrieval tell
@@ -66,6 +72,30 @@ type Episode struct {
 	CoverageGap bool `json:"coverageGap,omitempty"` // C1: empty search → set_nug (the nug didn't exist)
 	GoodAbandon bool `json:"goodAbandon,omitempty"` // C2: confirmed absence was the useful answer
 	Answerable  bool `json:"answerable"`            // in RU's denominator (not a coverage gap / good abandonment)
+}
+
+// ResultHit is one candidate nug in an episode's served result set, projected for
+// the JSON emit: the nug id, its per-query match score, and its 1-based rank
+// (slice position in the served set). Surfaces the ranked candidate list that the
+// Results count alone drops.
+type ResultHit struct {
+	ID    string  `json:"id"`
+	Score float64 `json:"score,omitempty"`
+	Rank  int     `json:"rank"`
+}
+
+// projectResults ranks the served candidate set for the JSON emit: 1-based rank is
+// the slice position, id + score read straight from event.Results. Returns nil for
+// an empty set so the field stays omitempty.
+func projectResults(hits []event.NugHit) []ResultHit {
+	if len(hits) == 0 {
+		return nil
+	}
+	out := make([]ResultHit, len(hits))
+	for i, h := range hits {
+		out[i] = ResultHit{ID: h.ID, Score: h.Score, Rank: i + 1}
+	}
+	return out
 }
 
 // FirstTry reports the query-was-right-first-time leg of RU (HopInterp clean).
@@ -289,6 +319,7 @@ func (b *epBuild) finalize() Episode {
 		Query:          b.query,
 		Queries:        b.queries,
 		Results:        len(b.results),
+		ResultIDs:      projectResults(b.results),
 		SelfRequery:    b.selfRequery,
 		RetryMotif:     b.retryMotif,
 		EmptyResult:    empty,

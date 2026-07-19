@@ -1,6 +1,7 @@
 package score
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/dkoosis/ferret/internal/dialogue"
@@ -214,6 +215,59 @@ func assertEpisode(t *testing.T, got, want Episode) {
 	}
 }
 
+// TestBuildEpisodesResultIDs pins the resultIds projection (ferret-kuv.14): the
+// served candidate set is emitted ranked (1-based position) with id + score, a
+// self-requery reflects the LAST query's set, and an empty set stays nil so the
+// field is omitted. This is the gold-marking surface for recall-eval fixtures.
+func TestBuildEpisodesResultIDs(t *testing.T) {
+	scored := func(seq int, query string, hits ...event.NugHit) event.Event {
+		return event.Event{Seq: seq, Session: "s", Project: "p", Kind: event.KindTool, Action: toolGetNug, Query: query, Results: hits}
+	}
+
+	t.Run("ranked with scores", func(t *testing.T) {
+		evs := []event.Event{
+			scored(1, "q", event.NugHit{ID: "aaa", Score: 0.9}, event.NugHit{ID: "bbb", Score: 0.7}),
+		}
+		eps := BuildEpisodes(evs)
+		if len(eps) != 1 {
+			t.Fatalf("want 1 episode, got %d", len(eps))
+		}
+		want := []ResultHit{{ID: "aaa", Score: 0.9, Rank: 1}, {ID: "bbb", Score: 0.7, Rank: 2}}
+		if got := eps[0].ResultIDs; len(got) != len(want) {
+			t.Fatalf("ResultIDs = %+v, want %+v", got, want)
+		}
+		for i, w := range want {
+			if eps[0].ResultIDs[i] != w {
+				t.Errorf("ResultIDs[%d] = %+v, want %+v", i, eps[0].ResultIDs[i], w)
+			}
+		}
+	})
+
+	t.Run("self-requery reflects last query's set", func(t *testing.T) {
+		evs := []event.Event{
+			getNug(1, "q1", "aaa", "bbb"),
+			getNug(2, "q2", "ccc"), // reformulation folds; served set advances
+		}
+		eps := BuildEpisodes(evs)
+		if len(eps) != 1 || !eps[0].SelfRequery {
+			t.Fatalf("want 1 self-requery episode, got %+v", eps)
+		}
+		if got := eps[0].ResultIDs; len(got) != 1 || got[0].ID != "ccc" || got[0].Rank != 1 {
+			t.Errorf("ResultIDs = %+v, want [{ccc _ 1}]", got)
+		}
+	})
+
+	t.Run("empty set → nil", func(t *testing.T) {
+		eps := BuildEpisodes([]event.Event{getNug(1, "q")})
+		if len(eps) != 1 {
+			t.Fatalf("want 1 episode, got %d", len(eps))
+		}
+		if eps[0].ResultIDs != nil {
+			t.Errorf("ResultIDs = %+v, want nil", eps[0].ResultIDs)
+		}
+	})
+}
+
 // TestBuildEpisodesBoundaries covers multi-episode segmentation: a by-id fetch
 // and pre-search calls are not episodes, and a new query after consumption opens
 // a fresh episode rather than folding.
@@ -257,7 +311,7 @@ func TestBuildEpisodesDeterministic(t *testing.T) {
 			t.Fatalf("run %d: len %d != %d", i, len(got), len(first))
 		}
 		for j := range got {
-			if got[j] != first[j] {
+			if !reflect.DeepEqual(got[j], first[j]) {
 				t.Fatalf("run %d episode %d not stable:\n got %+v\nwant %+v", i, j, got[j], first[j])
 			}
 		}
