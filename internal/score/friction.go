@@ -2,10 +2,10 @@ package score
 
 import (
 	"regexp"
-	"strings"
 
 	"github.com/dkoosis/ferret/internal/dialogue"
 	"github.com/dkoosis/ferret/internal/event"
+	"github.com/dkoosis/ferret/internal/turn"
 )
 
 // Deterministic architectural-friction telemetry (ferret-bbp.10).
@@ -202,11 +202,10 @@ func countIgnoredConstraints(moves []dialogue.Move) int {
 
 // isBareAffirmation reports whether a whole turn is a closed-set acknowledgement
 // (a forced "yes" / "ok" / "go ahead"), reusing the same affirmations set and
-// normalization the boundary guard folds on (segment.go) so confirmation-waste
-// can never drift from what counts as a bare ack.
+// normalization the boundary guard folds on (turn.ClassifyBoundary) so
+// confirmation-waste can never drift from what counts as a bare ack.
 func isBareAffirmation(prompt string) bool {
-	low := strings.ToLower(strings.TrimSpace(prompt))
-	return affirmations[strings.TrimRight(low, " .!,?…")]
+	return turn.IsAffirmation(prompt)
 }
 
 func matchesAny(s string, res []*regexp.Regexp) bool {
