@@ -21,9 +21,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/dkoosis/ferret/internal/score"
 	"github.com/dkoosis/ferret/internal/shellnorm"
 	"github.com/dkoosis/ferret/internal/transcript"
+	"github.com/dkoosis/ferret/internal/turn"
 )
 
 // Class is the opportunity flavor: a recall question (dk asking what's already
@@ -314,11 +314,11 @@ func (s *scanner) feedUser(raw transcript.Raw) {
 	if s.watching {
 		s.captureResult(raw.Message.Content) // tool_result carrier may hold the retrieved nug
 	}
-	prompt := score.PromptText(raw.Message.Content)
+	prompt := turn.PromptText(raw.Message.Content)
 	if prompt == "" {
 		return // tool_result carrier: not a boundary
 	}
-	if skip, _, _ := score.ClassifyBoundary(prompt); skip {
+	if skip, _, _ := turn.ClassifyBoundary(prompt); skip {
 		return // carrier/control/affirmation: continues the arc, opens nothing
 	}
 	// A genuine user turn ends the arc: grade a watched store reach, close any

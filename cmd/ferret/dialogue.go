@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/dkoosis/ferret/internal/dialogue"
-	"github.com/dkoosis/ferret/internal/score"
 	"github.com/dkoosis/ferret/internal/transcript"
+	"github.com/dkoosis/ferret/internal/turn"
 )
 
 // dialogueCap bounds the per-turn label rendered/stored.
@@ -70,10 +70,10 @@ func runDialogue(w io.Writer, root, session, format string) error {
 	var res dlgResult
 	res.Session, res.Project, res.Agent = src.Session, src.Project, src.Agent
 	var moves []dialogue.Move
-	turn := 0
+	turnIdx := 0
 	priorAgentQuestion := false
 	if err := transcript.ReadLines(src.Path, func(line []byte) error {
-		tagUserTurn(line, &res, &moves, &turn, &priorAgentQuestion)
+		tagUserTurn(line, &res, &moves, &turnIdx, &priorAgentQuestion)
 		return nil
 	}); err != nil {
 		return err
@@ -98,7 +98,7 @@ func runDialogue(w io.Writer, root, session, format string) error {
 // (ISO 24617-2, Bunt 2012) — and consumed by the next genuine user turn, so a real
 // answer-after-agent-question tags MoveClarify. This is the caller that structurally
 // sees assistant turns beside user turns (the events path has no assistant NL).
-func tagUserTurn(line []byte, res *dlgResult, moves *[]dialogue.Move, turn *int, priorAgentQuestion *bool) {
+func tagUserTurn(line []byte, res *dlgResult, moves *[]dialogue.Move, turnIdx *int, priorAgentQuestion *bool) {
 	var raw transcript.Raw
 	if err := json.Unmarshal(line, &raw); err != nil {
 		res.DecodeErrs++
@@ -110,7 +110,7 @@ func tagUserTurn(line []byte, res *dlgResult, moves *[]dialogue.Move, turn *int,
 	// An assistant text turn (re)sets the pending-question flag; tool-only assistant
 	// turns carry no text, so they leave a pending question standing for the answer.
 	if raw.Type == "assistant" {
-		if text := score.PromptText(raw.Message.Content); text != "" {
+		if text := turn.PromptText(raw.Message.Content); text != "" {
 			*priorAgentQuestion = dialogue.AssistantAskedQuestion(text)
 		}
 		return
@@ -118,11 +118,11 @@ func tagUserTurn(line []byte, res *dlgResult, moves *[]dialogue.Move, turn *int,
 	if raw.Type != "user" {
 		return
 	}
-	prompt := score.PromptText(raw.Message.Content)
+	prompt := turn.PromptText(raw.Message.Content)
 	if prompt == "" {
 		return
 	}
-	if skip, kind, _ := score.ClassifyBoundary(prompt); skip {
+	if skip, kind, _ := turn.ClassifyBoundary(prompt); skip {
 		// A skipped genuine user turn (affirmation/control) still answers or
 		// supersedes a pending question — consume the flag so it can't leak to the
 		// next request. A carrier is a system envelope, not user intent: leave the
@@ -135,7 +135,7 @@ func tagUserTurn(line []byte, res *dlgResult, moves *[]dialogue.Move, turn *int,
 	move, cue := dialogue.TagMoveContext(prompt, dialogue.MoveContext{PriorAgentQuestion: *priorAgentQuestion})
 	*priorAgentQuestion = false // consumed: the human has now answered (or superseded) the question
 	res.Signals = append(res.Signals, dialogue.Signal{
-		Turn: *turn, Move: move, Cue: cue,
+		Turn: *turnIdx, Move: move, Cue: cue,
 		Text: truncateRunes(prompt, dialogueCap),
 	})
 	*moves = append(*moves, move)
@@ -149,7 +149,7 @@ func tagUserTurn(line []byte, res *dlgResult, moves *[]dialogue.Move, turn *int,
 	default:
 		// clarify/meta/constrain/new-task + catalog moves carry no r/a tally
 	}
-	*turn++
+	*turnIdx++
 }
 
 // writeDialogueText emits the human-readable rendering.
