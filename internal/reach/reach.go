@@ -162,6 +162,16 @@ var reachLocalGrep = map[string]bool{
 	"ferret": true,
 }
 
+// reachExcludeShell narrows lens's coarse read/search class where reach-rate
+// semantics intentionally differ from lens. wc/jq are coarse "read" for lens
+// analysis, but they are local text-munging, not retrieval reaches — counting
+// them as reaches would flip a compound turn like `wc -l notes.txt && trixi
+// search "x"` from ReachStore to ReachGrep, moving the store-first numerator.
+// The command lists stay single-sourced in lens; this is only the projection.
+var reachExcludeShell = map[string]bool{
+	"wc": true, "jq": true,
+}
+
 // gitForensic is the read-only git subset reach counts as external forensics (a
 // reach). It NARROWS lens.IsVCS's VCS family: git writes (commit/push) and
 // status/diff are not reaches and fall through to none. lens.IsVCS's own doc
@@ -234,6 +244,11 @@ func classifyShellCmd(cmd string) (Reach, string) {
 	}
 	switch cls {
 	case lens.ClassRead, lens.ClassSearch:
+		if reachExcludeShell[cmd] {
+			// reach-rate semantics intentionally differ from lens coarse class
+			// here — wc/jq are local text-munging, not retrieval reaches.
+			return ReachNone, ""
+		}
 		return ReachGrep, cmd
 	case lens.ClassVCS:
 		// lens.IsVCS is the FAMILY gate (true for git_commit/push/status too).

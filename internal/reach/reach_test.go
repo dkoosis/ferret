@@ -89,6 +89,10 @@ func TestClassifyShellCmd(t *testing.T) {
 		{"fgrep", ReachGrep},
 		{"ag", ReachGrep},
 		{"ferret", ReachGrep}, // project-own CLI, reach-local gap
+		// wc/jq are lens coarse "read" but local text-munging, not retrieval
+		// reaches — reach-rate semantics intentionally differ from lens here.
+		{"wc", ReachNone},
+		{"jq", ReachNone},
 		{"unknown_cmd", ReachNone},
 	}
 	for _, tt := range tests {
@@ -103,8 +107,10 @@ func TestClassifyShellCmd(t *testing.T) {
 // channel through the projection — no parallel hand-maintained list. If a future
 // search tool is added to lens.coarseShell, reach buckets it as ReachGrep for
 // free; this test fails if the projection is bypassed by a re-listed copy.
+// wc/jq are excluded — see reachExcludeShell (reach-rate semantics differ from
+// lens there); TestClassifyShellCmd pins them to ReachNone.
 func TestClassifyShellCmd_TracksLens(t *testing.T) {
-	for _, cmd := range []string{"rg", "grep", "fd", "find", "egrep", "cat", "bat", "head", "tail", "ls", "eza", "wc", "jq"} {
+	for _, cmd := range []string{"rg", "grep", "fd", "find", "egrep", "cat", "bat", "head", "tail", "ls", "eza"} {
 		cls, ok := lens.ShellClass(cmd)
 		if !ok || (cls != lens.ClassRead && cls != lens.ClassSearch) {
 			t.Fatalf("test premise broken: lens.ShellClass(%q) = (%q,%v)", cmd, cls, ok)
@@ -133,6 +139,11 @@ func TestClassifyReachBlock(t *testing.T) {
 		{"bash-trixi-search", bash(`trixi search "loto lock"`), ReachStore},
 		{"bash-rg", bash(`rg -n foo internal/`), ReachGrep},
 		{"bash-compound-first-retrieval", bash(`cd /tmp && bd show x-1`), ReachBeads},
+		// Regression (ferret-9q8): wc/jq are not retrieval reaches, so the FIRST
+		// retrieval segment is trixi search — the turn stays ReachStore, not
+		// ReachGrep. This is the store-first numerator the bead's AC preserves.
+		{"bash-wc-then-store", bash(`wc -l notes.txt && trixi search "x"`), ReachStore},
+		{"bash-jq-then-store", bash(`jq . s.json && trixi get ferret-p2a`), ReachStore},
 		{"bash-build-not-reach", bash(`make check`), ReachNone},
 		{"text-block-not-reach", newBlock("text", "", ``), ReachNone},
 	}
