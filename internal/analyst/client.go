@@ -98,11 +98,14 @@ var ErrNoAPIKey = errors.New("analyst: no API key (store one in the keychain und
 
 // HasAPIKey reports whether a credential is available from cfg, the keychain,
 // or the environment — lets the command choose between a live run and
-// --emit-prompt. An unreadable (locked/denied) keychain reports false here;
-// the actual call surfaces the read error with its cause.
-func (c Config) HasAPIKey() bool {
+// --emit-prompt. An unreadable (locked/denied) keychain is a hard error here
+// too, so the precheck never masks the cause behind a generic ErrNoAPIKey.
+func (c Config) HasAPIKey() (bool, error) {
 	k, err := resolveKey(c)
-	return err == nil && k != ""
+	if err != nil {
+		return false, err
+	}
+	return k != "", nil
 }
 
 func (c Config) model() string {

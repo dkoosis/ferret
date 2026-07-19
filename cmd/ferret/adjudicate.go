@@ -73,7 +73,11 @@ func cmdAdjudicate() error {
 	}
 
 	cfg := analyst.Config{Model: cmd.Model, Timeout: cmd.Timeout}
-	if !cfg.HasAPIKey() {
+	ok, err := cfg.HasAPIKey()
+	if err != nil {
+		return err
+	}
+	if !ok {
 		return analyst.ErrNoAPIKey
 	}
 	ctx, stop := analystContext()
@@ -145,7 +149,11 @@ func runPropose(root string) error {
 	}
 
 	cfg := analyst.Config{Model: cmd.Model, Timeout: cmd.Timeout}
-	if !cfg.HasAPIKey() {
+	ok, err := cfg.HasAPIKey()
+	if err != nil {
+		return err
+	}
+	if !ok {
 		return analyst.ErrNoAPIKey
 	}
 	ctx, stop := analystContext()

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/dkoosis/keyring"
 )
 
 func TestBuildPromptEmbedsSpineAndSchema(t *testing.T) {
@@ -129,15 +131,25 @@ func TestConfigModelDefault(t *testing.T) {
 
 func TestConfigHasAPIKey(t *testing.T) {
 	t.Setenv("FERRET_ANTHROPIC_API_KEY", "")
-	if (Config{}).HasAPIKey() {
-		t.Error("HasAPIKey() = true with no key set")
+	if ok, err := (Config{}).HasAPIKey(); ok || err != nil {
+		t.Errorf("HasAPIKey() = (%v, %v) with no key set", ok, err)
 	}
-	if !(Config{APIKey: "sk-x"}).HasAPIKey() {
-		t.Error("HasAPIKey() = false with explicit key")
+	if ok, err := (Config{APIKey: "sk-x"}).HasAPIKey(); !ok || err != nil {
+		t.Errorf("HasAPIKey() = (%v, %v) with explicit key", ok, err)
 	}
 	t.Setenv("FERRET_ANTHROPIC_API_KEY", "sk-env")
-	if !(Config{}).HasAPIKey() {
-		t.Error("HasAPIKey() = false with env key")
+	if ok, err := (Config{}).HasAPIKey(); !ok || err != nil {
+		t.Errorf("HasAPIKey() = (%v, %v) with env key", ok, err)
+	}
+}
+
+func TestConfigHasAPIKey_UnreadableKeychainSurfaces(t *testing.T) {
+	restore := readKeychain
+	defer func() { readKeychain = restore }()
+	readKeychain = func() (string, error) { return "", keyring.ErrUnreadable }
+	t.Setenv("FERRET_ANTHROPIC_API_KEY", "sk-env")
+	if _, err := (Config{}).HasAPIKey(); !errors.Is(err, keyring.ErrUnreadable) {
+		t.Errorf("locked keychain must surface through HasAPIKey, got %v", err)
 	}
 }
 
