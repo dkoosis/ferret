@@ -110,7 +110,11 @@ func TestClassifyShellCmd(t *testing.T) {
 // wc/jq are excluded — see reachExcludeShell (reach-rate semantics differ from
 // lens there); TestClassifyShellCmd pins them to ReachNone.
 func TestClassifyShellCmd_TracksLens(t *testing.T) {
-	for _, cmd := range []string{"rg", "grep", "fd", "find", "egrep", "cat", "bat", "head", "tail", "ls", "eza"} {
+	covered := 0
+	for _, cmd := range lens.ShellReadSearch() {
+		if reachExcludeShell[cmd] {
+			continue // wc/jq: read-class for lens, ReachNone for reach (pinned separately)
+		}
 		cls, ok := lens.ShellClass(cmd)
 		if !ok || (cls != lens.ClassRead && cls != lens.ClassSearch) {
 			t.Fatalf("test premise broken: lens.ShellClass(%q) = (%q,%v)", cmd, cls, ok)
@@ -118,6 +122,10 @@ func TestClassifyShellCmd_TracksLens(t *testing.T) {
 		if got, _ := classifyShellCmd(cmd); got != ReachGrep {
 			t.Errorf("classifyShellCmd(%q) = %q, want ReachGrep (lens class %q)", cmd, got, cls)
 		}
+		covered++
+	}
+	if covered == 0 {
+		t.Fatal("lens.ShellReadSearch returned no non-excluded commands — projection guard is vacuous")
 	}
 }
 

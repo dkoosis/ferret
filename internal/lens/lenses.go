@@ -49,6 +49,20 @@ var coarseShell = map[string]string{
 	"ls": clsRead, "eza": clsRead, "tree": clsRead, "dtree": clsRead, "wc": clsRead, "jq": clsRead,
 }
 
+// ShellReadSearch returns every normalized shell command coarseShell classifies
+// as generic read or search — the set reach projects onto ReachGrep. Exported so
+// the reach drift guard iterates the real table instead of a hand-copied subset:
+// a search/read tool added to coarseShell is then covered for free.
+func ShellReadSearch() []string {
+	var cmds []string
+	for cmd, cls := range coarseShell {
+		if cls == ClassRead || cls == ClassSearch {
+			cmds = append(cmds, cmd)
+		}
+	}
+	return cmds
+}
+
 func (coarse) Token(e *event.Event) (string, bool) {
 	switch e.Kind {
 	case event.KindPrompt:

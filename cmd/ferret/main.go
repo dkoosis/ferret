@@ -307,6 +307,11 @@ var CLI struct {
 		Limit    int    `help:"Max opportunity rows (0 = unlimited)." default:"0" name:"limit"`
 		MaxBytes int    `help:"Max output bytes, text only (0 = unlimited)." default:"0" name:"max-bytes"`
 	} `cmd:"" help:"Reach-rate: at recall opportunities in a date window, did Claude reach the trixi store FIRST (store) vs grep/gh/none. Keystone metric for tx-qw86; transcript-only (Phase 1)."`
+
+	Recurrence struct {
+		CommonFlags
+		Signatures string `help:"Known-signatures JSONL file (default: <data>/friction_signatures.jsonl; absent = learn signatures from the corpus)." name:"signatures"`
+	} `cmd:"" help:"Friction-recurrence detector: flag the 2nd+ occurrence of a known friction signature (normalized command/error fingerprint). Emits match records for the /wrap trap-graduation prompt."`
 }
 
 func main() {
@@ -357,7 +362,8 @@ func main() {
 				"  ferret adjudicate  --session PREFIX [--model ID] [--emit-prompt] [--propose] [--top 10] [--format text|json]\n"+
 				"  ferret fixes add  --motif \"Edit!,Read\" --fix \"hookify read-before-edit\" [--note ...]\n"+
 				"  ferret fixes list [--format json]\n"+
-				"  ferret reach    [--since Y-M-D] [--until Y-M-D] [--project SUBSTR] [--format text|json|md]   (recall-opportunity reach-rate)\n\n"+
+				"  ferret reach    [--since Y-M-D] [--until Y-M-D] [--project SUBSTR] [--format text|json|md]   (recall-opportunity reach-rate)\n"+
+				"  ferret recurrence [--signatures FILE] [--format text|json]   (flag 2nd+ occurrence of a known friction signature)\n\n"+
 				"common: --data DIR (default ~/.ferret)  --format text|json  --limit N  --max-bytes N\n"+
 				"lenses: coarse | tool | target | exact",
 		),
@@ -413,6 +419,8 @@ func main() {
 		err = cmdFixesList()
 	case "reach":
 		err = cmdReach()
+	case "recurrence":
+		err = cmdRecurrence()
 	default:
 		k.Fatalf("unknown command %q", k.Command())
 	}
