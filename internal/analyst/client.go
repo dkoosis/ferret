@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -45,35 +44,41 @@ const (
 	keychainAccount = "anthropic"
 )
 
-// readKeychain is a test seam: tests replace it so they never touch the
-// developer's real keychain (a stored ferret/anthropic item would otherwise
-// leak into every "no key set" test). Production never reassigns it.
-var readKeychain = func() (string, error) {
-	store, err := keyring.New(keychainService)
-	if err != nil {
-		return "", err
-	}
-	return store.Get(keychainAccount)
+// newStore is a test seam: tests point it at a Store backed by a stub
+// `security` binary (keyring.WithSecurityBin) so resolution-order tests
+// exercise the real library without touching the developer's keychain.
+// Production never reassigns it. Package-wide isolation from a real
+// ferret/anthropic item is the keyring.DisableEnv kill-switch, set in
+// TestMain.
+var newStore = func() (*keyring.Store, error) {
+	return keyring.New(keychainService)
 }
 
 // resolveKey resolves the credential: explicit Config.APIKey, then the
-// keychain, then the environment. A keychain that CONFIRMS absence (or has no
-// backend, i.e. Linux) falls through to env; a keychain that could not be
-// read (locked, denied, timed out) is a hard error — never silently
-// downgraded to the environment. An empty result with nil error means "no
-// key anywhere" and is the caller's ErrNoAPIKey case.
+// keychain-first GetOrEnv chain. The library owns the fallback semantics: a
+// keychain that CONFIRMS absence (ErrNotFound) or has no backend
+// (ErrUnsupported, i.e. Linux or KEYRING_DISABLE) falls through to envAPIKey;
+// a keychain that could not be read (locked, denied, timed out) is a hard
+// error — never silently downgraded to the environment. An empty result with
+// nil error means "no key anywhere" and is the caller's ErrNoAPIKey case.
 func resolveKey(cfg Config) (string, error) {
 	if cfg.APIKey != "" {
 		return cfg.APIKey, nil
 	}
-	k, err := readKeychain()
+	store, err := newStore()
+	if err != nil {
+		return "", fmt.Errorf("analyst: opening keychain store: %w", err)
+	}
+	k, err := store.GetOrEnv(keychainAccount, envAPIKey)
 	switch {
-	case err == nil && k != "":
+	case err == nil:
 		return k, nil
-	case err != nil && !errors.Is(err, keyring.ErrNotFound) && !errors.Is(err, keyring.ErrUnsupported):
+	case errors.Is(err, keyring.ErrNotFound), errors.Is(err, keyring.ErrUnsupported):
+		// Absent from keychain AND env — the caller's ErrNoAPIKey case.
+		return "", nil
+	default:
 		return "", fmt.Errorf("analyst: reading API key from keychain: %w", err)
 	}
-	return os.Getenv(envAPIKey), nil
 }
 
 // Config drives one adjudication call.

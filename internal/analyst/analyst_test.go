@@ -4,8 +4,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-
-	"github.com/dkoosis/keyring"
 )
 
 func TestBuildPromptEmbedsSpineAndSchema(t *testing.T) {
@@ -140,16 +138,6 @@ func TestConfigHasAPIKey(t *testing.T) {
 	t.Setenv("FERRET_ANTHROPIC_API_KEY", "sk-env")
 	if ok, err := (Config{}).HasAPIKey(); !ok || err != nil {
 		t.Errorf("HasAPIKey() = (%v, %v) with env key", ok, err)
-	}
-}
-
-func TestConfigHasAPIKey_UnreadableKeychainSurfaces(t *testing.T) {
-	restore := readKeychain
-	defer func() { readKeychain = restore }()
-	readKeychain = func() (string, error) { return "", keyring.ErrUnreadable }
-	t.Setenv("FERRET_ANTHROPIC_API_KEY", "sk-env")
-	if _, err := (Config{}).HasAPIKey(); !errors.Is(err, keyring.ErrUnreadable) {
-		t.Errorf("locked keychain must surface through HasAPIKey, got %v", err)
 	}
 }
 
