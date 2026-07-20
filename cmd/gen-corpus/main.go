@@ -182,7 +182,7 @@ func writeAtomic(path string, data []byte) error {
 	if e := f.Close(); e != nil {
 		return e
 	}
-	if e := os.Rename(tmp, path); e != nil {
+	if e := renameFile(tmp, path); e != nil {
 		return e
 	}
 	renamed = true
@@ -193,6 +193,12 @@ func writeAtomic(path string, data []byte) error {
 	// it (ferret-xz8).
 	return syncDir(filepath.Dir(path))
 }
+
+// renameFile publishes the temp file over the destination. A package var so a
+// test can inject a failure and exercise the torn-file guard deterministically —
+// chmod-based failure injection is a no-op under root (CI), leaving the guard
+// unexercised (ferret-e3q).
+var renameFile = os.Rename
 
 // syncDir fsyncs a directory so a just-published rename within it is durable.
 // A package var so a test can observe that writeAtomic invokes it after rename.
