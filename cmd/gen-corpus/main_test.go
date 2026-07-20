@@ -1,11 +1,14 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+var errInjectedRename = errors.New("injected rename failure")
 
 // TestFlushRollsBackOnSubagentFailure forces the subagent write to fail and
 // asserts that no orphaned session .jsonl is left in projDir. The session file
@@ -136,10 +139,14 @@ func TestFlush_LeavesNoTmpArtifact_When_WriteSucceeds(t *testing.T) {
 
 // TestWriteAtomic_PreservesExistingFile_When_RenameFails asserts the core
 // atomicity invariant: writeAtomic must never replace the destination with a
-// torn/partial file. We force the publish step to fail (read-only parent dir
-// blocks the rename) and assert the pre-existing destination still holds its
-// ORIGINAL, complete content — not a truncated or empty file — and that no
-// stray *.tmp sibling is left behind.
+// torn/partial file. We inject a rename failure (via the renameFile seam) and
+// assert the pre-existing destination still holds its ORIGINAL, complete content
+// — not a truncated or empty file — and that no stray *.tmp sibling is left.
+//
+// The failure is injected, not filesystem-permission-based: a chmod(0o500) guard
+// is a no-op under root (CI runs as root), so rename succeeds and the torn-file
+// guard goes unexercised (ferret-e3q). The seam makes the failure path fire
+// regardless of process privilege.
 //
 // A bare os.WriteFile truncates-then-writes in place, so a failure after the
 // truncate leaves a torn file; a tmp+Sync+Rename writes to a sibling and only
@@ -155,23 +162,20 @@ func TestWriteAtomic_PreservesExistingFile_When_RenameFails(t *testing.T) {
 		t.Fatalf("seed original: %v", err)
 	}
 
-	// Make the parent dir read-only so the rename (publish) step fails, while
-	// the tmp file (written to the same dir) also can't be created — both ways,
-	// the destination must be left untouched.
-	if err := os.Chmod(dir, 0o500); err != nil {
-		t.Fatalf("chmod ro: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	// Inject a failing rename so the publish step fails deterministically,
+	// independent of process privilege.
+	orig := renameFile
+	renameFile = func(string, string) error { return errInjectedRename }
+	t.Cleanup(func() { renameFile = orig })
 
 	err := writeAtomic(dest, []byte("torn"))
 	if err == nil {
-		t.Fatal("writeAtomic: expected error with read-only parent dir, got nil")
+		t.Fatal("writeAtomic: expected error from injected rename failure, got nil")
+	}
+	if !errors.Is(err, errInjectedRename) {
+		t.Fatalf("writeAtomic: want injected rename error, got %v", err)
 	}
 
-	// Restore write so we can inspect.
-	if err := os.Chmod(dir, 0o700); err != nil {
-		t.Fatalf("chmod restore: %v", err)
-	}
 	got, err := os.ReadFile(dest)
 	if err != nil {
 		t.Fatalf("read dest: %v", err)
