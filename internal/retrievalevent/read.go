@@ -10,12 +10,6 @@ import (
 	"os"
 )
 
-// probe is the cheap first-pass decode: only the field ReadEvents must
-// validate before trusting the rest of the row.
-type probe struct {
-	SchemaVersion int `json:"schema_version"`
-}
-
 // errSchemaMismatch is the static sentinel a row's schema_version mismatch
 // wraps (contract Trap 1): a shape change that isn't version-bumped must
 // break the join loudly, not compute silently-wrong numbers.
@@ -59,19 +53,17 @@ func ReadEvents(path string) ([]Event, error) {
 
 // decodeLine decodes one JSONL line into an Event, asserting schema_version
 // before trusting the rest of the row (contract Trap 1). Split out of
-// ReadEvents to keep the streaming loop's cognitive complexity low.
+// ReadEvents to keep the streaming loop's cognitive complexity low. Event
+// carries schema_version itself, so one unmarshal both validates the version
+// and populates the row.
 func decodeLine(path string, lineNo int, line []byte) (Event, error) {
-	var p probe
-	if err := json.Unmarshal(line, &p); err != nil {
-		return Event{}, fmt.Errorf("retrievalevent: %s:%d: decode: %w", path, lineNo, err)
-	}
-	if p.SchemaVersion != SchemaVersion {
-		return Event{}, fmt.Errorf("%w: %s:%d: got %d, reader expects %d (shape may have changed)",
-			errSchemaMismatch, path, lineNo, p.SchemaVersion, SchemaVersion)
-	}
 	var e Event
 	if err := json.Unmarshal(line, &e); err != nil {
 		return Event{}, fmt.Errorf("retrievalevent: %s:%d: decode: %w", path, lineNo, err)
+	}
+	if e.SchemaVersion != SchemaVersion {
+		return Event{}, fmt.Errorf("%w: %s:%d: got %d, reader expects %d (shape may have changed)",
+			errSchemaMismatch, path, lineNo, e.SchemaVersion, SchemaVersion)
 	}
 	return e, nil
 }
