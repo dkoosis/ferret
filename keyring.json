@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "service": "ferret",
+  "accounts": [
+    {
+      "account": "anthropic",
+      "env": "FERRET_ANTHROPIC_API_KEY",
+      "required": true,
+      "description": "Anthropic API key for ferret's analyst",
+      "obtain_url": "https://platform.claude.com/settings/workspaces"
+    }
+  ]
+}
