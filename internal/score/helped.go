@@ -57,16 +57,23 @@ const (
 
 // JudgeFingerprint is the structured provenance record every helped verdict
 // carries (D4): which adjudicator, which scheme, a hash of the rules that
-// produced it, and — reserved for the staged-LLM path on the conflict bucket,
-// NOT built in v1 — which model, if any, was consulted. Defined here (not in
-// internal/analyst) so Hop1 can reuse the same shape without a package cycle
-// (analyst already imports score); Hop1's own fingerprint is a sibling bead,
-// not built by this one.
+// produced it, and which model, if any, was consulted (nil = purely
+// deterministic verdict). Defined here (not in internal/analyst) so Hop1 can
+// reuse the same shape without a package cycle (analyst already imports
+// score); Hop1 stamps its own fingerprint (ferret-bbp.15).
 type JudgeFingerprint struct {
-	Adjudicator string  `json:"adjudicator"`
-	Scheme      string  `json:"scheme"`
-	RulesHash   string  `json:"rules_hash"`
-	LLM         *string `json:"llm"`
+	Adjudicator string          `json:"adjudicator"`
+	Scheme      string          `json:"scheme"`
+	RulesHash   string          `json:"rules_hash"`
+	LLM         *LLMFingerprint `json:"llm"`
+}
+
+// LLMFingerprint identifies the paid judge behind a fingerprint's LLM leg:
+// the model consulted and a hash of the exact system prompt it ran under, so
+// a replay can tell two prompt revisions apart even on the same model.
+type LLMFingerprint struct {
+	Model      string `json:"model"`
+	PromptHash string `json:"prompt_hash"`
 }
 
 // helpedFingerprint is the one JudgeFingerprint every helped verdict stamps
