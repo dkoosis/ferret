@@ -138,6 +138,11 @@ type Signal struct {
 	Move Move   `json:"move"`
 	Cue  string `json:"cue,omitempty"` // the matched cue phrase, "" for neutral
 	Text string `json:"text"`          // compact label of the turn (truncated by caller)
+	// Cause is the agent-side initiative-calibration tag when this turn's reaction
+	// reveals one (ferret-bbp.11) — WHY the agent provoked the human's reaction.
+	// "" when no initiative-calibration signal; CauseCue is the phrase that matched.
+	Cause    AgentCause `json:"cause,omitempty"`
+	CauseCue string     `json:"causeCue,omitempty"`
 }
 
 // IsRepairMove reports whether a move counts as a repair for Outcome purposes —

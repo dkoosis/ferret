@@ -134,9 +134,12 @@ func tagUserTurn(line []byte, res *dlgResult, moves *[]dialogue.Move, turnIdx *i
 	}
 	move, cue := dialogue.TagMoveContext(prompt, dialogue.MoveContext{PriorAgentQuestion: *priorAgentQuestion})
 	*priorAgentQuestion = false // consumed: the human has now answered (or superseded) the question
+	cause, causeCue, _ := dialogue.TagAgentCause(prompt)
 	res.Signals = append(res.Signals, dialogue.Signal{
 		Turn: *turnIdx, Move: move, Cue: cue,
-		Text: truncateRunes(prompt, dialogueCap),
+		Text:     truncateRunes(prompt, dialogueCap),
+		Cause:    cause,
+		CauseCue: causeCue,
 	})
 	*moves = append(*moves, move)
 	switch {
@@ -163,12 +166,17 @@ func writeDialogueText(w io.Writer, res dlgResult) error {
 	fmt.Fprintln(bw,
 		"≡ v1 user-turn moves (regex-first): repair = human-side friction marker, "+
 			"accept = outcome success leg. Outcome = PARADISE task-success rollup.")
-	for _, s := range res.Signals {
+	for i := range res.Signals {
+		s := &res.Signals[i]
 		cue := ""
 		if s.Cue != "" {
 			cue = fmt.Sprintf(" cue=%q", s.Cue)
 		}
-		fmt.Fprintf(bw, "[turn %d] %-8s%s  %s\n", s.Turn, s.Move, cue, s.Text)
+		cause := ""
+		if s.Cause != "" {
+			cause = fmt.Sprintf(" ⚑agent:%s", s.Cause)
+		}
+		fmt.Fprintf(bw, "[turn %d] %-8s%s%s  %s\n", s.Turn, s.Move, cue, cause, s.Text)
 	}
 	fmt.Fprintf(bw, "--- turns=%d repairs=%d accepts=%d outcome=%s",
 		len(res.Signals), res.Repairs, res.Accepts, res.Outcome)
