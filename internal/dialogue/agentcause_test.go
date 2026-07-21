@@ -91,3 +91,94 @@ func TestTagAgentCauseOverInitiative(t *testing.T) {
 		t.Errorf("continuation demand → %q, want premature-stop", cause)
 	}
 }
+
+// TestTagAgentCauseUnderInitiative: after the agent EXPLAINED where execution was
+// wanted (no tool call, no permission ask), a push-to-execute reaction tags
+// under-initiative; the same reaction after the agent ACTED does not (it reads as a
+// next step, not an under-action). Keyed on the human's words + the agent-turn context.
+func TestTagAgentCauseUnderInitiative(t *testing.T) {
+	proseOnly := AgentContext{AgentActed: false, AgentAskedPermission: false}
+	fires := []string{
+		"just do it",
+		"stop explaining and just make the change",
+		"i told you to implement it",
+		"actually do it",
+		"less talk — just fix it",
+		"just do the refactor",
+	}
+	for _, s := range fires {
+		if cause, cue, ok := TagAgentCauseContext(s, proseOnly); !ok || cause != CauseUnderInitiative {
+			t.Errorf("%q (prose-only) → (%q,%q,%v), want under-initiative", s, cause, cue, ok)
+		}
+	}
+
+	// Same reactions, but the agent already acted: no under-action → no cause.
+	acted := AgentContext{AgentActed: true}
+	for _, s := range []string{"just do it", "actually do it", "just do the refactor"} {
+		if cause, _, ok := TagAgentCauseContext(s, acted); ok && cause == CauseUnderInitiative {
+			t.Errorf("%q (agent acted) → %q, want no under-initiative", s, cause)
+		}
+	}
+
+	// Benign task turns carry no push-to-execute cue → no cause even prose-only.
+	for _, s := range []string{"add a test for the edge case", "what do you think?", "looks good, ship it"} {
+		if cause, _, ok := TagAgentCauseContext(s, proseOnly); ok {
+			t.Errorf("%q → %q, want no cause (false-fire)", s, cause)
+		}
+	}
+}
+
+// TestTagAgentCauseMiscalibratedInterruption: after the agent asked PERMISSION on
+// already-clear intent, a push-to-execute reaction tags miscalibrated-interruption —
+// the permission ask routes it here rather than to under-initiative.
+func TestTagAgentCauseMiscalibratedInterruption(t *testing.T) {
+	asked := AgentContext{AgentAskedPermission: true}
+	fires := []string{
+		"just do it",
+		"stop asking and do it",
+		"quit asking — get it done",
+		"yes, do it",
+		"go ahead and make it",
+	}
+	for _, s := range fires {
+		if cause, cue, ok := TagAgentCauseContext(s, asked); !ok || cause != CauseMiscalibratedInterruption {
+			t.Errorf("%q (agent asked permission) → (%q,%q,%v), want miscalibrated-interruption", s, cause, cue, ok)
+		}
+	}
+
+	// The permission ask wins even if the agent also acted (it asked when it shouldn't
+	// have): still miscalibrated-interruption, not under-initiative.
+	if cause, _, _ := TagAgentCauseContext("just do it", AgentContext{AgentActed: true, AgentAskedPermission: true}); cause != CauseMiscalibratedInterruption {
+		t.Errorf("push after permission-ask → %q, want miscalibrated-interruption", cause)
+	}
+
+	// A context-free cause still wins over the agent-context pass.
+	if cause, _, _ := TagAgentCauseContext("undo that, I didn't ask you to", asked); cause != CauseOverInitiative {
+		t.Errorf("reversal → %q, want over-initiative (context-free wins)", cause)
+	}
+}
+
+// TestAssistantAskedPermission: a trailing permission question is a permission ask; a
+// clarifying question or a declarative sentence is not.
+func TestAssistantAskedPermission(t *testing.T) {
+	yes := []string{
+		"I can refactor the parser. Should I go ahead?",
+		"Want me to delete the shim?",
+		"That's a big change — do you want me to proceed?",
+	}
+	for _, s := range yes {
+		if !AssistantAskedPermission(s) {
+			t.Errorf("%q → false, want permission ask", s)
+		}
+	}
+	no := []string{
+		"Which file did you mean?",         // clarify, not permission
+		"I refactored the parser.",         // declarative, no question
+		"Should I use tabs? Anyway, done.", // permission phrase but not the trailing sentence
+	}
+	for _, s := range no {
+		if AssistantAskedPermission(s) {
+			t.Errorf("%q → true, want not a permission ask", s)
+		}
+	}
+}

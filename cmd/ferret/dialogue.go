@@ -71,9 +71,9 @@ func runDialogue(w io.Writer, root, session, format string) error {
 	res.Session, res.Project, res.Agent = src.Session, src.Project, src.Agent
 	var moves []dialogue.Move
 	turnIdx := 0
-	priorAgentQuestion := false
+	var st agentTurnState
 	if err := transcript.ReadLines(src.Path, func(line []byte) error {
-		tagUserTurn(line, &res, &moves, &turnIdx, &priorAgentQuestion)
+		tagUserTurn(line, &res, &moves, &turnIdx, &st)
 		return nil
 	}); err != nil {
 		return err
@@ -88,17 +88,47 @@ func runDialogue(w io.Writer, root, session, format string) error {
 	return writeDialogueText(w, res)
 }
 
+// agentTurnState accumulates the agent-turn context between two genuine human turns:
+// the pending-question flag MoveClarify consumes, plus whether the agent ACTED (made a
+// tool call) or ended on a PERMISSION question — the two facts the under-action
+// AgentCause detectors need (ferret-bbp.11). A human turn consume()s the window.
+type agentTurnState struct {
+	priorAgentQuestion   bool
+	agentActed           bool
+	agentAskedPermission bool
+}
+
+// consume clears the accumulated agent-turn context once a human turn has read it —
+// the pending question is answered/superseded and the action window closes.
+func (s *agentTurnState) consume() {
+	s.priorAgentQuestion = false
+	s.agentActed = false
+	s.agentAskedPermission = false
+}
+
+// hasToolUse reports whether an assistant turn made a tool call — the "agent acted"
+// signal the under-action detectors gate on. A tool-only assistant turn carries no
+// PromptText, so scanning the blocks is the only tell that it executed.
+func hasToolUse(blocks transcript.Blocks) bool {
+	for i := range blocks {
+		if blocks[i].Type == "tool_use" {
+			return true
+		}
+	}
+	return false
+}
+
 // tagUserTurn decodes one transcript line and, if it carries a genuine user
 // prompt that isn't a fold-in (carrier/control/affirmation), tags it with a Move
 // and appends the signal. Mirrors the segmenter's tolerance: a bad line bumps the
 // decode counter and is dropped.
 //
-// priorAgentQuestion carries the one cross-turn signal MoveClarify needs: it is set
-// on an assistant turn that ended in a question — the CheckQuestion dependence-link
-// (ISO 24617-2, Bunt 2012) — and consumed by the next genuine user turn, so a real
-// answer-after-agent-question tags MoveClarify. This is the caller that structurally
-// sees assistant turns beside user turns (the events path has no assistant NL).
-func tagUserTurn(line []byte, res *dlgResult, moves *[]dialogue.Move, turnIdx *int, priorAgentQuestion *bool) {
+// st carries the cross-turn signals set on the assistant turns beside the user turns:
+// the CheckQuestion dependence-link MoveClarify needs (ISO 24617-2, Bunt 2012) plus the
+// agent-acted / asked-permission facts the AgentCause under-action detectors need. Each
+// is consumed by the next genuine user turn. This is the caller that structurally sees
+// assistant turns beside user turns (the events path has no assistant NL).
+func tagUserTurn(line []byte, res *dlgResult, moves *[]dialogue.Move, turnIdx *int, st *agentTurnState) {
 	var raw transcript.Raw
 	if err := json.Unmarshal(line, &raw); err != nil {
 		res.DecodeErrs++
@@ -107,11 +137,16 @@ func tagUserTurn(line []byte, res *dlgResult, moves *[]dialogue.Move, turnIdx *i
 	if raw.IsMeta || raw.Message == nil {
 		return
 	}
-	// An assistant text turn (re)sets the pending-question flag; tool-only assistant
-	// turns carry no text, so they leave a pending question standing for the answer.
+	// An assistant tool call marks the agent as having acted; an assistant text turn
+	// (re)sets the pending-question + asked-permission flags. Tool-only turns carry no
+	// text, so they leave a pending question standing for the answer.
 	if raw.Type == "assistant" {
+		if hasToolUse(raw.Message.Content) {
+			st.agentActed = true
+		}
 		if text := turn.PromptText(raw.Message.Content); text != "" {
-			*priorAgentQuestion = dialogue.AssistantAskedQuestion(text)
+			st.priorAgentQuestion = dialogue.AssistantAskedQuestion(text)
+			st.agentAskedPermission = dialogue.AssistantAskedPermission(text)
 		}
 		return
 	}
@@ -123,18 +158,21 @@ func tagUserTurn(line []byte, res *dlgResult, moves *[]dialogue.Move, turnIdx *i
 		return
 	}
 	if skip, kind, _ := turn.ClassifyBoundary(prompt); skip {
-		// A skipped genuine user turn (affirmation/control) still answers or
-		// supersedes a pending question — consume the flag so it can't leak to the
-		// next request. A carrier is a system envelope, not user intent: leave the
-		// pending question standing for the real answer.
+		// A skipped genuine user turn (affirmation/control) still answers or supersedes
+		// the pending agent context — consume it so it can't leak to the next request. A
+		// carrier is a system envelope, not user intent: leave the window standing for
+		// the real answer.
 		if kind != "carrier" {
-			*priorAgentQuestion = false
+			st.consume()
 		}
 		return
 	}
-	move, cue := dialogue.TagMoveContext(prompt, dialogue.MoveContext{PriorAgentQuestion: *priorAgentQuestion})
-	*priorAgentQuestion = false // consumed: the human has now answered (or superseded) the question
-	cause, causeCue, _ := dialogue.TagAgentCause(prompt)
+	move, cue := dialogue.TagMoveContext(prompt, dialogue.MoveContext{PriorAgentQuestion: st.priorAgentQuestion})
+	cause, causeCue, _ := dialogue.TagAgentCauseContext(prompt, dialogue.AgentContext{
+		AgentActed:           st.agentActed,
+		AgentAskedPermission: st.agentAskedPermission,
+	})
+	st.consume() // the human turn has read the window: clear it for the next
 	res.Signals = append(res.Signals, dialogue.Signal{
 		Turn: *turnIdx, Move: move, Cue: cue,
 		Text:     truncateRunes(prompt, dialogueCap),

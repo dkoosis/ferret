@@ -130,6 +130,24 @@ func AssistantAskedQuestion(text string) bool {
 	return questionTailRe.MatchString(strings.TrimSpace(text))
 }
 
+// permissionPhraseRe matches an assistant turn asking PERMISSION to act ("should I…",
+// "want me to…", "shall I…") — as opposed to clarifying WHAT was meant. Paired with a
+// trailing "?" it distinguishes a needless interruption (→ miscalibrated-interruption,
+// ferret-bbp.11) from a genuine clarify. Borrowed method: Horvitz cost-of-interruption
+// (CHI 1999) — confirming an action whose expected value already clears the bar;
+// Amershi et al. G8/G9/G10 (CHI 2019).
+var permissionPhraseRe = regexp.MustCompile(`(?i)\b(should i|shall (i|we)|want me to|(do|would) you (want|like) me to|ok(ay)? (to|if i)|can i|may i|let me know (if|whether))\b`)
+
+// AssistantAskedPermission reports whether an assistant turn ENDED in a permission-
+// seeking question — a trailing question (AssistantAskedQuestion) whose phrasing asks
+// to DO something. The tell that routes a human's push-to-execute reaction to
+// miscalibrated-interruption (a needless ask) rather than under-initiative (a bare
+// explanation). See permissionPhraseRe for the citation.
+func AssistantAskedPermission(text string) bool {
+	t := strings.TrimSpace(text)
+	return AssistantAskedQuestion(t) && permissionPhraseRe.MatchString(t)
+}
+
 // Signal is one tagged user turn: where it sat, what it did, and the cue that
 // fired (kept for traceability — every label points at the substring that
 // earned it, so a human validator can audit the matcher cheaply).

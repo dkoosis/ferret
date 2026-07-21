@@ -13,12 +13,13 @@ import "regexp"
 // interaction (Horvitz, CHI 1999), types & levels of automation (Parasuraman,
 // Sheridan & Wickens, IEEE SMC-A 2000), appropriate reliance (Lee & See, Human
 // Factors 2004), and the human-AI interaction guidelines (Amershi et al., CHI
-// 2019). The full taxonomy is defined here as data; detectors land as slices, each
-// keyed on the human's own words (the bbp thesis). Shipped: premature-stop (a
-// continuation demand) and over-initiative (a reversal of an unrequested action).
-// Pending — need agent-turn context threaded from the transcript walk: under-
-// initiative (prose-only where execution was wanted) and miscalibrated-interruption
-// (a permission question on a reversible action whose intent was clear).
+// 2019). The full taxonomy is defined here as data; every detector is keyed on the
+// human's own words (the bbp thesis). Two are context-free — premature-stop (a
+// continuation demand) and over-initiative (a reversal of an unrequested action),
+// read from the reaction alone (TagAgentCause). Two need the AGENT-turn shape threaded
+// from the walk — under-initiative (the agent explained where execution was wanted) and
+// miscalibrated-interruption (the agent asked permission on already-clear intent) —
+// both gated on the agent under-acting plus a push-to-execute reaction (TagAgentCauseContext).
 type AgentCause string
 
 const (
@@ -28,13 +29,15 @@ const (
 	// human's reversal words (overInitiativeCues); agent-turn confirmation + the
 	// no-pushback case are the deferred LLM leg (ferret-bbp.18).
 	CauseOverInitiative AgentCause = "over-initiative"
-	// CauseUnderInitiative — the agent explained where execution was wanted (prose,
-	// no tool call, then the human re-issues). Parasuraman under-automation; Lee &
-	// See / Bo under-reliance. (detector: pending)
+	// CauseUnderInitiative — the agent explained where execution was wanted (prose, no
+	// tool call, then the human re-issues). Parasuraman under-automation; Lee & See / Bo
+	// under-reliance. Detected from a push-to-execute reaction (pushToExecuteCues) when
+	// the agent neither acted nor asked (AgentContext); TagAgentCauseContext.
 	CauseUnderInitiative AgentCause = "under-initiative"
 	// CauseMiscalibratedInterruption — the agent asked permission for a low-risk,
 	// reversible action whose intent was already clear. Horvitz cost-of-interruption;
-	// Amershi G8/G9/G10. (detector: pending)
+	// Amershi G8/G9/G10. Detected from a push-to-execute reaction when the agent ended on
+	// a permission question (AgentContext.AgentAskedPermission); TagAgentCauseContext.
 	CauseMiscalibratedInterruption AgentCause = "miscalibrated-interruption"
 	// CausePrematureStop — the agent handed back before the task was complete and the
 	// human had to demand continuation. Long-Horizon-Terminal-Bench; SHIELDA
@@ -96,13 +99,44 @@ var overInitiativeCues = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\bwhy did you (chang|edit|modif|touch|delet|rewrit|refactor|overwrit|remov|updat|creat)\w*\b`),
 }
 
-// TagAgentCause reads a user turn for an agent-side initiative-calibration cause.
-// Detects CausePrematureStop (a continuation demand) and CauseOverInitiative (a
-// reversal of an unrequested action) from the human's words; under-initiative and
-// miscalibrated-interruption return ("", "", false) until their agent-turn detectors
-// land. Premature-stop is checked first so behavior is preserved; the cue sets are
-// disjoint in practice (a continuation demand never reads as a reversal). ok=false
-// means no initiative-calibration signal on this turn.
+// AgentContext carries the AGENT-turn shape the two under-action causes need: what
+// the assistant turn(s) between the previous human turn and this one looked like.
+// under-initiative and miscalibrated-interruption both key on the agent UNDER-acting
+// (it explained, or asked, instead of doing); the human's words alone can't carry the
+// "did it act / did it ask permission" facts, so the walk threads them here. Mirrors
+// MoveContext (the Move-side per-turn context); kept separate so the two concerns —
+// the human's move and the agent's initiative — don't entangle.
+type AgentContext struct {
+	// AgentActed is true if an assistant turn since the previous human turn made a tool
+	// call — the agent EXECUTED. Gates OUT under-initiative (a pure explanation).
+	AgentActed bool
+	// AgentAskedPermission is true if the last assistant text since the previous human
+	// turn ended in a permission-seeking question ("should I…", "want me to…"). Routes a
+	// push-to-execute reaction to miscalibrated-interruption rather than under-initiative.
+	AgentAskedPermission bool
+}
+
+// pushToExecuteCues match a human turn that pushes the agent to ACT after it under-
+// acted — the shared reaction tell for the two under-action causes, read from the
+// human's own words (the bbp thesis). The AgentContext routes WHICH cause; this cue
+// establishes the human wanted execution, not more talk. Bare acknowledgements ("go
+// ahead", "yes", "proceed") fold upstream as affirmations (turn.ClassifyBoundary), so
+// these deliberately target the non-bare, impatient forms that survive to this point.
+var pushToExecuteCues = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\bjust (do|make|run|write|fix|build|add|change|finish|implement) (it|that|them|the \w+)\b`),
+	regexp.MustCompile(`(?i)\b(do it now|get it done|just do it|go ahead and (do|make|run|fix|change|implement)|go for it)\b`),
+	regexp.MustCompile(`(?i)\b(stop (explaining|asking|talking)|less talk|enough (talk|explaining|questions)|quit asking)\b`),
+	regexp.MustCompile(`(?i)\bi (said|asked you to|told you to|already (said|asked you to)) (do|make|run|write|fix|build|add|change|implement)\b`),
+	regexp.MustCompile(`(?i)\b(actually|then|so) (do|make|run|write|fix|build) it\b`),
+	regexp.MustCompile(`(?i)\byes,? (do it|make the change|go ahead and \w+)\b`),
+}
+
+// TagAgentCause reads a user turn for the two CONTEXT-FREE initiative-calibration
+// causes — CausePrematureStop (a continuation demand) and CauseOverInitiative (a
+// reversal of an unrequested action) — from the human's words alone. Premature-stop is
+// checked first so behavior is preserved; the cue sets are disjoint in practice (a
+// continuation demand never reads as a reversal). The two agent-turn-context causes are
+// TagAgentCauseContext's job. ok=false means no context-free signal on this turn.
 func TagAgentCause(turn string) (cause AgentCause, cue string, ok bool) {
 	if c, matched := firstMatch(turn, continuationCues); matched {
 		return CausePrematureStop, c, true
@@ -114,4 +148,34 @@ func TagAgentCause(turn string) (cause AgentCause, cue string, ok bool) {
 		return CauseOverInitiative, c, true
 	}
 	return "", "", false
+}
+
+// TagAgentCauseContext reads a user turn for any of the four initiative-calibration
+// causes, consulting ctx for the two that need agent-turn context. The context-free
+// pair (premature-stop, over-initiative) is checked first via TagAgentCause; the two
+// under-action causes then need the agent to have UNDER-acted plus a push-to-execute
+// reaction, keyed on the human's words (the bbp thesis):
+//   - miscalibrated-interruption: the agent asked permission — a needless interruption
+//     on already-clear intent — and the human pushes it to just proceed.
+//   - under-initiative: the agent only explained (no tool call, no permission ask) and
+//     the human re-issues the directive to actually execute.
+//
+// When the agent DID act and did not needlessly ask, a push-to-execute reads as a NEXT
+// step, not an under-action — no cause. ok=false means no signal on this turn.
+func TagAgentCauseContext(turn string, ctx AgentContext) (cause AgentCause, cue string, ok bool) {
+	if c, cc, hit := TagAgentCause(turn); hit {
+		return c, cc, hit
+	}
+	c, matched := firstMatch(turn, pushToExecuteCues)
+	if !matched {
+		return "", "", false
+	}
+	switch {
+	case ctx.AgentAskedPermission:
+		return CauseMiscalibratedInterruption, c, true
+	case !ctx.AgentActed:
+		return CauseUnderInitiative, c, true
+	default:
+		return "", "", false
+	}
 }
