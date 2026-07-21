@@ -279,15 +279,16 @@ var CLI struct {
 	} `cmd:"" help:"Adjudicate retrieval outcomes (helped|ignored|misled|conflict|no_signal): join each search event to its task segment by timestamp, then apply the deterministic lattice. Live ts→segment join (bbp.16)."`
 
 	Adjudicate struct {
-		Session    string        `help:"Session ID prefix (required)." required:"" name:"session"`
-		Root       string        `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
-		Model      string        `help:"Claude model ID (default: claude-sonnet-4-6; use claude-opus-4-8 for calibration)." name:"model"`
-		Format     string        `help:"Output format: text|json." default:"text" name:"format"`
-		EmitPrompt bool          `help:"Assemble + print the prompt without calling the model (no API key needed)." name:"emit-prompt"`
-		Propose    bool          `help:"Propose mode: feed the cost-leak candidates + spine and return one fix per task (automate/de-context) instead of mismatch verdicts." name:"propose"`
-		Top        int           `help:"Propose mode: max candidate tasks fed to the analyst (0 = all)." default:"10" name:"top"`
-		Timeout    time.Duration `help:"Operator deadline for the analyst call across all retries (0 = SDK defaults)." default:"5m" name:"timeout"`
-	} `cmd:"" help:"LLM analyst: flag tool-for-intent mismatches in a session, or --propose cost-cutting fixes over the candidates (precision layer; dk validates)."`
+		Session     string        `help:"Session ID prefix (required unless --recall-trace)." name:"session"`
+		Root        string        `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
+		Model       string        `help:"Claude model ID (default: claude-sonnet-4-6; use claude-opus-4-8 for calibration)." name:"model"`
+		Format      string        `help:"Output format: text|json." default:"text" name:"format"`
+		EmitPrompt  bool          `help:"Assemble + print the prompt without calling the model (no API key needed)." name:"emit-prompt"`
+		Propose     bool          `help:"Propose mode: feed the cost-leak candidates + spine and return one fix per task (automate/de-context) instead of mismatch verdicts." name:"propose"`
+		RecallTrace string        `help:"Recall-use mode: judge trixi-bot's recall-trace.jsonl (recalled fragments + final answer per run) for memory use/miss instead of a transcript session. Emits the findings shape trixi-bot's eval/adjudicate consumes." name:"recall-trace"`
+		Top         int           `help:"Propose mode: max candidate tasks fed to the analyst (0 = all)." default:"10" name:"top"`
+		Timeout     time.Duration `help:"Operator deadline for the analyst call across all retries (0 = SDK defaults)." default:"5m" name:"timeout"`
+	} `cmd:"" help:"LLM analyst: flag tool-for-intent mismatches in a session, --propose cost-cutting fixes, or --recall-trace judge memory use/miss (precision layer; dk validates)."`
 
 	Fixes struct {
 		Add struct {
