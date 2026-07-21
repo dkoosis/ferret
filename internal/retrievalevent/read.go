@@ -27,16 +27,22 @@ func ReadEvents(path string) ([]Event, error) {
 		return nil, fmt.Errorf("retrievalevent: open %s: %w", path, err)
 	}
 	defer f.Close()
+	return ReadEventsFrom(f, path)
+}
 
+// ReadEventsFrom is ReadEvents over an already-open stream — the live CLI feeds
+// stdin through it (bbp.16). name labels the source in error messages. Same
+// schema-version assertion and blank-line tolerance as ReadEvents.
+func ReadEventsFrom(rd io.Reader, name string) ([]Event, error) {
 	var events []Event
-	r := bufio.NewReaderSize(f, 1<<20)
+	r := bufio.NewReaderSize(rd, 1<<20)
 	lineNo := 0
 	for {
 		line, rerr := r.ReadBytes('\n')
 		line = bytes.TrimSpace(line)
 		lineNo++
 		if len(line) > 0 {
-			e, derr := decodeLine(path, lineNo, line)
+			e, derr := decodeLine(name, lineNo, line)
 			if derr != nil {
 				return nil, derr
 			}
@@ -46,7 +52,7 @@ func ReadEvents(path string) ([]Event, error) {
 			return events, nil
 		}
 		if rerr != nil {
-			return nil, fmt.Errorf("retrievalevent: %s: read: %w", path, rerr)
+			return nil, fmt.Errorf("retrievalevent: %s: read: %w", name, rerr)
 		}
 	}
 }

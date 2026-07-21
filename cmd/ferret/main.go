@@ -271,6 +271,13 @@ var CLI struct {
 		Format  string `help:"Output format: text|json." default:"text" name:"format"`
 	} `cmd:"" help:"Reference-free quality: per-task efficiency/adaptivity axes (--session), or corpus pass^k consistency over recurring task-shapes (no --session)."`
 
+	Helped struct {
+		Session string `help:"Session ID prefix (required): the transcript whose task segments the events join against." required:"" name:"session"`
+		Events  string `help:"Retrieval-event JSONL (trixi sidecar rows); '-' or empty = stdin." name:"events"`
+		Root    string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
+		Format  string `help:"Output format: text|json." default:"text" name:"format"`
+	} `cmd:"" help:"Adjudicate retrieval outcomes (helped|ignored|misled|conflict|no_signal): join each search event to its task segment by timestamp, then apply the deterministic lattice. Live ts→segment join (bbp.16)."`
+
 	Adjudicate struct {
 		Session    string        `help:"Session ID prefix (required)." required:"" name:"session"`
 		Root       string        `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
@@ -411,6 +418,8 @@ func main() {
 		err = cmdRetrieval()
 	case "quality":
 		err = cmdQuality()
+	case "helped":
+		err = cmdHelped()
 	case "adjudicate":
 		err = cmdAdjudicate()
 	case "fixes add":
