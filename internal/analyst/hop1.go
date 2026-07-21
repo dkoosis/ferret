@@ -16,9 +16,61 @@ package analyst
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 
 	"github.com/dkoosis/ferret/internal/score"
 )
+
+// hop1Adjudicator and hop1Scheme name this adjudicator + scheme in every
+// fingerprint it stamps — the staged sibling of helped's lattice-v1
+// (ferret-bbp.15): a deterministic floor that escalates to a paid judge,
+// so the LLM leg is per-result (null when the floor decided) rather than
+// always-null.
+const (
+	hop1Adjudicator = "hop1"
+	hop1Scheme      = "staged-floor-v1"
+)
+
+// hop1FloorRules is the canonical serialization of the deterministic floor —
+// the staged half of the rules the fingerprint vouches for (the other half is
+// coverageSystemPrompt, the judge the clean case escalates to). Restated as
+// data, not derived from code, for the same reason helped's lattice hashes
+// its own table: the hash must change iff the RULES change, and this string
+// is the rules. Keep it in lockstep with Hop1Escalates + Hop1's floor branch.
+const hop1FloorRules = `self_requery|retry_motif -> low, no call
+no prompt -> no signal, no call
+clean first-try -> escalate to results-blind Q3 coverage judge
+coverage: full -> high, partial -> mid, miss -> low`
+
+// hop1RulesHash covers floor + escalation prompt together: a revision to
+// either is a different judge, and a replay reading only rules_hash must see
+// that. Computed once at package init, pinned by test.
+var hop1RulesHash = hashRules(hop1FloorRules + "\n" + coverageSystemPrompt)
+
+// coveragePromptHash is the LLM leg's prompt hash — just the paid judge's
+// system prompt, so the model+prompt pair identifies the escalation target
+// independent of floor-rule churn.
+var coveragePromptHash = hashRules(coverageSystemPrompt)
+
+// hashRules is the shared 128-bit rule digest (same shape as helped's
+// computeRulesHash: sha256 truncated to 16 bytes, hex).
+func hashRules(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:16])
+}
+
+// hop1Fingerprint builds the fingerprint one Hop1Result carries. llm is nil
+// for a floor-decided (or no-signal) episode and names the consulted
+// model+prompt when the coverage judge ran.
+func hop1Fingerprint(llm *score.LLMFingerprint) score.JudgeFingerprint {
+	return score.JudgeFingerprint{
+		Adjudicator: hop1Adjudicator,
+		Scheme:      hop1Scheme,
+		RulesHash:   hop1RulesHash,
+		LLM:         llm,
+	}
+}
 
 // Hop1Grade mirrors score.QPPGrade's low/mid/high taxonomy so a Hop1 grade and a
 // Hop2 grade are two readings of the same episode, joinable without translation.
@@ -43,6 +95,10 @@ type Hop1Result struct {
 	LLMCalled    bool      `json:"llmCalled"`
 	InputTokens  int64     `json:"inputTokens,omitempty"`
 	OutputTokens int64     `json:"outputTokens,omitempty"`
+	// JudgeFingerprint versions the verdict (contract amendment rank 3,
+	// ferret-bbp.15): same shape helped stamps, hop1's own scheme. LLM is
+	// null when the deterministic floor decided.
+	JudgeFingerprint score.JudgeFingerprint `json:"judge_fingerprint"`
 }
 
 // fromCoverageGrade maps the Q3 coverage scale (0=miss/1=partial/2=full) onto the
@@ -84,23 +140,26 @@ func Hop1(ctx context.Context, cfg Config, episodeID string, ep score.Episode) (
 		if ep.SelfRequery || ep.RetryMotif {
 			grade = Hop1Low
 		}
-		return Hop1Result{Episode: episodeID, Grade: grade, LLMCalled: false}, nil
+		return Hop1Result{Episode: episodeID, Grade: grade, LLMCalled: false, JudgeFingerprint: hop1Fingerprint(nil)}, nil
 	}
+	llm := &score.LLMFingerprint{Model: cfg.model(), PromptHash: coveragePromptHash}
 	cov, usage, err := RunCoverage(ctx, cfg, episodeID, ep.Prompt, ep.Query)
 	if err != nil {
 		return Hop1Result{
-			Episode:      episodeID,
-			LLMCalled:    true,
-			InputTokens:  usage.InputTokens,
-			OutputTokens: usage.OutputTokens,
+			Episode:          episodeID,
+			LLMCalled:        true,
+			InputTokens:      usage.InputTokens,
+			OutputTokens:     usage.OutputTokens,
+			JudgeFingerprint: hop1Fingerprint(llm),
 		}, err
 	}
 	return Hop1Result{
-		Episode:      episodeID,
-		Grade:        fromCoverageGrade(cov.Grade),
-		Why:          cov.Why,
-		LLMCalled:    true,
-		InputTokens:  usage.InputTokens,
-		OutputTokens: usage.OutputTokens,
+		Episode:          episodeID,
+		Grade:            fromCoverageGrade(cov.Grade),
+		Why:              cov.Why,
+		LLMCalled:        true,
+		InputTokens:      usage.InputTokens,
+		OutputTokens:     usage.OutputTokens,
+		JudgeFingerprint: hop1Fingerprint(llm),
 	}, nil
 }
