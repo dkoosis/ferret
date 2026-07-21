@@ -60,15 +60,22 @@ type Cont struct {
 // when the segment owns no calls. Prompt is the verbatim user text that opened it
 // (empty only for the synthetic preamble that holds calls preceding any prompt).
 type Segment struct {
-	Index     int      `json:"index"`
-	Prompt    string   `json:"prompt"`
-	FirstCall int      `json:"firstCall"`
-	LastCall  int      `json:"lastCall"`
-	InBytes   int      `json:"inBytes,omitempty"`  // tool_use input bytes the task spent
-	OutBytes  int      `json:"outBytes,omitempty"` // tool_result output bytes the task's calls pulled in — the de-context payoff
-	Shape     []string `json:"shape,omitempty"`    // ordered tool-shape tokens of the calls this task owns — the cross-session recurrence key (kuv.12)
-	Pivots    []Pivot  `json:"pivots,omitempty"`
-	Conts     []Cont   `json:"conts,omitempty"`
+	Index     int    `json:"index"`
+	Prompt    string `json:"prompt"`
+	FirstCall int    `json:"firstCall"`
+	LastCall  int    `json:"lastCall"`
+	// FirstTS/LastTS are the transcript timestamps (RFC3339Nano) of this
+	// segment's first and last owned call — its wall-clock span. Empty when the
+	// segment owns no calls. The bridge the retrieval-outcome contract's ts→
+	// segment join rides: a search event (trixi's sidecar clock) lands in the
+	// segment whose [FirstTS,LastTS] interval contains its ts (ferret-bbp.16).
+	FirstTS  string   `json:"firstTS,omitempty"`
+	LastTS   string   `json:"lastTS,omitempty"`
+	InBytes  int      `json:"inBytes,omitempty"`  // tool_use input bytes the task spent
+	OutBytes int      `json:"outBytes,omitempty"` // tool_result output bytes the task's calls pulled in — the de-context payoff
+	Shape    []string `json:"shape,omitempty"`    // ordered tool-shape tokens of the calls this task owns — the cross-session recurrence key (kuv.12)
+	Pivots   []Pivot  `json:"pivots,omitempty"`
+	Conts    []Cont   `json:"conts,omitempty"`
 	// Outcome is a WEAK, deterministic positive-outcome label for this task — set
 	// only when the task owns a terminal VCS action (commit/push/PR). nil = no
 	// signal (NOT a negative label; absence is silence). See outcome.go. (kuv.8)
@@ -171,7 +178,7 @@ func (s *segmenter) feed(line []byte) {
 		blk := &raw.Message.Content[i]
 		switch blk.Type {
 		case "tool_use":
-			s.addCall(blk.ID, len(blk.Input), CallShapeTokens(blk))
+			s.addCall(blk.ID, len(blk.Input), CallShapeTokens(blk), raw.Timestamp)
 		case "thinking":
 			s.scanThinking(blk)
 		}
@@ -271,7 +278,7 @@ func (s *segmenter) addContinuation(kind, label string) {
 // back here. Calls that precede the first prompt open a synthetic preamble segment
 // (empty prompt) so no call is silently dropped — a transcript can begin with
 // sidechain/tool activity.
-func (s *segmenter) addCall(id string, inBytes int, shape []string) {
+func (s *segmenter) addCall(id string, inBytes int, shape []string, ts string) {
 	if !s.started {
 		s.segs = append(s.segs, Segment{Index: 0, Prompt: "", FirstCall: -1, LastCall: -1})
 		s.started = true
@@ -281,8 +288,10 @@ func (s *segmenter) addCall(id string, inBytes int, shape []string) {
 	cur := &s.segs[owner]
 	if cur.FirstCall == -1 {
 		cur.FirstCall = s.callIndex
+		cur.FirstTS = ts
 	}
 	cur.LastCall = s.callIndex
+	cur.LastTS = ts
 	cur.InBytes += inBytes
 	cur.Shape = append(cur.Shape, shape...)
 	if id != "" {
