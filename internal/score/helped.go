@@ -139,11 +139,12 @@ func computeRulesHash() string {
 }
 
 // Leg is the caller-supplied episode-side evidence for one retrieval event,
-// keyed by the search row's EventID. v1 takes it as an input rather than
-// deriving it from a live ts→segment join: segments (score.Segment) key on
-// call index, not timestamps, so that join has no home yet (open question 2,
-// flagged for a follow-up bead). Keeping Leg an input keeps Adjudicate a pure
-// function, testable against the vendored fixture without the live wiring.
+// keyed by the search row's EventID. Adjudicate takes it as an input rather than
+// reaching for the transcript itself, so it stays a pure function testable
+// against the vendored fixture. The live join that derives Legs from a real
+// session — ts→segment interval containment for Tell/SegOutcome (bbp.16), read-
+// adjacency for RepairAdjacent (bbp.17) — lives in JoinLegs (join.go) + the
+// cmd `helped` path, feeding this exact shape.
 type Leg struct {
 	// SegmentID is the owning task segment's identifier (AC4: every emitted
 	// record must carry one).
@@ -158,6 +159,9 @@ type Leg struct {
 	// adjacent to the read that resolved this search. Only a repair the
 	// human made *right after* opening the result should indict the search
 	// itself (misled); a repair elsewhere in the segment is unrelated churn.
+	// In the live join (bbp.17) an adjacent repair also SUPPLIES this leg's
+	// Tell — the human's direct reaction to this retrieval — so misled fires on
+	// a clean search→pushback, not only inside an already-repair-heavy segment.
 	RepairAdjacent bool
 }
 

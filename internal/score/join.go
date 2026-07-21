@@ -10,19 +10,14 @@ import (
 // SegEvidence is the caller-computed episode-side signal for one task segment,
 // aligned by slice index to a Result's Segments. The score package holds the
 // deterministic segmentation and the lattice; the per-segment dialogue reading
-// (Tell) and read-adjacency (RepairAdjacent) are wired at the cmd layer where
-// the dialogue helpers live, then handed back here — so JoinLegs stays a pure
-// function testable without that wiring (ferret-bbp.16).
+// (Tell) is wired at the cmd layer where the dialogue helpers live, then handed
+// back here — so JoinLegs stays a pure function testable without that wiring
+// (ferret-bbp.16). Read-adjacency is per-EVENT, not per-segment, so it rides a
+// separate map into JoinLegs rather than this struct (ferret-bbp.17).
 type SegEvidence struct {
 	// Tell is the segment's rolled-up dialogue.Outcome — the human's own words
 	// (classifyTurnsCross over the segment's user turns).
 	Tell dialogue.Outcome
-	// RepairAdjacent reports a repair/abandon move sitting immediately after the
-	// read that resolved a search this segment owns. v1 leaves it false: true
-	// adjacency needs read-event→following-move linkage the segment grain can't
-	// see, and misled is the lattice's one correlational verdict — under-flagging
-	// it is the conservative default until that linkage lands (follow-up).
-	RepairAdjacent bool
 }
 
 // OwningSegment returns the index into segs of the segment whose [FirstTS,LastTS]
@@ -59,15 +54,17 @@ func OwningSegment(segs []Segment, ts string) int {
 // JoinLegs builds the AdjudicateEvents legs map from a live segmentation. For
 // each kind:search event it resolves the owning segment by ts-interval
 // containment (OwningSegment) and assembles that segment's Leg: SegmentID from
-// segID, SegOutcome straight off the segment, Tell + RepairAdjacent from the
-// aligned SegEvidence. ev is indexed by segment position (ev[i] describes
+// segID, SegOutcome straight off the segment, Tell from the aligned SegEvidence,
+// and RepairAdjacent from repairAdj (keyed by search EventID — a repair sits
+// right after one of THIS search's reads, a per-event fact the segment grain
+// can't hold, ferret-bbp.17). ev is indexed by segment position (ev[i] describes
 // segs[i]); a nil or short ev yields zero evidence for the missing indices. A
 // search event that lands in no segment gets no leg — AdjudicateEvents then
 // reads the zero Leg for it (no tell, no outcome), never a fabricated one.
 //
 // The map is keyed by the search event's EventID, exactly the key
 // AdjudicateEvents looks a leg up under.
-func JoinLegs(segs []Segment, events []retrievalevent.Event, ev []SegEvidence, segID func(Segment) string) map[string]Leg {
+func JoinLegs(segs []Segment, events []retrievalevent.Event, ev []SegEvidence, repairAdj map[string]bool, segID func(Segment) string) map[string]Leg {
 	legs := make(map[string]Leg)
 	for i := range events {
 		e := &events[i]
@@ -80,12 +77,23 @@ func JoinLegs(segs []Segment, events []retrievalevent.Event, ev []SegEvidence, s
 		}
 		seg := segs[idx]
 		leg := Leg{
-			SegmentID:  segID(seg),
-			SegOutcome: seg.Outcome,
+			SegmentID:      segID(seg),
+			SegOutcome:     seg.Outcome,
+			RepairAdjacent: repairAdj[e.EventID],
 		}
 		if idx < len(ev) {
 			leg.Tell = ev[idx].Tell
-			leg.RepairAdjacent = ev[idx].RepairAdjacent
+		}
+		// A repair immediately after this retrieval's read IS the human's reaction
+		// to THIS retrieval — a more direct tell than the segment rollup, which is
+		// blind to it (the repair boundary-opens the next segment). So it supplies
+		// the leg's Tell, letting the lattice fire misled on a clean search→pushback,
+		// not only inside an already-repair-heavy segment (ferret-bbp.17, per the
+		// bbp thesis: read the human's words, not the tool sequence). If the segment
+		// also shipped (SegOutcome.Positive), isConflictingTells still wins the
+		// precedence → conflict, as the ratified lattice intends.
+		if leg.RepairAdjacent {
+			leg.Tell = dialogue.OutcomeRepairHeavy
 		}
 		legs[e.EventID] = leg
 	}
