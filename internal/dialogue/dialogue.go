@@ -145,7 +145,26 @@ var permissionPhraseRe = regexp.MustCompile(`(?i)\b(should i|shall (i|we)|want m
 // explanation). See permissionPhraseRe for the citation.
 func AssistantAskedPermission(text string) bool {
 	t := strings.TrimSpace(text)
-	return AssistantAskedQuestion(t) && permissionPhraseRe.MatchString(t)
+	// The permission phrase must sit in the FINAL question, not anywhere in the turn:
+	// "Should I use tabs? Which file did you mean?" closes on a clarify, so the early
+	// "should I" must NOT tag it a permission ask (Codex/Gemini #85).
+	return AssistantAskedQuestion(t) && permissionPhraseRe.MatchString(lastSentence(t))
+}
+
+// lastSentence returns the final sentence of s — the run after the last INTERNAL
+// sentence terminator ([.!?]), so a trailing clause is judged on its own. "Should I
+// use tabs? Which file did you mean?" → "Which file did you mean?"; a single-sentence
+// turn returns unchanged. Abbreviations (e.g. "e.g.") can over-split, but the cost is
+// only a missed permission match on a rare shape — precision-safe by construction.
+func lastSentence(s string) string {
+	s = strings.TrimSpace(s)
+	// Drop the trailing terminator(s) so LastIndexAny finds the boundary BEFORE the
+	// final sentence, not its own closing mark.
+	trimmed := strings.TrimRight(s, " \t?!.")
+	if i := strings.LastIndexAny(trimmed, ".!?"); i >= 0 {
+		return strings.TrimSpace(s[i+1:])
+	}
+	return s
 }
 
 // Signal is one tagged user turn: where it sat, what it did, and the cue that

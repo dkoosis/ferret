@@ -97,7 +97,8 @@ func TestTagAgentCauseOverInitiative(t *testing.T) {
 // under-initiative; the same reaction after the agent ACTED does not (it reads as a
 // next step, not an under-action). Keyed on the human's words + the agent-turn context.
 func TestTagAgentCauseUnderInitiative(t *testing.T) {
-	proseOnly := AgentContext{AgentActed: false, AgentAskedPermission: false}
+	// A real agent turn intervened and it only explained (responded, didn't act/ask).
+	proseOnly := AgentContext{AgentResponded: true, AgentActed: false, AgentAskedPermission: false}
 	fires := []string{
 		"just do it",
 		"stop explaining and just make the change",
@@ -109,6 +110,15 @@ func TestTagAgentCauseUnderInitiative(t *testing.T) {
 	for _, s := range fires {
 		if cause, cue, ok := TagAgentCauseContext(s, proseOnly); !ok || cause != CauseUnderInitiative {
 			t.Errorf("%q (prose-only) → (%q,%q,%v), want under-initiative", s, cause, cue, ok)
+		}
+	}
+
+	// First turn / two human turns in a row: no agent turn intervened (AgentResponded
+	// false), so a push-to-execute has nothing to attribute → no cause (Codex #85).
+	firstTurn := AgentContext{}
+	for _, s := range []string{"just do it", "just do the refactor", "actually do it"} {
+		if cause, _, ok := TagAgentCauseContext(s, firstTurn); ok {
+			t.Errorf("%q (no agent turn) → %q, want no cause (first-turn FP guard)", s, cause)
 		}
 	}
 
@@ -172,9 +182,10 @@ func TestAssistantAskedPermission(t *testing.T) {
 		}
 	}
 	no := []string{
-		"Which file did you mean?",         // clarify, not permission
-		"I refactored the parser.",         // declarative, no question
-		"Should I use tabs? Anyway, done.", // permission phrase but not the trailing sentence
+		"Which file did you mean?",                    // clarify, not permission
+		"I refactored the parser.",                    // declarative, no question
+		"Should I use tabs? Anyway, done.",            // permission phrase, trailing sentence declarative
+		"Should I use tabs? Which file did you mean?", // permission phrase early, trailing question is a clarify (Codex/Gemini #85)
 	}
 	for _, s := range no {
 		if AssistantAskedPermission(s) {

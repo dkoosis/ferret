@@ -107,6 +107,11 @@ var overInitiativeCues = []*regexp.Regexp{
 // MoveContext (the Move-side per-turn context); kept separate so the two concerns —
 // the human's move and the agent's initiative — don't entangle.
 type AgentContext struct {
+	// AgentResponded is true if an assistant turn actually intervened since the previous
+	// human turn. Without it a first turn (or two human turns in a row) has a zero-value
+	// context and there is NO agent action to judge — the under-action detectors must not
+	// fire (Codex #85: a first-turn "just do it" would otherwise false-tag under-initiative).
+	AgentResponded bool
 	// AgentActed is true if an assistant turn since the previous human turn made a tool
 	// call — the agent EXECUTED. Gates OUT under-initiative (a pure explanation).
 	AgentActed bool
@@ -172,8 +177,11 @@ func TagAgentCauseContext(turn string, ctx AgentContext) (cause AgentCause, cue 
 	}
 	switch {
 	case ctx.AgentAskedPermission:
+		// A permission ask implies an agent turn happened, so this arm is inherently safe.
 		return CauseMiscalibratedInterruption, c, true
-	case !ctx.AgentActed:
+	case ctx.AgentResponded && !ctx.AgentActed:
+		// under-initiative needs a real intervening agent turn that under-acted; without
+		// AgentResponded a first-turn push-to-execute has nothing to attribute (Codex #85).
 		return CauseUnderInitiative, c, true
 	default:
 		return "", "", false

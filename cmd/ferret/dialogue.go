@@ -94,6 +94,7 @@ func runDialogue(w io.Writer, root, session, format string) error {
 // AgentCause detectors need (ferret-bbp.11). A human turn consume()s the window.
 type agentTurnState struct {
 	priorAgentQuestion   bool
+	agentResponded       bool
 	agentActed           bool
 	agentAskedPermission bool
 }
@@ -102,6 +103,7 @@ type agentTurnState struct {
 // the pending question is answered/superseded and the action window closes.
 func (s *agentTurnState) consume() {
 	s.priorAgentQuestion = false
+	s.agentResponded = false
 	s.agentActed = false
 	s.agentAskedPermission = false
 }
@@ -141,6 +143,7 @@ func tagUserTurn(line []byte, res *dlgResult, moves *[]dialogue.Move, turnIdx *i
 	// (re)sets the pending-question + asked-permission flags. Tool-only turns carry no
 	// text, so they leave a pending question standing for the answer.
 	if raw.Type == "assistant" {
+		st.agentResponded = true // a real agent turn intervened — the under-action gate
 		if hasToolUse(raw.Message.Content) {
 			st.agentActed = true
 		}
@@ -169,6 +172,7 @@ func tagUserTurn(line []byte, res *dlgResult, moves *[]dialogue.Move, turnIdx *i
 	}
 	move, cue := dialogue.TagMoveContext(prompt, dialogue.MoveContext{PriorAgentQuestion: st.priorAgentQuestion})
 	cause, causeCue, _ := dialogue.TagAgentCauseContext(prompt, dialogue.AgentContext{
+		AgentResponded:       st.agentResponded,
 		AgentActed:           st.agentActed,
 		AgentAskedPermission: st.agentAskedPermission,
 	})
