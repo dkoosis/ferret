@@ -13,16 +13,20 @@ import "regexp"
 // interaction (Horvitz, CHI 1999), types & levels of automation (Parasuraman,
 // Sheridan & Wickens, IEEE SMC-A 2000), appropriate reliance (Lee & See, Human
 // Factors 2004), and the human-AI interaction guidelines (Amershi et al., CHI
-// 2019). The full taxonomy is defined here as data; v1 detects the strongest-
-// signalled one (premature-stop) from the human's own words. The other three need
-// agent-turn context (mutating call / prose-only / permission question) threaded
-// from the transcript walk and land next.
+// 2019). The full taxonomy is defined here as data; detectors land as slices, each
+// keyed on the human's own words (the bbp thesis). Shipped: premature-stop (a
+// continuation demand) and over-initiative (a reversal of an unrequested action).
+// Pending — need agent-turn context threaded from the transcript walk: under-
+// initiative (prose-only where execution was wanted) and miscalibrated-interruption
+// (a permission question on a reversible action whose intent was clear).
 type AgentCause string
 
 const (
 	// CauseOverInitiative — the agent acted beyond the ask (a mutating/irreversible
 	// step when advice/options/review was wanted). Horvitz expected-value-of-action;
-	// Parasuraman over-automation; OWASP LLM06 Excessive Agency. (detector: pending)
+	// Parasuraman over-automation; OWASP LLM06 Excessive Agency. Detected from the
+	// human's reversal words (overInitiativeCues); agent-turn confirmation + the
+	// no-pushback case are the deferred LLM leg (ferret-bbp.18).
 	CauseOverInitiative AgentCause = "over-initiative"
 	// CauseUnderInitiative — the agent explained where execution was wanted (prose,
 	// no tool call, then the human re-issues). Parasuraman under-automation; Lee &
@@ -61,16 +65,48 @@ var continuationCues = []*regexp.Regexp{
 // the turn (mirrors matchRepair's leading-"no" handling).
 var leadingContinueRe = regexp.MustCompile(`(?i)^(continue|keep going|go on|proceed)\b`)
 
+// overInitiativeCues match a human turn that REVERSES or halts an action the agent
+// took beyond the ask — the deterministic tell of over-initiative, read from the
+// human's own words (the bbp thesis). Anchor: Horvitz expected-value-of-action (CHI
+// 1999) — the agent acted where the expected value did not warrant it; Parasuraman
+// over-automation; OWASP LLM06 Excessive Agency.
+//
+// Precision-first/corrective, mirroring the premature-stop guard: a bare "undo"/
+// "revert" is an ordinary approach repair (it already tags MoveRepair) and does NOT
+// imply the agent OVER-stepped, so these cues require the UNREQUESTED framing — the
+// human disclaims the request ("I didn't ask", "who told you to", "you weren't
+// supposed to"), orders the agent to stop mutating ("stop editing", "don't touch"),
+// or questions an unprompted mutation ("leave it alone", "why did you delete").
+// The agent-turn confirmation (there really WAS an unrequested mutating call) and
+// the no-pushback case (the human stays silent) are the deferred LLM leg (ferret-
+// bbp.18); this floor fires only on an explicit human reversal.
+var overInitiativeCues = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\bi (did ?n'?t|didnt|never) ask(ed)?\b`),
+	regexp.MustCompile(`(?i)\bi (did ?n'?t|didnt|never) (tell|want) you to\b`),
+	regexp.MustCompile(`(?i)\bwho (asked|told) you to\b`),
+	regexp.MustCompile(`(?i)\byou (weren'?t|were not|aren'?t|are not) (supposed|asked|meant) to\b`),
+	regexp.MustCompile(`(?i)\b(stop|quit) (chang|edit|modif|touch|delet|rewrit|refactor|overwrit|remov|updat|creat)\w*\b`),
+	regexp.MustCompile(`(?i)\b(don'?t|do not) (chang|edit|modif|touch|delet|rewrit|refactor|overwrit|remov)\w*\b`),
+	regexp.MustCompile(`(?i)\bleave (it|that|them|those|this|the \w+) alone\b`),
+	regexp.MustCompile(`(?i)\bwhy did you (chang|edit|modif|touch|delet|rewrit|refactor|overwrit|remov)\w*\b`),
+}
+
 // TagAgentCause reads a user turn for an agent-side initiative-calibration cause.
-// v1 detects CausePrematureStop from a continuation demand; the other three causes
-// return ("", "", false) until their agent-turn detectors land. ok=false means no
-// initiative-calibration signal on this turn.
+// Detects CausePrematureStop (a continuation demand) and CauseOverInitiative (a
+// reversal of an unrequested action) from the human's words; under-initiative and
+// miscalibrated-interruption return ("", "", false) until their agent-turn detectors
+// land. Premature-stop is checked first so behavior is preserved; the cue sets are
+// disjoint in practice (a continuation demand never reads as a reversal). ok=false
+// means no initiative-calibration signal on this turn.
 func TagAgentCause(turn string) (cause AgentCause, cue string, ok bool) {
 	if c, matched := firstMatch(turn, continuationCues); matched {
 		return CausePrematureStop, c, true
 	}
 	if leadingContinueRe.MatchString(turn) {
 		return CausePrematureStop, "continue", true
+	}
+	if c, matched := firstMatch(turn, overInitiativeCues); matched {
+		return CauseOverInitiative, c, true
 	}
 	return "", "", false
 }
