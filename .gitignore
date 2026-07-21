@@ -8,6 +8,9 @@
 .sandbox/bin/**/*.upx
 .sandbox/bin/**/*.000
 .claude/tmp/
+# transient scratch (go-build caches et al. — must never ride git add -A into a PR)
+/.tmp/
+/tmp/
 
 # Beads / Dolt files (added by bd init)
 .dolt/
@@ -30,3 +33,5 @@ ferret-bbp.7/
 ferret-bbp.8/
 # bd worktree
 ferret-7c8/
+# bd worktree
+ferret-bbp.14/

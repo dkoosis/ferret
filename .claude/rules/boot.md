@@ -1,17 +1,17 @@
 # Boot
-updated: 2026-07-03
+updated: 2026-07-19
 
 *Project working-memory. Maintained for future-me: current state + live frontier + traps that still bite. Resolved lanes pruned — history lives in beads/PRs.*
 
-## lane: GreatKilldeer
-→ next: **design round — `helped` adjudicator.** Brief → `~/Projects/dk/Project/ferret/specs/helped-adjudicator-design.md` (4 decisions, dk drives — mid-read). After: mint consumer bead (ingest→join→emit vs golden fixture). Open: bbp.11 (P3); ferret-frr (P2, parked — boundary-helper extraction out of `score`).
-✓ assessed external arch review → 1/7 accepted (filed ferret-frr); rejected the speculative session-timeline restructure.
-‡ vault daemon truncates streamed writes to KG plan dir — write tmp + `mv`.
-‡ arch reviews recycle a "duplicate substrate" claim — but shellnorm already centralizes shell parse; don't re-accept F5-shaped findings.
-~ dk terse ship-mode: one-line grants, ends on "next?".
+## lane: LiveAdjudicator
+→ next: **bbp.11** (agency-calibration axis, P3) or **bbp.17** (read-adjacency so the live join emits `misled`, P3). Or open **567** (metrics-engine container, untouched). Lower-priority tail — no blocking decision.
+↑ so that the `helped` retrieval-outcome verdict runs on **live** data, not just the golden fixture — ferret's side of the trixi⇄ferret contract goes end-to-end.
+✓ session #79 shipped 5 PRs: **kuv.3** (#77, analyst assumes snipe available — killed the circular availability excuse, flags real symbol-nav mismatches) · **bbp.15** (#78, `judge_fingerprint` on `Hop1Result`) · **bbp.16** (#79, live `ts→segment` join mechanism A + `ferret helped` CLI, smoke-tested e2e) · **kuv.15** (#80, substitution ledger: confirmed mismatches → dedup'd rules).
+‡ join mechanism A: `Segment.FirstTS/LastTS` interval containment, timestamps **parsed not string-compared** (CC millis vs trixi nanos). bbp.16 v1 sets `RepairAdjacent=false` → live join never emits `misled` yet (bbp.17 fixes).
+~ dk terse ship-mode: one-line grants ("go", "A", "pick and execute"), ends on "next?". Drove the kuv.3 fork himself (rejected my first framing, sharpened to "grepped when you could have snipped, period").
 
 ## State
-- main @ `f0bd8f0`, origin synced. PR queue EMPTY — #62 (ferret-p2a reach harness) merged 2026-07-13. Branches/worktrees/stashes pruned.
+- main @ `f7d9d06`, origin synced. PR queue EMPTY — #77–80 merged 2026-07-20. Branches/worktrees/stashes pruned. `.tmp/`+`tmp/` now gitignored (BrightKoala's 77MB-cache trap closed).
 - Scorers live in **`internal/score/`** (landmark/quality/conform all there — ratified, design-doc D2). New scorers go here.
 - `/team` = one shared tree + loto (worktrees retired). No concurrent `make check`; primary verifies once at wave end.
 
@@ -23,10 +23,13 @@ updated: 2026-07-03
 - ✓ **bbp.9 SHIPPED** (#59) — MoveClarify populated on the `ferret dialogue` path (AssistantAskedQuestion → PriorAgentQuestion); retrieval/Finding path still clarify-inert (no assistant NL in events).
 - ✓ **bbp.10/.12/.13 SHIPPED** (#58/57/56) — deterministic friction metrics over segments · abandonment-by-topic-switch wired into per-segment dialogueOutcomeNote · GoodAbandon self-contradictory-label suppression in retrieval CLI.
 - ✓ **bbp.5 SHIPPED** (#53) — staged Hop1 judge: deterministic floor, paid LLM (results-blind Q3 coverage judge, AgentRewardBench bias guards) only on floor-undecidable episodes; grades joinable with Hop2 QPP.
-- → **remaining, unminted:** contract-consumer plumbing (sidecar-stream ingest → segment join → outcome emit w/ `judge_fingerprint`) + the `helped` adjudicator design (composes episode tells + read-linkage + segment outcome; ✗ same thing as Hop1). Open bead under this epic: **bbp.11** (agency-calibration axis — agent-side initiative, sibling to the user-move taxonomy, P3).
+- ✓ **bbp.14 SHIPPED** (#74) — `helped` adjudicator: det precedence lattice (`helped|ignored|misled|conflict|no_signal`) as data + `internal/retrievalevent/` leaf pkg (schema-guarded JSONL reader, vendored golden fixture). Design ratified (decision nug `f7977bfc1afa`).
+- ✓ **bbp.15 SHIPPED** (#78) — `judge_fingerprint` on `Hop1Result` (shared `score.LLMFingerprint{model,prompt_hash}`, pinned `rules_hash` over floor+coverage prompt).
+- ✓ **bbp.16 SHIPPED** (#79) — live `ts→segment` join (mechanism A: `Segment.FirstTS/LastTS` interval containment) + `ferret helped` CLI. bbp.14 is no longer fixture-only; adjudicator runs e2e on real events.
+- → **remaining:** **bbp.11** (agency-calibration axis, P3) · **bbp.17** (read-adjacency → live `misled`, P3, split from bbp.16).
 - bbp regex-first; ✗ emotion detector (dev jargon "kill/dead/braindead" ≠ affect)
 
-Under epic **ferret-kuv** (container, ✗ dispatch): **567** (metrics-engine for a Claude analyst — per-candidate bundle + proposal loop, in_progress), **kuv.3** (tool-for-intent applicability check, in_progress).
+Under epic **ferret-kuv** (container, ✗ dispatch): **567** (metrics-engine for a Claude analyst — per-candidate bundle + proposal loop, in_progress, UNTOUCHED all session). **kuv.3 SHIPPED** (#77) + **kuv.15 SHIPPED** (#80, substitution ledger `ferret fixes sub/subs` — confirmed mismatches dedup into executable `intent→better` rules w/ occurrence count). Loop closed: adjudicate flags → dk validates → `fixes sub` records → hook/CLAUDE.md nudge consumes.
 
 **Retrieval-outcome contract (trixi⇄ferret)** — drafted 2026-06-29 → `~/Projects/dk/Project/trixi/specs/retrieval-outcome-contract-design.md`. The validation seam:
 `trixi/observe.2.1` emits retrieval-event JSONL (producer) → `ferret/bbp` joins to task segments + adjudicates outcome (consumer) → `search-loop.4` reads back via interrupted-time-series (reader).
@@ -47,4 +50,4 @@ Dry fenced grants, zero corrections → trust-the-loop. Surface deviations, ✗ 
 - read-before-edit/write hookify guard — top ferret-scan burn finding (`Edit!⇝Read` + `Write!⇝Read⇝Write`, ~670k). Build as a hook, log in the ferret fix ledger. Harness-side, not a ferret bead. Done-status unverified.
 
 ## Shipped ledger
-bbp.13 GoodAbandon-label suppress (#56) · bbp.12 abandonment-by-topic-switch (#57) · bbp.10 det friction metrics (#58) · bbp.9 clarify population (#59) · bbp.7 v2 taxonomy (#54) · bbp deterministic spine #49–52 (bbp.1/.2/.3/.4/.6) · landmark wave kuv.10/vy7/afm/t5d (#45–47) · sq.2 judge+golden + d28 spec (#41) · kuv.5 quality axes (#44) · kuv.4 conformance (#27) · kuv.2 segmentation · kuv.1 spine (#23) · d01 prompt-text capture (#34) · bbp tagger (#33) · 9 go-bug-audit fixes (#31) · nilaway clear (#48).
+kuv.15 substitution ledger (#80) · bbp.16 live ts→segment join + helped CLI (#79) · bbp.15 judge_fingerprint on Hop1Result (#78) · kuv.3 analyst-assumes-snipe (#77) · bbp.14 helped adjudicator (#74) · bbp.13 GoodAbandon-label suppress (#56) · bbp.12 abandonment-by-topic-switch (#57) · bbp.10 det friction metrics (#58) · bbp.9 clarify population (#59) · bbp.7 v2 taxonomy (#54) · bbp deterministic spine #49–52 (bbp.1/.2/.3/.4/.6) · landmark wave kuv.10/vy7/afm/t5d (#45–47) · sq.2 judge+golden + d28 spec (#41) · kuv.5 quality axes (#44) · kuv.4 conformance (#27) · kuv.2 segmentation · kuv.1 spine (#23) · d01 prompt-text capture (#34) · bbp tagger (#33) · 9 go-bug-audit fixes (#31) · nilaway clear (#48).
