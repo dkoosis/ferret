@@ -237,6 +237,7 @@ var CLI struct {
 		Format      string `help:"Output format: text|json." default:"text" name:"format"`
 		Top         int    `help:"Max candidate tasks/shapes (0 = all)." default:"10" name:"top"`
 		MinSessions int    `help:"Corpus mode: min distinct sessions a shape must recur in." default:"2" name:"min-sessions"`
+		Conformance string `help:"Optional JSON file of per-task reference plans ([{task,reference,observed}]); folds kuv.4 conformance into the leak score for covered tasks (--session mode)." name:"conformance"`
 	} `cmd:"" help:"Rank a session's tasks (--session), or recurring task-shapes across the whole corpus (no --session), as cost-leak candidates for the analyst proposal loop."`
 
 	Conformance struct {

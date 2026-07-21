@@ -141,7 +141,7 @@ func runPropose(root string) error {
 		return err
 	}
 	var bundle bytes.Buffer
-	if err := candidates(&bundle, root, cmd.Session, fmtJSON, cmd.Top); err != nil {
+	if err := candidates(&bundle, root, cmd.Session, fmtJSON, cmd.Top, ""); err != nil {
 		return err
 	}
 	var spineBuf bytes.Buffer
