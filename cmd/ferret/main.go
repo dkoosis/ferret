@@ -302,6 +302,18 @@ var CLI struct {
 			Data   string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
 			Format string `help:"Output format: text|json." default:"text" name:"format"`
 		} `cmd:"" help:"List recorded fixes."`
+		Sub struct {
+			Data    string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
+			Intent  string `help:"Normalized intent class the mismatch belongs to (kebab, e.g. \"symbol-callers\") — the dedup key with --better." required:"" name:"intent"`
+			Wrong   string `help:"The tool actually reached for (e.g. \"rg\")." required:"" name:"wrong"`
+			Better  string `help:"Executable substitution template the consumer runs instead (e.g. \"snipe callers <sym>\")." required:"" name:"better"`
+			Example string `help:"One verbatim offending call, for traceability." name:"example"`
+			Session string `help:"Source session prefix the mismatch was confirmed in." name:"session"`
+		} `cmd:"" help:"Record a confirmed adjudicate mismatch (fit=mismatch) as a substitution rule; a repeat intent→fix bumps its occurrence count (dk validates before recording). ferret-kuv.15."`
+		Subs struct {
+			Data   string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
+			Format string `help:"Output format: text|json." default:"text" name:"format"`
+		} `cmd:"" help:"List recorded substitution rules (intent→better, occurrence count)."`
 	} `cmd:"" help:"Fix ledger: record motif→fix, then 'report --since-fixes' computes burn-delta."`
 
 	Reach struct {
@@ -426,6 +438,10 @@ func main() {
 		err = cmdFixesAdd()
 	case "fixes list":
 		err = cmdFixesList()
+	case "fixes sub":
+		err = cmdFixesSub()
+	case "fixes subs":
+		err = cmdFixesSubs()
 	case "reach":
 		err = cmdReach()
 	case "recurrence":
@@ -1442,6 +1458,65 @@ func cmdFixesList() error {
 		}
 		sink.Row("%s  %-8s burn@fix=%-8d  %s → %s%s",
 			e.AddedAt.Format("2006-01-02"), e.Disp(), e.BaselineBurn, e.Motif, e.Fix, note)
+	}
+	return nil
+}
+
+// cmdFixesSub records a confirmed tool-for-intent mismatch (a `ferret adjudicate`
+// fit=mismatch finding dk has validated) as a substitution rule, deduping by
+// (intent, better): a repeat bumps the rule's occurrence count instead of adding
+// a row (ferret-kuv.15).
+func cmdFixesSub() error {
+	cmd := &CLI.Fixes.Sub
+	data, err := resolveData(cmd.Data)
+	if err != nil {
+		return err
+	}
+	sub := fixes.Substitution{
+		IntentClass: strings.TrimSpace(cmd.Intent),
+		WrongTool:   strings.TrimSpace(cmd.Wrong),
+		Better:      strings.TrimSpace(cmd.Better),
+		Example:     cmd.Example,
+		Session:     cmd.Session,
+	}
+	rule, created, err := fixes.RecordSub(fixes.SubPath(data), sub, time.Now())
+	if err != nil {
+		return err
+	}
+	verb := "bumped"
+	if created {
+		verb = "recorded"
+	}
+	fmt.Printf("%s substitution: %s → %s (×%d)\n", verb, rule.IntentClass, rule.Better, rule.Occurrences)
+	return nil
+}
+
+// cmdFixesSubs lists the recorded substitution rules, most-cited first.
+func cmdFixesSubs() error {
+	cmd := &CLI.Fixes.Subs
+	data, err := resolveData(cmd.Data)
+	if err != nil {
+		return err
+	}
+	if cmd.Format != "text" && cmd.Format != fmtJSON {
+		return fmt.Errorf("%w: %q (want text|json)", errBadFormat, cmd.Format)
+	}
+	subs, err := fixes.LoadSubs(fixes.SubPath(data))
+	if err != nil {
+		return err
+	}
+	sort.SliceStable(subs, func(i, j int) bool { return subs[i].Occurrences > subs[j].Occurrences })
+	if cmd.Format == fmtJSON {
+		return out.JSON(os.Stdout, map[string]any{
+			"substitutions": subs, keyTotal: len(subs),
+		})
+	}
+	sink := out.NewSink(os.Stdout, 0, 0)
+	defer sink.Close()
+	sink.Head("substitutions recorded=%d (ledger %s)", len(subs), fixes.SubPath(data))
+	for i := range subs {
+		s := &subs[i]
+		sink.Row("×%-4d %-18s %s → %s", s.Occurrences, s.IntentClass, s.WrongTool, s.Better)
 	}
 	return nil
 }
