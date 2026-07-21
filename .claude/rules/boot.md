@@ -4,14 +4,13 @@ updated: 2026-07-19
 *Project working-memory. Maintained for future-me: current state + live frontier + traps that still bite. Resolved lanes pruned — history lives in beads/PRs.*
 
 ## lane: LiveAdjudicator
-→ next: **bbp.11** (agency-calibration axis, P3) or **bbp.17** (read-adjacency so the live join emits `misled`, P3). Or open **567** (metrics-engine container, untouched). Lower-priority tail — no blocking decision.
-↑ so that the `helped` retrieval-outcome verdict runs on **live** data, not just the golden fixture — ferret's side of the trixi⇄ferret contract goes end-to-end.
-✓ session #79 shipped 5 PRs: **kuv.3** (#77, analyst assumes snipe available — killed the circular availability excuse, flags real symbol-nav mismatches) · **bbp.15** (#78, `judge_fingerprint` on `Hop1Result`) · **bbp.16** (#79, live `ts→segment` join mechanism A + `ferret helped` CLI, smoke-tested e2e) · **kuv.15** (#80, substitution ledger: confirmed mismatches → dedup'd rules).
-‡ join mechanism A: `Segment.FirstTS/LastTS` interval containment, timestamps **parsed not string-compared** (CC millis vs trixi nanos). bbp.16 v1 sets `RepairAdjacent=false` → live join never emits `misled` yet (bbp.17 fixes).
-~ dk terse ship-mode: one-line grants ("go", "A", "pick and execute"), ends on "next?". Drove the kuv.3 fork himself (rejected my first framing, sharpened to "grepped when you could have snipped, period").
+→ next: **plan bbp.11** (agency-calibration axis) — exploratory, `requires_plan`; own-scorer vs fold into bbp.7. `bd show ferret-bbp.11`.
+↑ so that ferret scores the agent's initiative-calibration (over/under-action), a new measurable-behavior axis toward the ★.
+‡ bbp.11: plan first (no anchor, unknown move-set). 567 has no children — decompose before dispatch.
+~ dk drives forks himself — hand them crisply, ✗ pre-decide ratified semantics.
 
 ## State
-- main @ `f7d9d06`, origin synced. PR queue EMPTY — #77–80 merged 2026-07-20. Branches/worktrees/stashes pruned. `.tmp/`+`tmp/` now gitignored (BrightKoala's 77MB-cache trap closed).
+- main @ `319a8cc`, origin synced. PR queue EMPTY — #77–81 merged 2026-07-20. Branches/worktrees/stashes pruned. `.tmp/`+`tmp/` gitignored.
 - Scorers live in **`internal/score/`** (landmark/quality/conform all there — ratified, design-doc D2). New scorers go here.
 - `/team` = one shared tree + loto (worktrees retired). No concurrent `make check`; primary verifies once at wave end.
 
@@ -25,8 +24,9 @@ updated: 2026-07-19
 - ✓ **bbp.5 SHIPPED** (#53) — staged Hop1 judge: deterministic floor, paid LLM (results-blind Q3 coverage judge, AgentRewardBench bias guards) only on floor-undecidable episodes; grades joinable with Hop2 QPP.
 - ✓ **bbp.14 SHIPPED** (#74) — `helped` adjudicator: det precedence lattice (`helped|ignored|misled|conflict|no_signal`) as data + `internal/retrievalevent/` leaf pkg (schema-guarded JSONL reader, vendored golden fixture). Design ratified (decision nug `f7977bfc1afa`).
 - ✓ **bbp.15 SHIPPED** (#78) — `judge_fingerprint` on `Hop1Result` (shared `score.LLMFingerprint{model,prompt_hash}`, pinned `rules_hash` over floor+coverage prompt).
-- ✓ **bbp.16 SHIPPED** (#79) — live `ts→segment` join (mechanism A: `Segment.FirstTS/LastTS` interval containment) + `ferret helped` CLI. bbp.14 is no longer fixture-only; adjudicator runs e2e on real events.
-- → **remaining:** **bbp.11** (agency-calibration axis, P3) · **bbp.17** (read-adjacency → live `misled`, P3, split from bbp.16).
+- ✓ **bbp.16 SHIPPED** (#79) — live `ts→segment` join (mechanism A: `Segment.FirstTS/LastTS` interval containment) + `ferret helped` CLI. bbp.14 no longer fixture-only.
+- ✓ **bbp.17 SHIPPED** (#81) — per-event read-adjacency; adjacent repair supplies leg `Tell` (reading 2) → `misled` fires on clean search→pushback; `conflict` outranks when the segment shipped. Adjudicator now emits all 5 verdicts on live data.
+- → **remaining:** **bbp.11** (agency-calibration axis, P3, exploratory/requires_plan — reads the AGENT's initiative-calibration, orthogonal to bbp's human-intent read).
 - bbp regex-first; ✗ emotion detector (dev jargon "kill/dead/braindead" ≠ affect)
 
 Under epic **ferret-kuv** (container, ✗ dispatch): **567** (metrics-engine for a Claude analyst — per-candidate bundle + proposal loop, in_progress, UNTOUCHED all session). **kuv.3 SHIPPED** (#77) + **kuv.15 SHIPPED** (#80, substitution ledger `ferret fixes sub/subs` — confirmed mismatches dedup into executable `intent→better` rules w/ occurrence count). Loop closed: adjudicate flags → dk validates → `fixes sub` records → hook/CLAUDE.md nudge consumes.
