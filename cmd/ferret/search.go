@@ -18,6 +18,9 @@ import (
 // tool results arrive as "user").
 const roleAssistant = "assistant"
 
+// roleUser is the transcript line type for human turns and tool results.
+const roleUser = "user"
+
 var (
 	errSearchQueryRequired = errors.New("search: query required")
 	errSearchBadContext    = errors.New("search: --context must be >= 0")
