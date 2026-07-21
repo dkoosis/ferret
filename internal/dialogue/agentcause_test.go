@@ -91,3 +91,149 @@ func TestTagAgentCauseOverInitiative(t *testing.T) {
 		t.Errorf("continuation demand → %q, want premature-stop", cause)
 	}
 }
+
+// TestTagAgentCauseOverPersistence: a human turn calling off an unproductive effort
+// tags CauseOverPersistence — the stopped-too-LATE mirror of premature-stop. A bare
+// "stop <mutation>" (over-initiative) and "keep going" (premature-stop) do NOT land
+// here: the stop-timing poles and the mutation-halt stay disjoint.
+func TestTagAgentCauseOverPersistence(t *testing.T) {
+	fires := []string{
+		"you're going in circles here",
+		"you keep trying the same thing",
+		"give up on that approach",
+		"just stop trying",
+		"this isn't working, move on",
+		"that isn't working — just give up",
+		"let it go and do the auth first",
+		"move on from this already",
+		"same error over and over — stop",
+		"that's enough of this",
+	}
+	for _, s := range fires {
+		if cause, cue, ok := TagAgentCause(s); !ok || cause != CauseOverPersistence {
+			t.Errorf("%q → (%q,%q,%v), want over-persistence", s, cause, cue, ok)
+		}
+	}
+
+	quiet := []string{
+		"keep going",                      // premature-stop — the opposite pole
+		"don't stop now",                  // premature-stop
+		"stop editing the tests",          // over-initiative (mutation halt)
+		"move on to the next task",        // new-task, not abandon-this
+		"this approach is elegant",        // no abandon framing
+		"drop the table in the migration", // 'drop the table', not 'drop the approach'
+	}
+	for _, s := range quiet {
+		if cause, _, ok := TagAgentCause(s); ok && cause == CauseOverPersistence {
+			t.Errorf("%q → %q, want no over-persistence (false-fire)", s, cause)
+		}
+	}
+
+	// The two stop-timing poles are mutually exclusive: "keep going" is premature-stop,
+	// "give up on that approach" is over-persistence — never crossed.
+	if cause, _, _ := TagAgentCause("keep going"); cause != CausePrematureStop {
+		t.Errorf(`"keep going" → %q, want premature-stop`, cause)
+	}
+}
+
+// TestTagAgentCauseUnderInitiative: after the agent EXPLAINED where execution was
+// wanted (no tool call, no permission ask), a push-to-execute reaction tags
+// under-initiative; the same reaction after the agent ACTED does not (it reads as a
+// next step, not an under-action). Keyed on the human's words + the agent-turn context.
+func TestTagAgentCauseUnderInitiative(t *testing.T) {
+	// A real agent turn intervened and it only explained (responded, didn't act/ask).
+	proseOnly := AgentContext{AgentResponded: true, AgentActed: false, AgentAskedPermission: false}
+	fires := []string{
+		"just do it",
+		"stop explaining and just make the change",
+		"i told you to implement it",
+		"actually do it",
+		"less talk — just fix it",
+		"just do the refactor",
+	}
+	for _, s := range fires {
+		if cause, cue, ok := TagAgentCauseContext(s, proseOnly); !ok || cause != CauseUnderInitiative {
+			t.Errorf("%q (prose-only) → (%q,%q,%v), want under-initiative", s, cause, cue, ok)
+		}
+	}
+
+	// First turn / two human turns in a row: no agent turn intervened (AgentResponded
+	// false), so a push-to-execute has nothing to attribute → no cause (Codex #85).
+	firstTurn := AgentContext{}
+	for _, s := range []string{"just do it", "just do the refactor", "actually do it"} {
+		if cause, _, ok := TagAgentCauseContext(s, firstTurn); ok {
+			t.Errorf("%q (no agent turn) → %q, want no cause (first-turn FP guard)", s, cause)
+		}
+	}
+
+	// Same reactions, but the agent already acted: no under-action → no cause.
+	acted := AgentContext{AgentActed: true}
+	for _, s := range []string{"just do it", "actually do it", "just do the refactor"} {
+		if cause, _, ok := TagAgentCauseContext(s, acted); ok && cause == CauseUnderInitiative {
+			t.Errorf("%q (agent acted) → %q, want no under-initiative", s, cause)
+		}
+	}
+
+	// Benign task turns carry no push-to-execute cue → no cause even prose-only.
+	for _, s := range []string{"add a test for the edge case", "what do you think?", "looks good, ship it"} {
+		if cause, _, ok := TagAgentCauseContext(s, proseOnly); ok {
+			t.Errorf("%q → %q, want no cause (false-fire)", s, cause)
+		}
+	}
+}
+
+// TestTagAgentCauseMiscalibratedInterruption: after the agent asked PERMISSION on
+// already-clear intent, a push-to-execute reaction tags miscalibrated-interruption —
+// the permission ask routes it here rather than to under-initiative.
+func TestTagAgentCauseMiscalibratedInterruption(t *testing.T) {
+	asked := AgentContext{AgentAskedPermission: true}
+	fires := []string{
+		"just do it",
+		"stop asking and do it",
+		"quit asking — get it done",
+		"yes, do it",
+		"go ahead and make it",
+	}
+	for _, s := range fires {
+		if cause, cue, ok := TagAgentCauseContext(s, asked); !ok || cause != CauseMiscalibratedInterruption {
+			t.Errorf("%q (agent asked permission) → (%q,%q,%v), want miscalibrated-interruption", s, cause, cue, ok)
+		}
+	}
+
+	// The permission ask wins even if the agent also acted (it asked when it shouldn't
+	// have): still miscalibrated-interruption, not under-initiative.
+	if cause, _, _ := TagAgentCauseContext("just do it", AgentContext{AgentActed: true, AgentAskedPermission: true}); cause != CauseMiscalibratedInterruption {
+		t.Errorf("push after permission-ask → %q, want miscalibrated-interruption", cause)
+	}
+
+	// A context-free cause still wins over the agent-context pass.
+	if cause, _, _ := TagAgentCauseContext("undo that, I didn't ask you to", asked); cause != CauseOverInitiative {
+		t.Errorf("reversal → %q, want over-initiative (context-free wins)", cause)
+	}
+}
+
+// TestAssistantAskedPermission: a trailing permission question is a permission ask; a
+// clarifying question or a declarative sentence is not.
+func TestAssistantAskedPermission(t *testing.T) {
+	yes := []string{
+		"I can refactor the parser. Should I go ahead?",
+		"Want me to delete the shim?",
+		"That's a big change — do you want me to proceed?",
+	}
+	for _, s := range yes {
+		if !AssistantAskedPermission(s) {
+			t.Errorf("%q → false, want permission ask", s)
+		}
+	}
+	no := []string{
+		"Which file did you mean?",                    // clarify, not permission
+		"I refactored the parser.",                    // declarative, no question
+		"Should I use tabs? Anyway, done.",            // permission phrase, trailing sentence declarative
+		"Should I use tabs? Which file did you mean?", // permission phrase early, trailing question is a clarify (Codex/Gemini #85)
+	}
+	for _, s := range no {
+		if AssistantAskedPermission(s) {
+			t.Errorf("%q → true, want not a permission ask", s)
+		}
+	}
+}

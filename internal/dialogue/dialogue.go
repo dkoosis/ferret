@@ -130,6 +130,43 @@ func AssistantAskedQuestion(text string) bool {
 	return questionTailRe.MatchString(strings.TrimSpace(text))
 }
 
+// permissionPhraseRe matches an assistant turn asking PERMISSION to act ("should I…",
+// "want me to…", "shall I…") — as opposed to clarifying WHAT was meant. Paired with a
+// trailing "?" it distinguishes a needless interruption (→ miscalibrated-interruption,
+// ferret-bbp.11) from a genuine clarify. Borrowed method: Horvitz cost-of-interruption
+// (CHI 1999) — confirming an action whose expected value already clears the bar;
+// Amershi et al. G8/G9/G10 (CHI 2019).
+var permissionPhraseRe = regexp.MustCompile(`(?i)\b(should i|shall (i|we)|want me to|(do|would) you (want|like) me to|ok(ay)? (to|if i)|can i|may i|let me know (if|whether))\b`)
+
+// AssistantAskedPermission reports whether an assistant turn ENDED in a permission-
+// seeking question — a trailing question (AssistantAskedQuestion) whose phrasing asks
+// to DO something. The tell that routes a human's push-to-execute reaction to
+// miscalibrated-interruption (a needless ask) rather than under-initiative (a bare
+// explanation). See permissionPhraseRe for the citation.
+func AssistantAskedPermission(text string) bool {
+	t := strings.TrimSpace(text)
+	// The permission phrase must sit in the FINAL question, not anywhere in the turn:
+	// "Should I use tabs? Which file did you mean?" closes on a clarify, so the early
+	// "should I" must NOT tag it a permission ask (Codex/Gemini #85).
+	return AssistantAskedQuestion(t) && permissionPhraseRe.MatchString(lastSentence(t))
+}
+
+// lastSentence returns the final sentence of s — the run after the last INTERNAL
+// sentence terminator ([.!?]), so a trailing clause is judged on its own. "Should I
+// use tabs? Which file did you mean?" → "Which file did you mean?"; a single-sentence
+// turn returns unchanged. Abbreviations (e.g. "e.g.") can over-split, but the cost is
+// only a missed permission match on a rare shape — precision-safe by construction.
+func lastSentence(s string) string {
+	s = strings.TrimSpace(s)
+	// Drop the trailing terminator(s) so LastIndexAny finds the boundary BEFORE the
+	// final sentence, not its own closing mark.
+	trimmed := strings.TrimRight(s, " \t?!.")
+	if i := strings.LastIndexAny(trimmed, ".!?"); i >= 0 {
+		return strings.TrimSpace(s[i+1:])
+	}
+	return s
+}
+
 // Signal is one tagged user turn: where it sat, what it did, and the cue that
 // fired (kept for traceability — every label points at the substring that
 // earned it, so a human validator can audit the matcher cheaply).
