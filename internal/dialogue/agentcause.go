@@ -4,9 +4,11 @@ import "regexp"
 
 // AgentCause is an agent-side INITIATIVE-CALIBRATION tag on a user turn: when the
 // human reacts, this names how the AGENT mis-calibrated its initiative to provoke
-// that reaction — acted too much, too little, interrupted needlessly, or stopped
-// too early. It is the mirror of the rest of this package: Move/Outcome read the
-// HUMAN's intent; AgentCause reads the agent's judgment about when to act vs defer.
+// that reaction — acted too much, too little, interrupted needlessly, stopped too
+// early, or would not stop. It is the mirror of the rest of this package: Move/Outcome
+// read the HUMAN's intent; AgentCause reads the agent's judgment about when to act vs
+// defer. Stop-timing is one BIDIRECTIONAL axis with two poles: premature-stop (too
+// early) and over-persistence (too late) — the mirror images the epic's read demands.
 //
 // Anchored in prior art, not invented (ferret-bbp.11; nug 20bbb30cece7 "Prior art
 // — agent initiative-calibration"): the four causes map to mixed-initiative
@@ -40,11 +42,20 @@ const (
 	// a permission question (AgentContext.AgentAskedPermission); TagAgentCauseContext.
 	CauseMiscalibratedInterruption AgentCause = "miscalibrated-interruption"
 	// CausePrematureStop — the agent handed back before the task was complete and the
-	// human had to demand continuation. Long-Horizon-Terminal-Bench; SHIELDA
-	// "Stopping Too Early". Bidirectional with the over-persistence pole ferret's
-	// friction metrics already catch (Majgaonkar, ICSE 2026: "inability to abandon an
-	// unproductive loop").
+	// human had to demand continuation. Long-Horizon-Terminal-Bench; SHIELDA "Stopping
+	// Too Early". The stopped-too-EARLY pole of the bidirectional stop-timing axis
+	// (see CauseOverPersistence for the too-LATE pole).
 	CausePrematureStop AgentCause = "premature-stop"
+	// CauseOverPersistence — the agent would not stop: it kept grinding an unproductive
+	// path and the human had to call it off ("you're going in circles", "give up on
+	// that", "let it go"). The stopped-too-LATE pole, mirror of premature-stop, read
+	// from the human's own words (the bbp thesis) — the SAME modality as its twin, which
+	// is why it lives here rather than as a friction counter. Anchor: Majgaonkar (ICSE
+	// 2026, "inability to abandon an unproductive loop"); master map §5. The AGENT-
+	// behaviour / no-pushback complement (the loop the human never calls out) is already
+	// caught by ferret's friction metrics (score.KindLoop / retry counts) — referenced,
+	// not rebuilt here, mirroring how over-initiative's no-pushback case is bbp.18.
+	CauseOverPersistence AgentCause = "over-persistence"
 )
 
 // continuationCues match a human turn that demands the agent CONTINUE work it
@@ -99,6 +110,33 @@ var overInitiativeCues = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\bwhy did you (chang|edit|modif|touch|delet|rewrit|refactor|overwrit|remov|updat|creat)\w*\b`),
 }
 
+// overPersistenceCues match a human turn CALLING OFF an unproductive effort — the
+// deterministic tell that the agent kept going when it should have stopped, read from
+// the human's own words (the bbp thesis). The stopped-too-LATE mirror of the
+// continuationCues; anchor: Majgaonkar (ICSE 2026, "inability to abandon an
+// unproductive loop"), master map §5.
+//
+// Precision-first/corrective, like its twin: a bare "stop" is too broad (it collides
+// with over-initiative's "stop editing" and meta's "stop explaining"), so the cues
+// require an ABANDON framing — a circling/looping metaphor ("going in circles",
+// "you're looping"), an explicit give-up-on-this-path ("give up on that approach",
+// "let it go"), or a not-working-so-stop redirect. "stop editing" (a mutation halt →
+// over-initiative) and "keep going" (→ premature-stop) are checked BEFORE these and
+// are disjoint. The agent-behaviour / no-pushback case (the loop the human never calls
+// out) is the friction complement (score.KindLoop / retries), not rebuilt here.
+var overPersistenceCues = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\b(going (in|around in) circles|round in circles)\b`),
+	regexp.MustCompile(`(?i)\byou('?re| are) (just )?(looping|spinning your wheels|chasing your tail|going in circles)\b`),
+	regexp.MustCompile(`(?i)\b(give up on|abandon|drop) (this|that|the) (approach|idea|path|line|attempt|route|thing)\b`),
+	regexp.MustCompile(`(?i)\b(just )?stop (trying|already)\b`),
+	regexp.MustCompile(`(?i)\b(this|that|it) ?(is ?n'?t|'?s not) working[\s,.—-]*(just )?(stop|give up|move on|try (something|another))\b`),
+	regexp.MustCompile(`(?i)\blet (it|this|that) go\b`),
+	regexp.MustCompile(`(?i)\bmove on (from (this|that|it)|already)\b`),
+	regexp.MustCompile(`(?i)\b(you keep|you'?re) (doing|trying|repeating) the same (thing|approach|fix)\b`),
+	regexp.MustCompile(`(?i)\bsame (thing|error|failure|mistake) (over and over|again and again|repeatedly)\b`),
+	regexp.MustCompile(`(?i)\bthat'?s enough (of (this|that))\b`),
+}
+
 // AgentContext carries the AGENT-turn shape the two under-action causes need: what
 // the assistant turn(s) between the previous human turn and this one looked like.
 // under-initiative and miscalibrated-interruption both key on the agent UNDER-acting
@@ -136,12 +174,16 @@ var pushToExecuteCues = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\byes,? (do it|make the change|go ahead and \w+)\b`),
 }
 
-// TagAgentCause reads a user turn for the two CONTEXT-FREE initiative-calibration
-// causes — CausePrematureStop (a continuation demand) and CauseOverInitiative (a
-// reversal of an unrequested action) — from the human's words alone. Premature-stop is
-// checked first so behavior is preserved; the cue sets are disjoint in practice (a
-// continuation demand never reads as a reversal). The two agent-turn-context causes are
-// TagAgentCauseContext's job. ok=false means no context-free signal on this turn.
+// TagAgentCause reads a user turn for the three CONTEXT-FREE initiative-calibration
+// causes, from the human's words alone: CausePrematureStop (a continuation demand),
+// CauseOverInitiative (a reversal of an unrequested action), and CauseOverPersistence
+// (a call to abandon an unproductive path). The stop-timing pair leads — premature-stop
+// then over-persistence, its mirror pole — and over-initiative sits between them;
+// checked in this order so behavior is preserved and the cue sets stay disjoint (a
+// continuation demand never reads as a reversal or an abandon-call, and "stop editing"
+// routes to over-initiative before over-persistence's "stop trying"). The two
+// agent-turn-context causes are TagAgentCauseContext's job. ok=false means no
+// context-free signal on this turn.
 func TagAgentCause(turn string) (cause AgentCause, cue string, ok bool) {
 	if c, matched := firstMatch(turn, continuationCues); matched {
 		return CausePrematureStop, c, true
@@ -151,6 +193,9 @@ func TagAgentCause(turn string) (cause AgentCause, cue string, ok bool) {
 	}
 	if c, matched := firstMatch(turn, overInitiativeCues); matched {
 		return CauseOverInitiative, c, true
+	}
+	if c, matched := firstMatch(turn, overPersistenceCues); matched {
+		return CauseOverPersistence, c, true
 	}
 	return "", "", false
 }

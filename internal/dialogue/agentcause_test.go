@@ -92,6 +92,50 @@ func TestTagAgentCauseOverInitiative(t *testing.T) {
 	}
 }
 
+// TestTagAgentCauseOverPersistence: a human turn calling off an unproductive effort
+// tags CauseOverPersistence — the stopped-too-LATE mirror of premature-stop. A bare
+// "stop <mutation>" (over-initiative) and "keep going" (premature-stop) do NOT land
+// here: the stop-timing poles and the mutation-halt stay disjoint.
+func TestTagAgentCauseOverPersistence(t *testing.T) {
+	fires := []string{
+		"you're going in circles here",
+		"you keep trying the same thing",
+		"give up on that approach",
+		"just stop trying",
+		"this isn't working, move on",
+		"that isn't working — just give up",
+		"let it go and do the auth first",
+		"move on from this already",
+		"same error over and over — stop",
+		"that's enough of this",
+	}
+	for _, s := range fires {
+		if cause, cue, ok := TagAgentCause(s); !ok || cause != CauseOverPersistence {
+			t.Errorf("%q → (%q,%q,%v), want over-persistence", s, cause, cue, ok)
+		}
+	}
+
+	quiet := []string{
+		"keep going",                      // premature-stop — the opposite pole
+		"don't stop now",                  // premature-stop
+		"stop editing the tests",          // over-initiative (mutation halt)
+		"move on to the next task",        // new-task, not abandon-this
+		"this approach is elegant",        // no abandon framing
+		"drop the table in the migration", // 'drop the table', not 'drop the approach'
+	}
+	for _, s := range quiet {
+		if cause, _, ok := TagAgentCause(s); ok && cause == CauseOverPersistence {
+			t.Errorf("%q → %q, want no over-persistence (false-fire)", s, cause)
+		}
+	}
+
+	// The two stop-timing poles are mutually exclusive: "keep going" is premature-stop,
+	// "give up on that approach" is over-persistence — never crossed.
+	if cause, _, _ := TagAgentCause("keep going"); cause != CausePrematureStop {
+		t.Errorf(`"keep going" → %q, want premature-stop`, cause)
+	}
+}
+
 // TestTagAgentCauseUnderInitiative: after the agent EXPLAINED where execution was
 // wanted (no tool call, no permission ask), a push-to-execute reaction tags
 // under-initiative; the same reaction after the agent ACTED does not (it reads as a
