@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 
 	"github.com/dkoosis/ferret/internal/analyst"
 	"github.com/dkoosis/ferret/internal/out"
@@ -23,6 +26,11 @@ func analystContext() (context.Context, context.CancelFunc) {
 
 var errAdjSessionRequired = errors.New("adjudicate: --session PREFIX required")
 
+// errNoRecallRuns is the empty-honest sentinel: a recall-trace with no runs is a
+// hard error, never a silent zero-finding green (the downstream metric must not
+// read a false baseline off an empty batch). Wrapped with the path at the call.
+var errNoRecallRuns = errors.New("adjudicate: recall-trace has no runs")
+
 // cmdAdjudicate runs the LLM analyst over one session's spine. It is the
 // precision half of the loop: the deterministic spine (recall — every
 // prompt+reasoning+call) is the input; the model judges each call against the
@@ -35,6 +43,9 @@ var errAdjSessionRequired = errors.New("adjudicate: --session PREFIX required")
 // pipeline is exercisable before an API key is wired up.
 func cmdAdjudicate() error {
 	cmd := &CLI.Adjudicate
+	if cmd.RecallTrace != "" {
+		return runRecallTrace()
+	}
 	if cmd.Session == "" {
 		return errAdjSessionRequired
 	}
@@ -189,6 +200,148 @@ func writeProposeText(w io.Writer, res analyst.ProposeResult) error {
 		sink.Row("    why: %s", p.Why)
 	}
 	return nil
+}
+
+// recallRun mirrors one row of trixi-bot's recall-trace.jsonl (its
+// agent.RecallTrace): the fragments memory surfaced at run start paired with the
+// final answer they may or may not have shaped. Field tags match the emitter
+// (trixi-bot internal/core/agent/trace.go) so the JSONL parses verbatim; the
+// timestamp/chat fields the judge doesn't need are ignored on decode.
+type recallRun struct {
+	RunID     string             `json:"run_id"`
+	Recalled  []recalledFragment `json:"recalled"`
+	FinalText string             `json:"final_text"`
+	Outcome   string             `json:"outcome"`
+}
+
+type recalledFragment struct {
+	Source string `json:"source"`
+	Text   string `json:"text"`
+}
+
+// items projects the row's fragments onto the analyst's input shape.
+func (r recallRun) items() []analyst.RecalledItem {
+	out := make([]analyst.RecalledItem, len(r.Recalled))
+	for i, f := range r.Recalled {
+		out[i] = analyst.RecalledItem{Source: f.Source, Text: f.Text}
+	}
+	return out
+}
+
+// runRecallTrace is the memory-use branch (ferret-izo): instead of a transcript
+// session it reads trixi-bot's recall-trace.jsonl — recalled fragments + the
+// final answer per run — and judges, per run, whether each fragment shaped the
+// answer. Findings across all runs aggregate into ONE Result whose findings shape
+// trixi-bot's eval/adjudicate mapper (gg-8rq.16.2) consumes unchanged. The CLI
+// seam is the contract: subprocess, --format json, keychain key — the judge lives
+// here, never reimplemented downstream.
+func runRecallTrace() error {
+	cmd := &CLI.Adjudicate
+	if err := validateFormat(cmd.Format); err != nil {
+		return err
+	}
+	runs, err := readRecallTrace(cmd.RecallTrace)
+	if err != nil {
+		return err
+	}
+	// The downstream metric (gg-8rq.16.3) must not read a false baseline off an
+	// empty batch; the consumer surfaces this error through its --trace seam.
+	if len(runs) == 0 {
+		return fmt.Errorf("%w: %q", errNoRecallRuns, cmd.RecallTrace)
+	}
+
+	if cmd.EmitPrompt {
+		emitRecallPrompts(os.Stdout, runs)
+		return nil
+	}
+
+	cfg := analyst.Config{Model: cmd.Model, Timeout: cmd.Timeout}
+	ok, err := cfg.HasAPIKey()
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return analyst.ErrNoAPIKey
+	}
+	ctx, stop := analystContext()
+	defer stop()
+
+	res := analyst.Result{Session: recallTraceLabel(cmd.RecallTrace)}
+	for _, r := range runs {
+		// A run that recalled nothing has no fragment to judge — skip the paid call
+		// rather than ask the model to judge an empty set.
+		if len(r.Recalled) == 0 {
+			continue
+		}
+		findings, model, err := analyst.RunRecallTrace(ctx, cfg, r.FinalText, r.Outcome, r.items())
+		if err != nil {
+			return fmt.Errorf("adjudicate recall-trace run %s: %w", r.RunID, err)
+		}
+		if res.Model == "" {
+			res.Model = model
+		}
+		res.Findings = append(res.Findings, findings...)
+	}
+
+	if cmd.Format == fmtJSON {
+		return out.JSON(os.Stdout, res)
+	}
+	return writeAdjudicateText(os.Stdout, res)
+}
+
+// readRecallTrace parses a recall-trace.jsonl into its runs. One JSON object per
+// line; blank lines are skipped; a malformed line fails loud with its line number
+// (a truncated or corrupt batch must not be half-scored, mirroring the consumer's
+// trailing-JSON rejection). The scanner buffer is raised because a run's final
+// answer plus recalled fragments can exceed the 64KiB default.
+func readRecallTrace(path string) ([]recallRun, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	var runs []recallRun
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for line := 1; sc.Scan(); line++ {
+		b := bytes.TrimSpace(sc.Bytes())
+		if len(b) == 0 {
+			continue
+		}
+		var r recallRun
+		if err := json.Unmarshal(b, &r); err != nil {
+			return nil, fmt.Errorf("recall-trace %s line %d: %w", path, line, err)
+		}
+		runs = append(runs, r)
+	}
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("recall-trace %s: %w", path, err)
+	}
+	return runs, nil
+}
+
+// recallTraceLabel names the batch in the Result the way a session id names a
+// spine adjudication — the trace file's basename, prefixed so it reads as a
+// recall-trace batch rather than a Claude Code session.
+func recallTraceLabel(path string) string {
+	return "recall-trace:" + filepath.Base(path)
+}
+
+// emitRecallPrompts is the --emit-prompt escape hatch for the recall-trace mode:
+// assemble and print each run's prompt without a network call, so the pipeline is
+// exercisable before an API key is wired up (same convention as cmdAdjudicate).
+func emitRecallPrompts(w io.Writer, runs []recallRun) {
+	for i, r := range runs {
+		if len(r.Recalled) == 0 {
+			continue
+		}
+		system, user := analyst.BuildRecallPrompt(r.FinalText, r.Outcome, r.items())
+		fmt.Fprintf(w, "=== RUN %d (%s) SYSTEM ===\n", i+1, r.RunID)
+		fmt.Fprintln(w, system)
+		fmt.Fprintf(w, "\n=== RUN %d (%s) USER ===\n", i+1, r.RunID)
+		fmt.Fprintln(w, user)
+		fmt.Fprintln(w)
+	}
 }
 
 // proposeMark maps a fix lever to its glyph (css symbol vocabulary).
