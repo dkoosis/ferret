@@ -290,6 +290,15 @@ var CLI struct {
 		Timeout     time.Duration `help:"Operator deadline for the analyst call across all retries (0 = SDK defaults)." default:"5m" name:"timeout"`
 	} `cmd:"" help:"LLM analyst: flag tool-for-intent mismatches in a session, --propose cost-cutting fixes, or --recall-trace judge memory use/miss (precision layer; dk validates)."`
 
+	OverInitiative struct {
+		Session    string        `help:"Session ID prefix (required)." name:"session"`
+		Root       string        `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
+		Model      string        `help:"Claude model ID (default: claude-sonnet-4-6; use claude-opus-4-8 for calibration)." name:"model"`
+		Format     string        `help:"Output format: text|json." default:"text" name:"format"`
+		EmitPrompt bool          `help:"Assemble + print each candidate's judge prompt without calling the model (no API key needed)." name:"emit-prompt"`
+		Timeout    time.Duration `help:"Operator deadline for the analyst call across all retries (0 = SDK defaults)." default:"5m" name:"timeout"`
+	} `cmd:"" name:"over-initiative" help:"LLM judge of the NO-PUSHBACK over-initiative case: episodes where the agent took a mutating action beyond an advice/review-scoped prompt and the human let it stand (the case the deterministic floor can't read). Precision layer; dk validates. (bbp.18)"`
+
 	Fixes struct {
 		Add struct {
 			Data        string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
@@ -435,6 +444,8 @@ func main() {
 		err = cmdHelped()
 	case "adjudicate":
 		err = cmdAdjudicate()
+	case "over-initiative":
+		err = cmdOverInitiative()
 	case "fixes add":
 		err = cmdFixesAdd()
 	case "fixes list":
