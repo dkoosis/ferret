@@ -75,20 +75,25 @@ var leadingContinueRe = regexp.MustCompile(`(?i)^(continue|keep going|go on|proc
 // "revert" is an ordinary approach repair (it already tags MoveRepair) and does NOT
 // imply the agent OVER-stepped, so these cues require the UNREQUESTED framing — the
 // human disclaims the request ("I didn't ask", "who told you to", "you weren't
-// supposed to"), orders the agent to stop mutating ("stop editing", "don't touch"),
-// or questions an unprompted mutation ("leave it alone", "why did you delete").
-// The agent-turn confirmation (there really WAS an unrequested mutating call) and
-// the no-pushback case (the human stays silent) are the deferred LLM leg (ferret-
-// bbp.18); this floor fires only on an explicit human reversal.
+// supposed to"), orders the agent to halt an action already in flight ("stop
+// editing"), or questions an unprompted mutation ("leave it alone", "why did you
+// delete"). Every cue carries a RETROSPECTIVE marker (a past-tense verb, a request
+// disclaimer, or "stop"/"leave", which presuppose an action already underway); a
+// bare prospective imperative ("don't modify the schema") is deliberately EXCLUDED —
+// it reads identically to an ordinary forward constraint ("refactor the parser, but
+// don't modify the schema") and would libel a correctly-scoped action (Codex #83).
+// That case needs the agent-turn confirmation (there really WAS an unrequested
+// mutating call) — the deferred LLM leg (ferret-bbp.18), which also handles the
+// no-pushback case (the human stays silent). This floor fires only on an explicit
+// human reversal.
 var overInitiativeCues = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\bi (did ?n'?t|didnt|never) ask(ed)?\b`),
 	regexp.MustCompile(`(?i)\bi (did ?n'?t|didnt|never) (tell|want) you to\b`),
 	regexp.MustCompile(`(?i)\bwho (asked|told) you to\b`),
 	regexp.MustCompile(`(?i)\byou (weren'?t|were not|aren'?t|are not) (supposed|asked|meant) to\b`),
 	regexp.MustCompile(`(?i)\b(stop|quit) (chang|edit|modif|touch|delet|rewrit|refactor|overwrit|remov|updat|creat)\w*\b`),
-	regexp.MustCompile(`(?i)\b(don'?t|do not) (chang|edit|modif|touch|delet|rewrit|refactor|overwrit|remov)\w*\b`),
-	regexp.MustCompile(`(?i)\bleave (it|that|them|those|this|the \w+) alone\b`),
-	regexp.MustCompile(`(?i)\bwhy did you (chang|edit|modif|touch|delet|rewrit|refactor|overwrit|remov)\w*\b`),
+	regexp.MustCompile(`(?i)\bleave (it|that|them|those|this|the [\w.-]+(?:\s+[\w.-]+){0,2}) alone\b`),
+	regexp.MustCompile(`(?i)\bwhy did you (chang|edit|modif|touch|delet|rewrit|refactor|overwrit|remov|updat|creat)\w*\b`),
 }
 
 // TagAgentCause reads a user turn for an agent-side initiative-calibration cause.

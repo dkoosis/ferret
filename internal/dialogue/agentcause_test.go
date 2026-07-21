@@ -50,10 +50,13 @@ func TestTagAgentCauseOverInitiative(t *testing.T) {
 		"who told you to delete the file?",
 		"you weren't supposed to touch main.go",
 		"stop editing the tests",
-		"don't modify the schema",
 		"leave it alone",
 		"leave the config alone",
+		"leave the main.go alone",     // filename with a dot after "the"
+		"leave the config file alone", // multi-word noun phrase (Gemini #83)
 		"why did you overwrite my changes",
+		"why did you create this file",  // 'create' — retrospective (Gemini #83)
+		"why did you update the schema", // 'update' — retrospective (Gemini #83)
 	}
 	for _, s := range fires {
 		if cause, cue, ok := TagAgentCause(s); !ok || cause != CauseOverInitiative {
@@ -62,10 +65,16 @@ func TestTagAgentCauseOverInitiative(t *testing.T) {
 	}
 
 	quiet := []string{
-		"undo that",                     // bare reversal — repair, not an over-step claim
-		"no, use the other file",        // approach redirect
-		"why did you choose sonnet?",    // 'choose' is not a mutating verb
-		"don't break the build",         // a constraint, not a stop-mutating order
+		"undo that",                  // bare reversal — repair, not an over-step claim
+		"no, use the other file",     // approach redirect
+		"why did you choose sonnet?", // 'choose' is not a mutating verb
+		"don't break the build",      // a constraint, not a stop-mutating order
+		// A bare prospective imperative reads identically to a forward constraint and
+		// so is EXCLUDED — the confirmation that a mutation already happened is the
+		// deferred bbp.18 agent-turn leg (Codex #83).
+		"don't modify the schema",
+		"refactor the parser, but don't modify the schema",
+		"add the endpoint, don't touch the tests",
 		"I didn't realize that was set", // 'realize', not a request disclaimer
 		"add a test for the edge case",
 		"leave the rest for tomorrow", // 'leave X for Y', not 'leave X alone'
