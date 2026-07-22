@@ -204,3 +204,31 @@ func TestCandidatesText(t *testing.T) {
 		}
 	}
 }
+
+// TestCandidatesTextNextLine pins the AXI #9 follow-up hint (ferret-8bb): a
+// non-empty ranking chains to `adjudicate --propose` with the session carried
+// through, an empty ranking chains to nothing, and JSON never carries the hint.
+func TestCandidatesTextNextLine(t *testing.T) {
+	const next = "next: ferret adjudicate --session s --propose"
+
+	var full bytes.Buffer
+	if err := writeCandidatesText(&full, candResult{Session: "s", Candidates: []candidate{{Task: 1, Cost: 10, Score: 12}}}); err != nil {
+		t.Fatalf("writeCandidatesText: %v", err)
+	}
+	if !strings.Contains(full.String(), next) {
+		t.Errorf("non-empty ranking missing next line:\n%s", full.String())
+	}
+
+	var empty bytes.Buffer
+	if err := writeCandidatesText(&empty, candResult{Session: "s"}); err != nil {
+		t.Fatalf("writeCandidatesText empty: %v", err)
+	}
+	if strings.Contains(empty.String(), "next:") {
+		t.Errorf("empty ranking emitted a next line:\n%s", empty.String())
+	}
+
+	// JSON mode is data-only — no follow-up hint.
+	if out := runCand(t, segFixtureLines(), fmtJSON, 0); strings.Contains(out, "next:") {
+		t.Errorf("json output carried a next line:\n%s", out)
+	}
+}

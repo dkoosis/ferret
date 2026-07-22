@@ -339,5 +339,11 @@ func writeCandidatesText(w io.Writer, res candResult) error {
 		fmt.Fprintf(bw, " (top %d of %d)", res.Top, res.Tasks)
 	}
 	fmt.Fprintln(bw)
+	// AXI #9 (contextual disclosure): chain the natural next stage — adjudicate
+	// the ranked bundle into proposals. Data first, hint last (AXI #8); omitted
+	// on an empty ranking (nothing to adjudicate). Text mode only.
+	if len(res.Candidates) > 0 {
+		fmt.Fprintf(bw, "next: ferret adjudicate --session %s --propose\n", res.Session)
+	}
 	return bw.Flush()
 }

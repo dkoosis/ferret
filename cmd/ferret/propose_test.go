@@ -36,6 +36,15 @@ func TestWriteProposeTextRendersActionable(t *testing.T) {
 	if strings.Contains(out, "novel debugging") {
 		t.Errorf("declined proposal leaked into actionable output:\n%s", out)
 	}
+	// AXI #9: actionable proposals chain to the fix ledger (ferret-8bb). The hint
+	// is a fill-in template — labeled as such, with bare (unquoted) placeholders so
+	// it can't paste into a shell and record literal <tokens>/<action> values.
+	if !strings.Contains(out, "next (template — fill from a proposal above): ferret fixes add --motif <tokens> --fix <action>") {
+		t.Errorf("actionable output missing/altered next template line:\n%s", out)
+	}
+	if strings.Contains(out, `--motif "<tokens>"`) {
+		t.Errorf("quoted placeholders would paste as a runnable command recording bogus ledger values:\n%s", out)
+	}
 }
 
 func TestWriteProposeTextNoActionable(t *testing.T) {
@@ -50,5 +59,9 @@ func TestWriteProposeTextNoActionable(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "no actionable fixes proposed") {
 		t.Errorf("expected no-actionable line:\n%s", buf.String())
+	}
+	// No actionable proposals → nothing to chain to (ferret-8bb).
+	if strings.Contains(buf.String(), "next:") {
+		t.Errorf("empty proposal set emitted a next line:\n%s", buf.String())
 	}
 }
