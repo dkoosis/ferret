@@ -26,6 +26,17 @@ func TestTerminalAction(t *testing.T) {
 		{"empty shape", nil, "", false},
 		{"last terminal action wins", []string{"sh:git_commit", "Edit", "sh:git_push"}, "sh:git_push", true},
 		{"read-only between mutations still last-mutation", []string{"sh:git_commit", "sh:git_status"}, "sh:git_commit", true},
+		// ferret-bbp.21: terminalTracker joins terminalVCS as the 4th multiplicand
+		// — a minted/closed bead is a shipped artifact too, not just a commit.
+		{"bd_create fires", []string{"sh:bd_create"}, "sh:bd_create", true},
+		{"bd_close fires", []string{"sh:bd_close"}, "sh:bd_close", true},
+		{"bd_update does not fire (chatty status flip, excluded)", []string{"sh:bd_update"}, "", false},
+		{
+			"43ad3b27-shaped: bd_create then bd_update then non-terminal lint, create wins",
+			[]string{"sh:bd_create", "sh:bd_update", "sh:bd_lint"}, "sh:bd_create", true,
+		},
+		{"tracker after vcs: last match wins across families", []string{"sh:git_commit", "sh:bd_close"}, "sh:bd_close", true},
+		{"vcs after tracker: last match wins across families", []string{"sh:bd_create", "sh:git_push"}, "sh:git_push", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -123,5 +134,47 @@ func TestSegmentSourceOutcome(t *testing.T) {
 		if mustMarshal(t, got) != want {
 			t.Fatalf("run %d not byte-stable", i)
 		}
+	}
+}
+
+// trackerFixtureLines mirrors the ferret-bbp.21 evidence session (43ad3b27): a
+// single task whose final calls are bd_create -> bd_update -> a non-terminal
+// lint check, then exit clean — no git/gh call anywhere. The weak label must
+// still fire on bd_create (last terminal match), proving terminalTracker joins
+// terminalVCS rather than replacing it.
+func trackerFixtureLines() []string {
+	return []string{
+		`{"type":"user","sessionId":"s","message":{"role":"user","content":"reproduce the recall bug and file a tracking bead for it"}}`,
+		`{"type":"assistant","sessionId":"s","message":{"role":"assistant","content":[` +
+			`{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"bd create --title recall-bug"}},` +
+			`{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"bd update recall-bug --status open"}},` +
+			`{"type":"tool_use","id":"t3","name":"Bash","input":{"command":"bd lint"}}]}}`,
+	}
+}
+
+// TestSegmentSourceOutcomeTracker is the tracker-family integration contract:
+// a session with no VCS terminal at all still ships via bd_create, and the
+// idempotent/byte-stable contract holds for the tracker path exactly as it does
+// for VCS (TestSegmentSourceOutcome).
+func TestSegmentSourceOutcomeTracker(t *testing.T) {
+	src := writeSession(t, trackerFixtureLines())
+	res, err := SegmentSource(src)
+	if err != nil {
+		t.Fatalf("SegmentSource: %v", err)
+	}
+	if len(res.Segments) != 1 {
+		t.Fatalf("want 1 segment, got %d", len(res.Segments))
+	}
+	if got := res.Segments[0].Outcome; got == nil || !got.Positive || got.Signal != "sh:bd_create" {
+		t.Errorf("seg1 outcome = %+v, want shipped via sh:bd_create", got)
+	}
+
+	want := mustMarshal(t, res)
+	got, gerr := SegmentSource(src)
+	if gerr != nil {
+		t.Fatal(gerr)
+	}
+	if mustMarshal(t, got) != want {
+		t.Fatalf("not byte-stable")
 	}
 }

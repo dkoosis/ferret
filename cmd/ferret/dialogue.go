@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/dkoosis/ferret/internal/dialogue"
+	"github.com/dkoosis/ferret/internal/score"
 	"github.com/dkoosis/ferret/internal/transcript"
 	"github.com/dkoosis/ferret/internal/turn"
 )
@@ -29,6 +30,14 @@ type dlgResult struct {
 	Repairs    int               `json:"repairs"`
 	Accepts    int               `json:"accepts"`
 	DecodeErrs int               `json:"decodeErrs,omitempty"`
+	// Shipped carries the terminal-tracker signal (e.g. "sh:bd_create") when the
+	// moves-outcome alone read unknown but the session's FINAL segment shipped a
+	// tracked artifact (ferret-bbp.21). Empty unless Outcome == OutcomeUnknown: a
+	// session with repair moves is never OutcomeUnknown in the first place, so
+	// this can never upgrade a repair-heavy/abandoned read — the precedence is
+	// structural, not a second check. Present in both formats, but Outcome itself
+	// is left untouched (episode.Classify semantics stay exactly as before).
+	Shipped string `json:"shipped,omitempty"`
 }
 
 // cmdDialogue wires the kong flags to dialogue tagging, resolving the transcript
@@ -79,6 +88,11 @@ func runDialogue(w io.Writer, root, session, format string) error {
 		return err
 	}
 	res.Outcome = dialogue.Classify(moves)
+	if res.Outcome == dialogue.OutcomeUnknown {
+		if sig, ok := shippedTell(src); ok {
+			res.Shipped = sig
+		}
+	}
 
 	if format == fmtJSON {
 		enc := json.NewEncoder(w)
@@ -86,6 +100,29 @@ func runDialogue(w io.Writer, root, session, format string) error {
 		return enc.Encode(res)
 	}
 	return writeDialogueText(w, res)
+}
+
+// shippedTell reports the terminal-tracker/VCS signal (internal/score's weak
+// per-segment Outcome label) on the session's FINAL segment, if any. It is the
+// join half of ferret-bbp.21: the moves-only session rollup can read unknown
+// (43ad3b27 — recall-failure diagnosis, bug reproduced, tx-0455 filed and
+// conformed, clean /exit — no accept-shaped human turn anywhere) while the
+// segmenter's independent artifact read shows the task closed on a durable
+// artifact. Re-segments src (score.SegmentSource is a pure function of the
+// transcript, cheap, and keeps this join decoupled from runDialogue's own
+// move-tagging walk) rather than widening dlgResult's caller to thread a
+// score.Result through. Errors are swallowed to "no tell" — this is a WEAK,
+// best-effort signal (kuv.8 contract), never worth failing `ferret dialogue` over.
+func shippedTell(src transcript.Source) (signal string, ok bool) {
+	res, err := score.SegmentSource(src)
+	if err != nil || len(res.Segments) == 0 {
+		return "", false
+	}
+	last := res.Segments[len(res.Segments)-1]
+	if last.Outcome == nil {
+		return "", false
+	}
+	return last.Outcome.Signal, true
 }
 
 // agentTurnState accumulates the agent-turn context between two genuine human turns:
@@ -220,8 +257,12 @@ func writeDialogueText(w io.Writer, res dlgResult) error {
 		}
 		fmt.Fprintf(bw, "[turn %d] %-8s%s%s  %s\n", s.Turn, s.Move, cue, cause, s.Text)
 	}
+	outcome := string(res.Outcome)
+	if res.Shipped != "" {
+		outcome = fmt.Sprintf("shipped(%s)", res.Shipped)
+	}
 	fmt.Fprintf(bw, "--- turns=%d repairs=%d accepts=%d outcome=%s",
-		len(res.Signals), res.Repairs, res.Accepts, res.Outcome)
+		len(res.Signals), res.Repairs, res.Accepts, outcome)
 	if res.DecodeErrs > 0 {
 		fmt.Fprintf(bw, " decode-errs=%d", res.DecodeErrs)
 	}
