@@ -1824,11 +1824,12 @@ func mermaidLabel(s string) string {
 }
 
 // sankeyField renders one CSV field of a mermaid sankey-beta row (RFC 4180):
-// a value containing a comma, quote, or newline is wrapped in quotes with
-// embedded quotes doubled. Exact-lens tokens can carry raw command text with
-// commas, and an unquoted comma would silently add a phantom column.
+// a value containing a comma, quote, or line break (LF or CR) is wrapped in
+// quotes with embedded quotes doubled. Exact-lens tokens can carry raw command
+// text with commas, and an unquoted comma — or a bare CR, which CSV parsers
+// treat as a record boundary — would silently corrupt the row.
 func sankeyField(s string) string {
-	if !strings.ContainsAny(s, `",`+"\n") {
+	if !strings.ContainsAny(s, `",`+"\n\r") {
 		return s
 	}
 	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`

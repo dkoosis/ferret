@@ -266,6 +266,8 @@ func TestSankeyFieldEscaping(t *testing.T) {
 		"Bash(a, b)":            `"Bash(a, b)"`,
 		`Grep:"foo"`:            `"Grep:""foo"""`,
 		"sh:git status && diff": "sh:git status && diff",
+		"echo a\rb":             "\"echo a\rb\"", // bare CR is a CSV record boundary — must quote
+		"line\nbreak":           "\"line\nbreak\"",
 	} {
 		if got := sankeyField(in); got != want {
 			t.Errorf("sankeyField(%q) = %q, want %q", in, got, want)
