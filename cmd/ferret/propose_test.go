@@ -36,6 +36,10 @@ func TestWriteProposeTextRendersActionable(t *testing.T) {
 	if strings.Contains(out, "novel debugging") {
 		t.Errorf("declined proposal leaked into actionable output:\n%s", out)
 	}
+	// AXI #9: actionable proposals chain to the fix ledger (ferret-8bb).
+	if !strings.Contains(out, "next: ferret fixes add --motif") {
+		t.Errorf("actionable output missing next line:\n%s", out)
+	}
 }
 
 func TestWriteProposeTextNoActionable(t *testing.T) {
@@ -50,5 +54,9 @@ func TestWriteProposeTextNoActionable(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "no actionable fixes proposed") {
 		t.Errorf("expected no-actionable line:\n%s", buf.String())
+	}
+	// No actionable proposals → nothing to chain to (ferret-8bb).
+	if strings.Contains(buf.String(), "next:") {
+		t.Errorf("empty proposal set emitted a next line:\n%s", buf.String())
 	}
 }
