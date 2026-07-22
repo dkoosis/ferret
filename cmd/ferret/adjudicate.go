@@ -203,7 +203,12 @@ func writeProposeText(w io.Writer, res analyst.ProposeResult) error {
 	// AXI #9 (contextual disclosure): chain the natural next stage — record the
 	// acted-on fix in the ledger. Head-style so the hint survives row truncation
 	// (AXI #8, data first). Only reached when actionable proposals exist.
-	sink.Head(`next: ferret fixes add --motif "<tokens>" --fix "<action>"`)
+	// Unlike the candidates→propose hint, this one is a fill-in template, not a
+	// runnable line: Proposal carries free-text, not discrete motif/fix tokens, so
+	// dk translates a proposal above into the two flags. Bare (unquoted) angle
+	// brackets keep it from pasting cleanly into a shell and recording literal
+	// placeholders in the ledger.
+	sink.Head(`next (template — fill from a proposal above): ferret fixes add --motif <tokens> --fix <action>`)
 	return nil
 }
 
