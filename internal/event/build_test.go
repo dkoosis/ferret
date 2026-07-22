@@ -37,6 +37,13 @@ func toolResultContent(uuid, id, contentJSON string) string {
 		uuid, id, contentJSON)
 }
 
+// toolResultErrContent is toolResultContent with is_error set — a failed call
+// that still carries a result body (an error message).
+func toolResultErrContent(uuid, id, contentJSON string) string {
+	return fmt.Sprintf(`{"type":"user","uuid":%q,"timestamp":"2026-06-10T10:00:05Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":%q,"is_error":true,"content":%s}]}}`,
+		uuid, id, contentJSON)
+}
+
 func ingest(t *testing.T, src transcript.Source) []*Event {
 	t.Helper()
 	b := NewBuilder()
@@ -546,6 +553,47 @@ func TestTrixiCompoundQueryAttribution(t *testing.T) {
 				t.Errorf("evs[%d].Results[%d] = %+v, want %+v", i, j, ev.Results[j], w)
 			}
 		}
+	}
+}
+
+// TestTrixiFailedCallYieldsNoHits pins the review fix: a FAILED trixi ask/search
+// whose error text happens to carry a 12-hex token (a session id, trace hash,
+// truncated digest) must not fabricate hits — parseHexHits is a plain-text scan,
+// so hit extraction is gated on StatusOK.
+func TestTrixiFailedCallYieldsNoHits(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"trixi ask \"memory design\""}`),
+		toolResultErrContent("u2", "t1", `"error: kg daemon unreachable (trace 03447c82d743)\n"`),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 1 {
+		t.Fatalf("events = %d, want 1", len(evs))
+	}
+	if evs[0].Status != StatusFail {
+		t.Fatalf("status = %q, want %q", evs[0].Status, StatusFail)
+	}
+	if evs[0].Query != "memory design" {
+		t.Errorf("Query = %q, want %q (query still captured from the call)", evs[0].Query, "memory design")
+	}
+	if evs[0].Results != nil {
+		t.Errorf("Results = %+v, want nil — a failed call must not scrape hits from its error text", evs[0].Results)
+	}
+}
+
+// TestTrixiQueryShellEscapes pins the review fix: a double-quoted query with
+// shell escapes beyond \" (here \$ and \\) is stored as the value the CLI
+// received, not its escaped source.
+func TestTrixiQueryShellEscapes(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"trixi ask \"cost \\$5 path\\\\name\""}`),
+		toolResultContent("u2", "t1", `"no hits\n"`),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 1 {
+		t.Fatalf("events = %d, want 1", len(evs))
+	}
+	if want := `cost $5 path\name`; evs[0].Query != want {
+		t.Errorf("Query = %q, want %q (shell escapes decoded)", evs[0].Query, want)
 	}
 }
 

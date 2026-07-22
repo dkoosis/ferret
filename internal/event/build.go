@@ -241,7 +241,18 @@ func (b *Builder) resolve(st *fileState, blk *transcript.Block, ts time.Time) {
 // hits. The MCP arm is never compound (a single tool_use), so a lone query event
 // dispatches by Kind; the shell arm can be compound, when two query-mode trixi
 // calls chain in one Bash tool_use and share one tool_result.
+//
+// Only a successful call yields real hits: parseHexHits is a plain-text scan, so
+// a failed trixi ask/search whose error body happens to carry a 12-hex token (a
+// session id, trace hash, truncated digest) would otherwise fabricate hits from
+// error text (ferret-bbp.20 review). Every segment of a block shares one status,
+// so evs[0] is representative; StatusCFail (a chained peer failed, which trixi
+// call is unknown) is treated as non-success, matching finish()'s no-attribution
+// stance on compound failures.
 func attachRetrievalHits(evs []*Event, content json.RawMessage) {
+	if len(evs) == 0 || evs[0].Status != StatusOK {
+		return
+	}
 	if len(evs) == 1 {
 		if evs[0].Query == "" {
 			return
@@ -403,19 +414,45 @@ func trixiCLIQuery(cmd, raw string) string {
 	return ""
 }
 
-// unquoteShellWord strips a single matching pair of surrounding quotes (the
-// only quoting trixiQueryWord can produce) from one extracted word.
+// unquoteShellWord strips a single matching pair of surrounding quotes (the only
+// quoting trixiQueryWord can produce) and decodes the escapes that quoting
+// honored, so Event.Query matches the value the CLI actually received rather than
+// its escaped source text (ferret-bbp.20 review). Single quotes preserve their
+// contents verbatim; inside double quotes the shell drops a backslash only before
+// $, `, ", \ or newline, so those pairs collapse to the escaped char.
 func unquoteShellWord(w string) string {
-	if len(w) >= 2 {
-		if (w[0] == '"' && w[len(w)-1] == '"') || (w[0] == '\'' && w[len(w)-1] == '\'') {
-			inner := w[1 : len(w)-1]
-			if w[0] == '"' {
-				inner = strings.ReplaceAll(inner, `\"`, `"`)
-			}
-			return inner
-		}
+	if len(w) < 2 || w[0] != w[len(w)-1] {
+		return w
+	}
+	inner := w[1 : len(w)-1]
+	switch w[0] {
+	case '\'':
+		return inner
+	case '"':
+		return unescapeDoubleQuoted(inner)
 	}
 	return w
+}
+
+// unescapeDoubleQuoted collapses shell double-quote backslash escapes: a
+// backslash is literal except before $, `, ", \ or newline, where it is dropped
+// and the following char kept.
+func unescapeDoubleQuoted(s string) string {
+	if !strings.Contains(s, `\`) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			switch s[i+1] {
+			case '$', '`', '"', '\\', '\n':
+				i++
+			}
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }
 
 // hexHitToken matches a returned nug id embedded in plain-text trixi CLI

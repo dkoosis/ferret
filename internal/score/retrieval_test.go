@@ -27,11 +27,11 @@ func byID(seq int) event.Event {
 // event builder populates Query/Results for query-mode `trixi ask`/`trixi
 // search` shell calls exactly as it does for the MCP get_nug arm.
 func trixiAsk(seq int, query string, ids ...string) event.Event {
-	return trixiShell(seq, "trixi_ask", query, ids...)
+	return trixiShell(seq, trixiAskAction, query, ids...)
 }
 
 func trixiSearch(seq int, query string, ids ...string) event.Event {
-	return trixiShell(seq, "trixi_search", query, ids...)
+	return trixiShell(seq, trixiSearchAction, query, ids...)
 }
 
 func trixiShell(seq int, action, query string, ids ...string) event.Event {
