@@ -91,15 +91,26 @@ func isPushbackTurn(prompt string) bool {
 	return false
 }
 
+// overInitAction is one mutating tool_use recorded into the open window, kept
+// alongside its tool_use_id so a later tool_result on the same id can drop it —
+// and marked dropped rather than deleted so call order survives the resolution.
+type overInitAction struct {
+	analyst.AgentAction
+	id      string
+	dropped bool
+}
+
 // overInitState accumulates one window: the opening prompt and the mutating actions
 // the agent took after it, pending the next human turn's verdict.
 type overInitState struct {
-	prompt  string
-	actions []analyst.AgentAction
-	open    bool
+	prompt string
+	raw    []overInitAction
+	open   bool
 }
 
-// applyAssistant folds an assistant turn's mutating tool calls into the open window.
+// applyAssistant folds an assistant turn's mutating tool calls into the open window,
+// optimistically — a tool_use is recorded before its tool_result is known, and
+// applyToolResult drops it if the result later reports failure/rejection.
 func (st *overInitState) applyAssistant(blocks transcript.Blocks) {
 	if !st.open {
 		return
@@ -107,9 +118,47 @@ func (st *overInitState) applyAssistant(blocks transcript.Blocks) {
 	for i := range blocks {
 		b := &blocks[i]
 		if b.Type == "tool_use" && isMutatingTool(b.Name) {
-			st.actions = append(st.actions, analyst.AgentAction{Tool: b.Name, Detail: actionDetail(b.Input)})
+			st.raw = append(st.raw, overInitAction{
+				AgentAction: analyst.AgentAction{Tool: b.Name, Detail: actionDetail(b.Input)},
+				id:          b.ID,
+			})
 		}
 	}
+}
+
+// applyToolResult drops the mutating action matching this tool_result's id when the
+// result reports is_error. CC surfaces a user-rejected permission prompt the same
+// way as an execution failure — both mean the mutation never landed, so neither may
+// reach the no-pushback judge as evidence of an unrequested action (ferret-xg4). A
+// tool_result with no matching pending id (already resolved, or for a non-mutating
+// tool this window never recorded) is a no-op.
+func (st *overInitState) applyToolResult(blk *transcript.Block) {
+	if !st.open || blk.ToolUseID == "" || blk.IsError == nil || !*blk.IsError {
+		return
+	}
+	for i := range st.raw {
+		if st.raw[i].id == blk.ToolUseID && !st.raw[i].dropped {
+			st.raw[i].dropped = true
+			return
+		}
+	}
+}
+
+// landedActions returns the window's mutating actions whose tool_use was never
+// dropped by a failed/rejected tool_result, in call order. An action whose
+// tool_result never arrived (transcript ended, or the result line was skipped)
+// stays landed — absence of a verdict is not evidence of failure.
+func (st *overInitState) landedActions() []analyst.AgentAction {
+	if len(st.raw) == 0 {
+		return nil
+	}
+	out := make([]analyst.AgentAction, 0, len(st.raw))
+	for _, a := range st.raw {
+		if !a.dropped {
+			out = append(out, a.AgentAction)
+		}
+	}
+	return out
 }
 
 // applyUser processes a genuine or folded human turn, closing the prior window via
@@ -149,6 +198,15 @@ func (st *overInitState) applyLine(line []byte, decodeErrs *int, emit func()) {
 	case roleAssistant:
 		st.applyAssistant(raw.Message.Content)
 	case roleUser:
+		// tool_result blocks land on user-role lines and must resolve pending
+		// mutations even on a tool_result-only line, where turn.PromptText returns
+		// "" and applyUser below never fires — checking both independently is what
+		// makes those lines visible to the gate.
+		for i := range raw.Message.Content {
+			if b := &raw.Message.Content[i]; b.Type == "tool_result" {
+				st.applyToolResult(b)
+			}
+		}
 		if prompt := turn.PromptText(raw.Message.Content); prompt != "" {
 			st.applyUser(prompt, emit)
 		}
@@ -162,8 +220,11 @@ func (st *overInitState) applyLine(line []byte, decodeErrs *int, emit func()) {
 func collectOverInitiativeCandidates(path string) (cands []overInitCandidate, decodeErrs int, err error) {
 	var st overInitState
 	emit := func() {
-		if st.open && len(st.actions) > 0 {
-			cands = append(cands, overInitCandidate{Prompt: st.prompt, Actions: st.actions})
+		if !st.open {
+			return
+		}
+		if acts := st.landedActions(); len(acts) > 0 {
+			cands = append(cands, overInitCandidate{Prompt: st.prompt, Actions: acts})
 		}
 	}
 	if rerr := transcript.ReadLines(path, func(line []byte) error {
