@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 
 	"github.com/dkoosis/ferret/internal/analyst"
 	"github.com/dkoosis/ferret/internal/out"
@@ -266,27 +267,87 @@ func runRecallTrace() error {
 	ctx, stop := analystContext()
 	defer stop()
 
-	res := analyst.Result{Session: recallTraceLabel(cmd.RecallTrace)}
-	for _, r := range runs {
-		// A run that recalled nothing has no fragment to judge — skip the paid call
-		// rather than ask the model to judge an empty set.
-		if len(r.Recalled) == 0 {
-			continue
-		}
-		findings, model, err := analyst.RunRecallTrace(ctx, cfg, r.FinalText, r.Outcome, r.items())
-		if err != nil {
-			return fmt.Errorf("adjudicate recall-trace run %s: %w", r.RunID, err)
-		}
-		if res.Model == "" {
-			res.Model = model
-		}
-		res.Findings = append(res.Findings, findings...)
+	judge := func(jctx context.Context, r recallRun) ([]analyst.Finding, string, error) {
+		return analyst.RunRecallTrace(jctx, cfg, r.FinalText, r.Outcome, r.items())
 	}
+	res, err := judgeRecallRuns(ctx, runs, judge)
+	if err != nil {
+		return err
+	}
+	res.Session = recallTraceLabel(cmd.RecallTrace)
 
 	if cmd.Format == fmtJSON {
 		return out.JSON(os.Stdout, res)
 	}
 	return writeAdjudicateText(os.Stdout, res)
+}
+
+// recallJudgeFunc judges one run's recalled fragments against its final answer,
+// returning the findings and the model that produced them. Abstracts
+// analyst.RunRecallTrace so tests can inject a fake judge without a network call.
+type recallJudgeFunc func(ctx context.Context, r recallRun) ([]analyst.Finding, string, error)
+
+// judgeRecallRuns fans the per-run judge calls out across an 8-wide semaphore
+// (ferret-nv3: sequential judging was O(n) wall-clock on large batches). Each
+// run's result lands in its own slot of an index-aligned slice, so the
+// concurrent fan-out cannot scramble finding order — callers downstream
+// (gg-8rq.16.2) assume findings arrive in run order. The first error from any
+// run cancels the shared context (cooperative fail-fast, mirroring the SIGINT
+// wiring in analystContext) and is returned once every in-flight call has
+// drained; it is never swallowed.
+//
+// A run with no recalled fragments has nothing to judge and is skipped — same
+// as the prior sequential loop, it costs no paid call and leaves its result
+// slot at its zero value.
+func judgeRecallRuns(ctx context.Context, runs []recallRun, judge recallJudgeFunc) (analyst.Result, error) {
+	const maxConcurrency = 8
+
+	type runOutcome struct {
+		findings []analyst.Finding
+		model    string
+	}
+	results := make([]runOutcome, len(runs))
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	sem := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
+	var errOnce sync.Once
+	var firstErr error
+
+	for i, r := range runs {
+		if len(r.Recalled) == 0 {
+			continue
+		}
+		sem <- struct{}{}
+		wg.Go(func() {
+			defer func() { <-sem }()
+			findings, model, err := judge(ctx, r)
+			if err != nil {
+				errOnce.Do(func() {
+					firstErr = fmt.Errorf("adjudicate recall-trace run %s: %w", r.RunID, err)
+					cancel()
+				})
+				return
+			}
+			results[i] = runOutcome{findings: findings, model: model}
+		})
+	}
+	wg.Wait()
+
+	if firstErr != nil {
+		return analyst.Result{}, firstErr
+	}
+
+	var res analyst.Result
+	for _, o := range results {
+		if res.Model == "" && o.model != "" {
+			res.Model = o.model
+		}
+		res.Findings = append(res.Findings, o.findings...)
+	}
+	return res, nil
 }
 
 // readRecallTrace parses a recall-trace.jsonl into its runs. One JSON object per
