@@ -23,6 +23,30 @@ func byID(seq int) event.Event {
 	return event.Event{Seq: seq, Session: "s", Project: "p", Kind: event.KindTool, Action: toolGetNug}
 }
 
+// trixiAsk / trixiSearch mint a KindShell CLI-recall event (ferret-bbp.20): the
+// event builder populates Query/Results for query-mode `trixi ask`/`trixi
+// search` shell calls exactly as it does for the MCP get_nug arm.
+func trixiAsk(seq int, query string, ids ...string) event.Event {
+	return trixiShell(seq, trixiAskAction, query, ids...)
+}
+
+func trixiSearch(seq int, query string, ids ...string) event.Event {
+	return trixiShell(seq, trixiSearchAction, query, ids...)
+}
+
+func trixiShell(seq int, action, query string, ids ...string) event.Event {
+	hits := make([]event.NugHit, len(ids))
+	for i, id := range ids {
+		hits[i] = event.NugHit{ID: id}
+	}
+	return event.Event{Seq: seq, Session: "s", Project: "p", Kind: event.KindShell, Action: action, Query: query, Results: hits}
+}
+
+// trixiGetShell mints a `trixi get <id>` shell event — a by-id fetch, no query.
+func trixiGetShell(seq int, id string) event.Event {
+	return event.Event{Seq: seq, Session: "s", Project: "p", Kind: event.KindShell, Action: "trixi_get", Detail: "trixi get " + id}
+}
+
 func setNug(seq int) event.Event {
 	return event.Event{Seq: seq, Session: "s", Project: "p", Kind: event.KindTool, Action: toolSetNug}
 }
@@ -662,4 +686,63 @@ func TestBuildEpisodesSharesPromptAcrossSameTurnEpisodes(t *testing.T) {
 	if eps[0].Prompt != "find x" || eps[1].Prompt != "find x" {
 		t.Errorf("Prompt = (%q, %q), want both %q", eps[0].Prompt, eps[1].Prompt, "find x")
 	}
+}
+
+// TestBuildEpisodesTrixiCLIRootsEpisode is the scorer-side half of the CLI-recall
+// contract (ferret-bbp.20): a query-mode `trixi ask`/`trixi search` KindShell
+// event (Query != "") roots a retrieval episode with the full RU + Q/R/C legs,
+// exactly like the MCP get_nug arm — consumption, first-try, and outcome all
+// fold for free off the same event fields. A `trixi get` by-id shell event stays
+// inert (mirrors the MCP by-id arm; no episode root).
+func TestBuildEpisodesTrixiCLIRootsEpisode(t *testing.T) {
+	t.Run("trixi_ask roots a full episode", func(t *testing.T) {
+		eps := BuildEpisodes([]event.Event{
+			trixiAsk(0, "how to lock files", "aaa111", "bbb222"),
+			trixiGetShell(1, "bbb222"), // explicit-id consume, rank 2
+			prompt(2, "yes, perfect"),
+		})
+		if len(eps) != 1 {
+			t.Fatalf("want 1 episode, got %d: %+v", len(eps), eps)
+		}
+		ep := eps[0]
+		if ep.Query != "how to lock files" || ep.Results != 2 {
+			t.Errorf("Query/Results = %q/%d, want %q/2", ep.Query, ep.Results, "how to lock files")
+		}
+		if !ep.ConsumedStrict || ep.ConsumedID != "bbb222" || ep.ConsumedRank != 2 {
+			t.Errorf("consumption = strict=%v id=%q rank=%d, want strict id=bbb222 rank=2", ep.ConsumedStrict, ep.ConsumedID, ep.ConsumedRank)
+		}
+		if ep.ClosingMove != dialogue.MoveAccept || ep.Outcome != dialogue.OutcomeSuccess {
+			t.Errorf("close/outcome = %q/%q, want %q/%q", ep.ClosingMove, ep.Outcome, dialogue.MoveAccept, dialogue.OutcomeSuccess)
+		}
+		if !ep.ServedStrict() {
+			t.Errorf("ServedStrict() = false, want true (consumed + first-try + non-abandon, same AND-gate as the MCP arm)")
+		}
+	})
+
+	t.Run("trixi_search roots an episode the same way", func(t *testing.T) {
+		eps := BuildEpisodes([]event.Event{
+			trixiSearch(0, "attribution hop", "ccc333"),
+		})
+		if len(eps) != 1 || eps[0].Query != "attribution hop" {
+			t.Fatalf("want 1 episode rooted on trixi_search, got %+v", eps)
+		}
+	})
+
+	t.Run("trixi get by-id is not an episode root", func(t *testing.T) {
+		eps := BuildEpisodes([]event.Event{
+			trixiGetShell(0, "aaa111"),
+		})
+		if len(eps) != 0 {
+			t.Errorf("want 0 episodes, got %d: %+v", len(eps), eps)
+		}
+	})
+
+	t.Run("a plain shell command with no query is not an episode root", func(t *testing.T) {
+		eps := BuildEpisodes([]event.Event{
+			shell(0, "git status"),
+		})
+		if len(eps) != 0 {
+			t.Errorf("want 0 episodes, got %d: %+v", len(eps), eps)
+		}
+	})
 }

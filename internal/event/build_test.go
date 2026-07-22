@@ -37,6 +37,13 @@ func toolResultContent(uuid, id, contentJSON string) string {
 		uuid, id, contentJSON)
 }
 
+// toolResultErrContent is toolResultContent with is_error set — a failed call
+// that still carries a result body (an error message).
+func toolResultErrContent(uuid, id, contentJSON string) string {
+	return fmt.Sprintf(`{"type":"user","uuid":%q,"timestamp":"2026-06-10T10:00:05Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":%q,"is_error":true,"content":%s}]}}`,
+		uuid, id, contentJSON)
+}
+
 func ingest(t *testing.T, src transcript.Source) []*Event {
 	t.Helper()
 	b := NewBuilder()
@@ -449,6 +456,144 @@ func TestSnipeApproxMarker(t *testing.T) {
 				t.Errorf("snipe Approx = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestTrixiAskSearchCaptureQueryAndResults is the CLI-recall half of the
+// retrieval episode contract (ferret-bbp.20): a query-mode `trixi ask`/`trixi
+// search` shell call captures its query string plus the returned nug ids
+// (ordered, deduped, lowercase 12-hex tokens scraped from the plain-text CLI
+// output — no JSON envelope to parse, unlike the MCP get_nug arm), while a
+// `trixi get <id>` by-id fetch captures neither (mirrors get_nug by-id).
+func TestTrixiAskSearchCaptureQueryAndResults(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"trixi ask \"memory design question\""}`),
+		toolResultContent("u2", "t1", `"Found 2 nugs:\n- 03447c82d743 (score 0.91) memory design notes\n- 1fe653da94e6 (score 0.5) older note\n"`),
+		toolUse("u3", "t2", "Bash", `{"command":"trixi search \"attribution hop\" --nugs"}`),
+		toolResultContent("u4", "t2", `"1 hit: 1fe653da94e6\n"`),
+		toolUse("u5", "t3", "Bash", `{"command":"trixi get 1fe653da94e6"}`),
+		toolResultContent("u6", "t3", `"id: 1fe653da94e6\nbody: older note\n"`),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 3 {
+		t.Fatalf("events = %d, want 3", len(evs))
+	}
+
+	ask := evs[0]
+	if ask.Query != "memory design question" {
+		t.Errorf("ask.Query = %q, want %q", ask.Query, "memory design question")
+	}
+	wantHits := []NugHit{{ID: "03447c82d743"}, {ID: "1fe653da94e6"}}
+	if len(ask.Results) != len(wantHits) {
+		t.Fatalf("ask.Results = %+v, want %+v", ask.Results, wantHits)
+	}
+	for i, w := range wantHits {
+		if ask.Results[i] != w {
+			t.Errorf("ask.Results[%d] = %+v, want %+v (rank = first-appearance order)", i, ask.Results[i], w)
+		}
+	}
+
+	search := evs[1]
+	if search.Query != "attribution hop" {
+		t.Errorf("search.Query = %q, want %q (flag stripped)", search.Query, "attribution hop")
+	}
+	if want := []NugHit{{ID: "1fe653da94e6"}}; len(search.Results) != 1 || search.Results[0] != want[0] {
+		t.Errorf("search.Results = %+v, want %+v", search.Results, want)
+	}
+
+	get := evs[2]
+	if get.Query != "" || get.Results != nil {
+		t.Errorf("trixi get by-id captured query=%q results=%+v, want neither (mirrors get_nug by-id)", get.Query, get.Results)
+	}
+}
+
+// TestTrixiGetFailedEchoNotCountedAsHit pins the AC4 edge case: a failed `trixi
+// get <id>` echoes the queried id back in its own error text ("Resource not
+// found"). Because trixi_get never sets Query (by-id fetch, no episode root),
+// the echo must never be mistaken for a served hit.
+func TestTrixiGetFailedEchoNotCountedAsHit(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"trixi get 0e29b02fa955"}`),
+		toolResultContent("u2", "t1", `"Resource not found: 0e29b02fa955 (dangling superseded pointer)\n"`),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 1 {
+		t.Fatalf("events = %d, want 1", len(evs))
+	}
+	if evs[0].Query != "" || evs[0].Results != nil {
+		t.Errorf("failed get = query %q results %+v, want neither (echoed id is not a served hit)", evs[0].Query, evs[0].Results)
+	}
+}
+
+// TestTrixiCompoundQueryAttribution pins AC4's compound-command attribution
+// rule: two query-mode trixi calls chained in ONE Bash tool_use share one
+// tool_result. Per the bead's documented rule, the shared result's hit ids are
+// extracted once and attributed to EACH query-mode event in the chain — the
+// alternative (splitting the shared text) has no principled boundary since the
+// CLI output carries no per-command delimiter.
+func TestTrixiCompoundQueryAttribution(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"trixi ask \"first q\" && trixi search \"second q\""}`),
+		toolResultContent("u2", "t1", `"03447c82d743\n1fe653da94e6\n"`),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 2 {
+		t.Fatalf("events = %d, want 2 (compound split)", len(evs))
+	}
+	wantHits := []NugHit{{ID: "03447c82d743"}, {ID: "1fe653da94e6"}}
+	if evs[0].Query != "first q" || evs[1].Query != "second q" {
+		t.Errorf("queries = %q, %q, want %q, %q", evs[0].Query, evs[1].Query, "first q", "second q")
+	}
+	for i, ev := range evs {
+		if len(ev.Results) != len(wantHits) {
+			t.Fatalf("evs[%d].Results = %+v, want %+v (shared hits attributed to each query event)", i, ev.Results, wantHits)
+		}
+		for j, w := range wantHits {
+			if ev.Results[j] != w {
+				t.Errorf("evs[%d].Results[%d] = %+v, want %+v", i, j, ev.Results[j], w)
+			}
+		}
+	}
+}
+
+// TestTrixiFailedCallYieldsNoHits pins the review fix: a FAILED trixi ask/search
+// whose error text happens to carry a 12-hex token (a session id, trace hash,
+// truncated digest) must not fabricate hits — parseHexHits is a plain-text scan,
+// so hit extraction is gated on StatusOK.
+func TestTrixiFailedCallYieldsNoHits(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"trixi ask \"memory design\""}`),
+		toolResultErrContent("u2", "t1", `"error: kg daemon unreachable (trace 03447c82d743)\n"`),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 1 {
+		t.Fatalf("events = %d, want 1", len(evs))
+	}
+	if evs[0].Status != StatusFail {
+		t.Fatalf("status = %q, want %q", evs[0].Status, StatusFail)
+	}
+	if evs[0].Query != "memory design" {
+		t.Errorf("Query = %q, want %q (query still captured from the call)", evs[0].Query, "memory design")
+	}
+	if evs[0].Results != nil {
+		t.Errorf("Results = %+v, want nil — a failed call must not scrape hits from its error text", evs[0].Results)
+	}
+}
+
+// TestTrixiQueryShellEscapes pins the review fix: a double-quoted query with
+// shell escapes beyond \" (here \$ and \\) is stored as the value the CLI
+// received, not its escaped source.
+func TestTrixiQueryShellEscapes(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"trixi ask \"cost \\$5 path\\\\name\""}`),
+		toolResultContent("u2", "t1", `"no hits\n"`),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 1 {
+		t.Fatalf("events = %d, want 1", len(evs))
+	}
+	if want := `cost $5 path\name`; evs[0].Query != want {
+		t.Errorf("Query = %q, want %q (shell escapes decoded)", evs[0].Query, want)
 	}
 }
 
