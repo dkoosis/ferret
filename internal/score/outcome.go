@@ -43,6 +43,21 @@ var terminalVCS = map[string]bool{
 	"gh_pr":      true, // gh pr create / gh pr merge — opened or landed a PR
 }
 
+// terminalTracker is the durable-artifact subset of bd (beads) actions —
+// ferret-bbp.21, the 4th multiplicand joining terminalVCS: a task can ship a
+// tracked artifact instead of a commit (mint a bead, close a bead) and that IS a
+// shipped signal in dk's workflow, same shape as a commit/push. Normalized forms
+// are shellnorm's base_subcommand ("bd create" -> "bd_create"), confirmed against
+// internal/reach/reach_test.go's bd_update fixture.
+//
+// bd_update is deliberately EXCLUDED: it fires on every status flip (in_progress,
+// blocked, priority, comment) — chatty, not terminal, too weak a tell even for
+// this already-weak label. Only minting or closing the artifact counts.
+var terminalTracker = map[string]bool{
+	"bd_create": true, // minted a tracked issue — the artifact now exists
+	"bd_close":  true, // closed a tracked issue — the artifact shipped
+}
+
 // Outcome is the weak positive-outcome label for one task. Positive is always
 // true when the label is present (absence is represented by a nil *Outcome on the
 // Segment, so there is no negative label — only "shipped" or silence). Signal is
@@ -64,19 +79,21 @@ func LabelOutcomes(res *Result) {
 	}
 }
 
-// terminalAction reports the LAST terminal VCS action in a segment's shape
-// tokens, if any. Last, not first, because the signal is "the action that
-// terminated the task" — the closing commit/push, even when earlier VCS calls
-// (a diff, a status) preceded it. Shape shell tokens are "sh:<cmd>"; the cmd is
-// gated by lens.IsVCS (the reused family classifier) and then narrowed to the
-// terminal subset. Non-shell tokens (Read, Edit, mcp:…) are skipped.
+// terminalAction reports the LAST terminal action (VCS or tracker family) in a
+// segment's shape tokens, if any. Last, not first, because the signal is "the
+// action that terminated the task" — the closing commit/push/bead-close, even
+// when earlier calls (a diff, a status, a bd_update) preceded it. Shape shell
+// tokens are "sh:<cmd>"; VCS commands are gated by lens.IsVCS (the reused family
+// classifier) then narrowed to the terminal subset, tracker commands are a flat
+// lookup (bd is not a VCS family). Non-shell tokens (Read, Edit, mcp:…) are
+// skipped.
 func terminalAction(shape []string) (signal string, ok bool) {
 	for _, tok := range shape {
 		cmd, isShell := strings.CutPrefix(tok, "sh:")
 		if !isShell {
 			continue
 		}
-		if lens.IsVCS(cmd) && terminalVCS[cmd] {
+		if (lens.IsVCS(cmd) && terminalVCS[cmd]) || terminalTracker[cmd] {
 			signal, ok = tok, true // keep scanning → last match wins
 		}
 	}
