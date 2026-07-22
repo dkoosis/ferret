@@ -152,6 +152,63 @@ func TestCollectCandidates_ReadOnlyNoCandidate(t *testing.T) {
 	}
 }
 
+// TestCollectCandidates_ErroredMutationExcluded is the core AC (ferret-xg4): a
+// mutating tool_use whose tool_result reports is_error MUST NOT be recorded as an
+// AgentAction. The window has exactly one mutation and it failed, so the episode
+// has zero landed actions and is not a candidate at all.
+func TestCollectCandidates_ErroredMutationExcluded(t *testing.T) {
+	root := t.TempDir()
+	writeSpineFixture(t, root, "-Users-dev-proj", "sess-err.jsonl", []string{
+		`{"type":"user","sessionId":"sess-err","message":{"role":"user","content":"what are my options for the retry backoff?"}}`,
+		`{"type":"assistant","sessionId":"sess-err","message":{"role":"assistant","content":[` +
+			`{"type":"tool_use","id":"t1","name":"Edit","input":{"file_path":"client.go"}}]}}`,
+		// the edit failed (or the user rejected the permission prompt — CC surfaces
+		// both as is_error on the tool_result) — the mutation never landed
+		`{"type":"user","sessionId":"sess-err","message":{"role":"user","content":[` +
+			`{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"edit failed: no such file"}]}}`,
+		`{"type":"user","sessionId":"sess-err","message":{"role":"user","content":"ok now write the changelog"}}`,
+	})
+	cands, _, err := collectOverInitiativeCandidates(filepath.Join(root, "-Users-dev-proj", "sess-err.jsonl"))
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	if len(cands) != 0 {
+		t.Fatalf("want 0 candidates (only mutation errored, never landed), got %d: %+v", len(cands), cands)
+	}
+}
+
+// TestCollectCandidates_RejectedMutationExcludedAmongLanded confirms selective
+// exclusion: of two mutations in one window, only the one whose tool_result is a
+// user rejection (is_error) is dropped — the other, successfully-landed mutation
+// still reaches the judge.
+func TestCollectCandidates_RejectedMutationExcludedAmongLanded(t *testing.T) {
+	root := t.TempDir()
+	writeSpineFixture(t, root, "-Users-dev-proj", "sess-rej.jsonl", []string{
+		`{"type":"user","sessionId":"sess-rej","message":{"role":"user","content":"what are my options here?"}}`,
+		`{"type":"assistant","sessionId":"sess-rej","message":{"role":"assistant","content":[` +
+			`{"type":"tool_use","id":"t1","name":"Edit","input":{"file_path":"rejected.go"}}]}}`,
+		// the user rejected this edit via the permission prompt — CC records it as
+		// an errored tool_result on the same tool_use_id
+		`{"type":"user","sessionId":"sess-rej","message":{"role":"user","content":[` +
+			`{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"The user doesn't want to proceed with this tool use."}]}}`,
+		`{"type":"assistant","sessionId":"sess-rej","message":{"role":"assistant","content":[` +
+			`{"type":"tool_use","id":"t2","name":"Write","input":{"file_path":"landed.go"}}]}}`,
+		`{"type":"user","sessionId":"sess-rej","message":{"role":"user","content":[` +
+			`{"type":"tool_result","tool_use_id":"t2","is_error":false,"content":"ok"}]}}`,
+		`{"type":"user","sessionId":"sess-rej","message":{"role":"user","content":"thanks, that's fine"}}`,
+	})
+	cands, _, err := collectOverInitiativeCandidates(filepath.Join(root, "-Users-dev-proj", "sess-rej.jsonl"))
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	if len(cands) != 1 {
+		t.Fatalf("want 1 candidate (the landed Write survives), got %d: %+v", len(cands), cands)
+	}
+	if len(cands[0].Actions) != 1 || cands[0].Actions[0].Tool != "Write" || cands[0].Actions[0].Detail != "landed.go" {
+		t.Errorf("candidate actions = %+v, want only the landed Write", cands[0].Actions)
+	}
+}
+
 // TestCollectCandidates_AffirmationClosesWindow confirms a folded affirmation
 // between the prompt and the next genuine turn does NOT emit a candidate — the human
 // engaged ("go ahead" authorizes), so the window closes without flagging.

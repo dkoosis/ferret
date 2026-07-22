@@ -121,7 +121,7 @@ func validateFormat(format string) error {
 // CommonFlags are shared across all analysis subcommands.
 type CommonFlags struct {
 	Data     string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
-	Format   string `help:"Output format: text|json (graph: +mermaid|dot)." default:"text" name:"format"`
+	Format   string `help:"Output format: text|json (graph: +mermaid|dot|sankey)." default:"text" name:"format"`
 	Limit    int    `help:"Max rows (0 = unlimited)." default:"0" name:"limit"`
 	MaxBytes int    `help:"Max output bytes, text only (0 = unlimited)." default:"0" name:"max-bytes"`
 }
@@ -377,7 +377,7 @@ func main() {
 				"  ferret rank     [--lens tool] [--min-support 20] [--order 3] [--top 10]\n"+
 				"  ferret report   [--lens tool] [--kind routine|friction|loop|noise] [--since-fixes] [--format json|md]\n"+
 				"  ferret surprise [--lens tool] [--order 3] [--min-toks 20]\n"+
-				"  ferret graph    [--lens tool] [--min-count 20] [--format text|json|mermaid|dot] [--loops]\n"+
+				"  ferret graph    [--lens tool] [--min-count 20] [--format text|json|mermaid|dot|sankey] [--loops]\n"+
 				"  ferret tokens   --session PREFIX [--lens tool]\n"+
 				"  ferret spine    --session PREFIX [--root DIR]\n"+
 				"  ferret segments --session PREFIX [--root DIR] [--format text|json]\n"+
@@ -1698,7 +1698,7 @@ func cmdGraph() error {
 		c.limit = 40
 	}
 	lo := fromLensFlags(cmd.LensFlags)
-	if err := c.validate("text", "json", "mermaid", "dot"); err != nil {
+	if err := c.validate("text", "json", "mermaid", "dot", "sankey"); err != nil {
 		return err
 	}
 	if err := c.ensureData(); err != nil {
@@ -1748,7 +1748,7 @@ func cmdGraph() error {
 			"edges": rows, "edgesTotal": totalEdges, keyTruncated: len(rows) < totalEdges,
 			"cycles": cyc, "cyclesTotal": len(f.Cycles),
 		})
-	case "mermaid", "dot":
+	case "mermaid", "dot", "sankey":
 		return writeGraph(os.Stdout, c.format, corpus, edges)
 	}
 
@@ -1789,11 +1789,21 @@ func writeGraph(w *os.File, format string, c *mine.Corpus, edges []mine.Edge) er
 		nodeID[t] = n
 		return n
 	}
-	if format == "mermaid" {
+	switch format {
+	case "mermaid":
 		fmt.Fprintln(w, "flowchart LR")
 		for _, e := range edges {
 			fmt.Fprintf(w, "  %s[\"%s\"] -->|%d| %s[\"%s\"]\n",
 				id(e.From), mermaidLabel(c.Vocab[e.From]), e.Count, id(e.To), mermaidLabel(c.Vocab[e.To]))
+		}
+		return nil
+	case "sankey":
+		// mermaid sankey-beta: a header line, a blank line, then CSV rows
+		// "source,target,value" — weights are the raw transition counts.
+		fmt.Fprintln(w, "sankey-beta")
+		fmt.Fprintln(w)
+		for _, e := range edges {
+			fmt.Fprintf(w, "%s,%s,%d\n", sankeyField(c.Vocab[e.From]), sankeyField(c.Vocab[e.To]), e.Count)
 		}
 		return nil
 	}
@@ -1811,6 +1821,18 @@ func writeGraph(w *os.File, format string, c *mine.Corpus, edges []mine.Edge) er
 func mermaidLabel(s string) string {
 	r := strings.NewReplacer(`"`, "#quot;", "[", "#91;", "]", "#93;", "{", "#123;", "}", "#125;")
 	return r.Replace(s)
+}
+
+// sankeyField renders one CSV field of a mermaid sankey-beta row (RFC 4180):
+// a value containing a comma, quote, or line break (LF or CR) is wrapped in
+// quotes with embedded quotes doubled. Exact-lens tokens can carry raw command
+// text with commas, and an unquoted comma — or a bare CR, which CSV parsers
+// treat as a record boundary — would silently corrupt the row.
+func sankeyField(s string) string {
+	if !strings.ContainsAny(s, `",`+"\n\r") {
+		return s
+	}
+	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
 }
 
 // ---- tokens ----

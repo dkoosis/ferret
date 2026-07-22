@@ -2,13 +2,22 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/dkoosis/ferret/internal/analyst"
 )
+
+// errBoom is a static sentinel for the fail-fast concurrency test (err113: test
+// judges must not construct dynamic errors inline).
+var errBoom = errors.New("boom")
 
 func TestWriteAdjudicateTextRendersMismatches(t *testing.T) {
 	res := analyst.Result{
@@ -153,5 +162,102 @@ func TestEmitRecallPrompts_SkipsEmptyRecall(t *testing.T) {
 func TestRecallTraceLabel(t *testing.T) {
 	if got := recallTraceLabel("/tmp/eval/recall-trace.jsonl"); got != "recall-trace:recall-trace.jsonl" {
 		t.Errorf("recallTraceLabel = %q", got)
+	}
+}
+
+// recallRunsWithFragments builds n runs, each carrying one recalled fragment (so
+// none are skipped for having nothing to judge) and a distinct RunID for
+// order-tracing.
+func recallRunsWithFragments(n int) []recallRun {
+	runs := make([]recallRun, n)
+	for i := range runs {
+		runs[i] = recallRun{
+			RunID:    fmt.Sprintf("r%d", i),
+			Recalled: []recalledFragment{{Source: "chat", Text: "fragment"}},
+		}
+	}
+	return runs
+}
+
+// TestJudgeRecallRuns_PreservesOrder: parallelizing the per-run judge calls must
+// not scramble the findings — the result order mirrors input run order even when
+// runs complete out of order (bbp/gg-8rq.16.2 downstream mappers assume this).
+// The fake judge sleeps longer for earlier runs so later runs finish first,
+// forcing an out-of-order completion sequence that a naive append-as-you-go
+// implementation would leak into the output.
+func TestJudgeRecallRuns_PreservesOrder(t *testing.T) {
+	const n = 10
+	runs := recallRunsWithFragments(n)
+	judge := func(_ context.Context, r recallRun) ([]analyst.Finding, string, error) {
+		idx := 0
+		if _, err := fmt.Sscanf(r.RunID, "r%d", &idx); err != nil {
+			t.Errorf("parse RunID %q: %v", r.RunID, err)
+		}
+		time.Sleep(time.Duration(n-idx) * 3 * time.Millisecond)
+		return []analyst.Finding{{Task: r.RunID}}, "test-model", nil
+	}
+
+	res, err := judgeRecallRuns(context.Background(), runs, judge)
+	if err != nil {
+		t.Fatalf("judgeRecallRuns: %v", err)
+	}
+	if len(res.Findings) != n {
+		t.Fatalf("want %d findings, got %d", n, len(res.Findings))
+	}
+	for i, f := range res.Findings {
+		want := fmt.Sprintf("r%d", i)
+		if f.Task != want {
+			t.Errorf("findings[%d].Task = %q, want %q (order not preserved)", i, f.Task, want)
+		}
+	}
+}
+
+// TestJudgeRecallRuns_FailFastErrorSurfaces: an error from any one run's judge
+// call must propagate out of judgeRecallRuns, not get silently dropped by the
+// concurrent fan-out.
+func TestJudgeRecallRuns_FailFastErrorSurfaces(t *testing.T) {
+	runs := recallRunsWithFragments(6)
+	judge := func(_ context.Context, r recallRun) ([]analyst.Finding, string, error) {
+		if r.RunID == "r3" {
+			return nil, "", errBoom
+		}
+		time.Sleep(2 * time.Millisecond)
+		return []analyst.Finding{{Task: r.RunID}}, "test-model", nil
+	}
+
+	_, err := judgeRecallRuns(context.Background(), runs, judge)
+	if err == nil {
+		t.Fatal("expected error to surface, got nil")
+	}
+	if !strings.Contains(err.Error(), "r3") || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("error should name the failing run and wrap the cause, got: %v", err)
+	}
+}
+
+// TestJudgeRecallRuns_BoundsConcurrency: the fan-out is bounded to an 8-wide
+// semaphore — never more than 8 judge calls in flight at once, even with many
+// more runs queued.
+func TestJudgeRecallRuns_BoundsConcurrency(t *testing.T) {
+	const n = 24
+	runs := recallRunsWithFragments(n)
+	var inFlight, maxInFlight int64
+	judge := func(_ context.Context, r recallRun) ([]analyst.Finding, string, error) {
+		cur := atomic.AddInt64(&inFlight, 1)
+		for {
+			m := atomic.LoadInt64(&maxInFlight)
+			if cur <= m || atomic.CompareAndSwapInt64(&maxInFlight, m, cur) {
+				break
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+		atomic.AddInt64(&inFlight, -1)
+		return []analyst.Finding{{Task: r.RunID}}, "test-model", nil
+	}
+
+	if _, err := judgeRecallRuns(context.Background(), runs, judge); err != nil {
+		t.Fatalf("judgeRecallRuns: %v", err)
+	}
+	if got := atomic.LoadInt64(&maxInFlight); got > 8 {
+		t.Errorf("max concurrent judge calls = %d, want <= 8", got)
 	}
 }
