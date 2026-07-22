@@ -161,17 +161,40 @@ type epBuild struct {
 	closingMove dialogue.Move
 }
 
-// isQueryGetNug reports whether an event roots a retrieval episode: a query-mode
-// get_nug call (Query is set only on query-mode calls; by-id fetches carry none).
-func isQueryGetNug(ev *event.Event) bool {
-	return ev.Kind == event.KindTool && ev.Action == toolGetNug && ev.Query != ""
+// trixiAskAction / trixiSearchAction are the shellnorm-normalized Action tokens
+// for a query-mode trixi CLI recall call (ferret-bbp.20) — the Bash-tool
+// counterpart of toolGetNug. The event builder (internal/event/build.go)
+// populates Query/Results identically to the MCP arm; admitting them here is
+// scorer-side generalization only, no new capture logic.
+const (
+	trixiAskAction    = "trixi_ask"
+	trixiSearchAction = "trixi_search"
+)
+
+// isQueryRetrieval reports whether an event roots a retrieval episode: a
+// query-mode get_nug MCP call, or a query-mode trixi ask/search CLI shell call
+// (ferret-bbp.20) — Query is set only on query-mode calls; by-id fetches (MCP
+// get_nug by-id, CLI trixi get) carry none, on either arm.
+func isQueryRetrieval(ev *event.Event) bool {
+	if ev.Query == "" {
+		return false
+	}
+	switch ev.Kind {
+	case event.KindTool:
+		return ev.Action == toolGetNug
+	case event.KindShell:
+		return ev.Action == trixiAskAction || ev.Action == trixiSearchAction
+	default:
+		return false
+	}
 }
 
 // BuildEpisodes assembles the retrieval episodes from ONE session's events, in
-// Seq order. A query-mode get_nug roots an episode; consecutive query-mode calls
-// before any consumption or human turn fold in as a self-requery chain; a human
-// turn closes the open episode as its reaction. Calls before the first search are
-// not episodes (no query to score).
+// Seq order. A query-mode retrieval call — MCP get_nug or CLI trixi ask/search
+// (ferret-bbp.20) — roots an episode; consecutive query-mode calls before any
+// consumption or human turn fold in as a self-requery chain; a human turn closes
+// the open episode as its reaction. Calls before the first search are not
+// episodes (no query to score).
 func BuildEpisodes(evs []event.Event) []Episode {
 	var (
 		eps        []Episode
@@ -196,7 +219,7 @@ func BuildEpisodes(evs []event.Event) []Episode {
 			// Update AFTER closing: a prompt closes the open episode as its
 			// reaction, then becomes the preceding-prompt for the next one.
 			lastPrompt = ev.Prompt
-		case isQueryGetNug(ev):
+		case isQueryRetrieval(ev):
 			// Fold a reformulation into the open episode only while it serves the
 			// same intent: no consuming action and no human turn since the root.
 			if cur != nil && cur.foldsReformulation() {
