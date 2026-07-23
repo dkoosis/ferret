@@ -230,7 +230,11 @@ func classifyBash(blk *transcript.Block) (Reach, string) {
 // source, so a search tool added there buckets here without a second edit.
 func classifyShellCmd(cmd string) (Reach, string) {
 	switch {
-	case cmd == "trixi_search" || cmd == "trixi_get":
+	case cmd == "trixi_search" || cmd == "trixi_get" || cmd == "trixi_ask":
+		// trixi_ask: the ONE door recall.md mandates (ferret-dic). Its absence
+		// here made the 2026-07 reach-rate a lower bound — any ask-first reach
+		// was misclassified. event/build.go already treats ask as retrieval;
+		// reach must agree or the two ferret lenses report different worlds.
 		return ReachStore, cmd
 	case bdReadSub[cmd]:
 		return ReachBeads, cmd

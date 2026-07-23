@@ -64,6 +64,11 @@ func TestClassifyShellCmd(t *testing.T) {
 	}{
 		{"trixi_search", ReachStore},
 		{"trixi_get", ReachStore},
+		// Regression (ferret-dic): trixi ask is the ONE door recall.md mandates;
+		// it was absent from the store list, so every ask-first reach in the
+		// 2026-07 baseline was misclassified — 0/88 read as a finding when it
+		// was a ruler defect (codex adversarial review, 2026-07-22).
+		{"trixi_ask", ReachStore},
 		{"trixi_set", ReachNone}, // a write is not a reach
 		{"bd_show", ReachBeads},
 		{"bd_query", ReachBeads},
@@ -145,6 +150,10 @@ func TestClassifyReachBlock(t *testing.T) {
 		{"edit-not-reach", newBlock("tool_use", "Edit", `{}`), ReachNone},
 		{"web-search", newBlock("tool_use", "WebSearch", `{}`), ReachGh},
 		{"bash-trixi-search", bash(`trixi search "loto lock"`), ReachStore},
+		// Regression (ferret-dic): a trixi ask first-reach scores store — the
+		// exact shape recall.md trains ("trixi ask" then widen).
+		{"bash-trixi-ask", bash(`trixi ask "box deploy plan"`), ReachStore},
+		{"bash-ask-then-grep", bash(`trixi ask "x" || rg -n x internal/`), ReachStore},
 		{"bash-rg", bash(`rg -n foo internal/`), ReachGrep},
 		{"bash-compound-first-retrieval", bash(`cd /tmp && bd show x-1`), ReachBeads},
 		// Regression (ferret-9q8): wc/jq are not retrieval reaches, so the FIRST
