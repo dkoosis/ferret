@@ -59,8 +59,8 @@ func fromStmt(st *syntax.Stmt, pr *syntax.Printer, depth int) []Segment {
 	if st == nil || st.Cmd == nil {
 		return nil
 	}
-	if depth > maxRecurseDepth {
-		return []Segment{{Cmd: "complex", Raw: printStmt(st, pr)}}
+	if seg, capped := recurseCap(st, pr, depth); capped {
+		return seg
 	}
 	switch c := st.Cmd.(type) {
 	case *syntax.CallExpr:
@@ -69,16 +69,7 @@ func fromStmt(st *syntax.Stmt, pr *syntax.Printer, depth int) []Segment {
 		}
 		return nil
 	case *syntax.BinaryCmd:
-		switch c.Op {
-		case syntax.AndStmt, syntax.OrStmt:
-			return append(fromStmt(c.X, pr, depth+1), fromStmt(c.Y, pr, depth+1)...)
-		case syntax.Pipe, syntax.PipeAll:
-			// a pipeline collapses to its first non-trivial command
-			if left := fromStmt(c.X, pr, depth+1); len(left) > 0 {
-				return left
-			}
-			return fromStmt(c.Y, pr, depth+1)
-		}
+		return fromBinaryCmd(c, pr, depth)
 	case *syntax.Subshell:
 		return fromStmts(c.Stmts, pr, depth+1)
 	case *syntax.Block:
@@ -95,6 +86,33 @@ func fromStmt(st *syntax.Stmt, pr *syntax.Printer, depth int) []Segment {
 		return fromStmt(c.Stmt, pr, depth+1)
 	}
 	return nil
+}
+
+// fromBinaryCmd handles the && / || / | / |& operators — split out of
+// fromStmt so its nested op-switch doesn't count against fromStmt's own
+// cognitive-complexity budget.
+func fromBinaryCmd(c *syntax.BinaryCmd, pr *syntax.Printer, depth int) []Segment {
+	switch c.Op {
+	case syntax.AndStmt, syntax.OrStmt:
+		return append(fromStmt(c.X, pr, depth+1), fromStmt(c.Y, pr, depth+1)...)
+	case syntax.Pipe, syntax.PipeAll:
+		// a pipeline collapses to its first non-trivial command
+		if left := fromStmt(c.X, pr, depth+1); len(left) > 0 {
+			return left
+		}
+		return fromStmt(c.Y, pr, depth+1)
+	}
+	return nil
+}
+
+// recurseCap reports whether depth has hit maxRecurseDepth — pathologically
+// nested input degrades to a single Segment{Cmd:"complex"} at the ceiling
+// instead of mirroring its AST depth into fromStmt's unbounded recursion.
+func recurseCap(st *syntax.Stmt, pr *syntax.Printer, depth int) ([]Segment, bool) {
+	if depth > maxRecurseDepth {
+		return []Segment{{Cmd: "complex", Raw: printStmt(st, pr)}}, true
+	}
+	return nil, false
 }
 
 func fromStmts(sts []*syntax.Stmt, pr *syntax.Printer, depth int) []Segment {

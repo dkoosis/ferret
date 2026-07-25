@@ -180,17 +180,15 @@ func Read(path string, fn func(*Event) error) error {
 		if len(trimmed) == 0 {
 			continue
 		}
-		var ev Event
-		if err := json.Unmarshal(trimmed, &ev); err != nil {
-			if ok {
-				fmt.Fprintf(stderr, "ferret: %s: line %d: malformed record skipped: %v\n", path, lineNo, err)
-				if corrupt == nil {
-					corrupt = fmt.Errorf("%s: line %d: malformed record: %w", path, lineNo, err)
-				}
-				continue
-			}
-			fmt.Fprintf(stderr, "ferret: %s: truncated trailing record dropped (1 fragment); re-ingest to repair\n", path)
+		ev, truncated, lineErr := decodeLine(path, lineNo, trimmed, ok)
+		if truncated {
 			return nil
+		}
+		if lineErr != nil {
+			if corrupt == nil {
+				corrupt = lineErr
+			}
+			continue
 		}
 		if err := fn(&ev); err != nil {
 			return err
@@ -200,6 +198,23 @@ func Read(path string, fn func(*Event) error) error {
 		return err
 	}
 	return corrupt
+}
+
+// decodeLine applies Read's salvage rule to one line: a malformed line with
+// more input still pending (hasMore) is mid-stream corruption — logged and
+// returned as an error so the caller can remember it and continue. A
+// malformed FINAL line (hasMore false) is the tolerated truncated-trailing-
+// record case — logged and reported via truncated=true so Read stops clean.
+func decodeLine(path string, lineNo int, trimmed []byte, hasMore bool) (ev Event, truncated bool, corrupt error) {
+	if err := json.Unmarshal(trimmed, &ev); err != nil {
+		if hasMore {
+			fmt.Fprintf(stderr, "ferret: %s: line %d: malformed record skipped: %v\n", path, lineNo, err)
+			return Event{}, false, fmt.Errorf("%s: line %d: malformed record: %w", path, lineNo, err)
+		}
+		fmt.Fprintf(stderr, "ferret: %s: truncated trailing record dropped (1 fragment); re-ingest to repair\n", path)
+		return Event{}, true, nil
+	}
+	return ev, false, nil
 }
 
 // WriteManifest publishes the completeness sentinel atomically and durably.

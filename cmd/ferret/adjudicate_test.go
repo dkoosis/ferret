@@ -275,17 +275,17 @@ func TestJudgeRecallRuns_StopsLaunchingAfterCancel(t *testing.T) {
 	defer cancel()
 
 	release := make(chan struct{})
-	var calledCount int64
+	var calledCount atomic.Int64
 
 	judge := func(_ context.Context, r recallRun) ([]analyst.Finding, string, error) {
-		if atomic.AddInt64(&calledCount, 1) <= maxConcurrency {
+		if calledCount.Add(1) <= maxConcurrency {
 			<-release // hold the semaphore saturated until the test cancels + releases
 		}
 		return []analyst.Finding{{Task: r.RunID}}, "test-model", nil
 	}
 
 	go func() {
-		for atomic.LoadInt64(&calledCount) < maxConcurrency {
+		for calledCount.Load() < maxConcurrency {
 			time.Sleep(time.Millisecond)
 		}
 		cancel()
@@ -296,7 +296,7 @@ func TestJudgeRecallRuns_StopsLaunchingAfterCancel(t *testing.T) {
 		t.Fatalf("judgeRecallRuns: %v", err)
 	}
 
-	got := atomic.LoadInt64(&calledCount)
+	got := calledCount.Load()
 	if got >= n {
 		t.Errorf("judge called %d/%d times — cancellation had no effect on the launch loop", got, n)
 	}

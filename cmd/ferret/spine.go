@@ -285,13 +285,12 @@ func (t *placeholderTable) lookup(val string) (string, bool) {
 	return tok, ok
 }
 
-// register mints and returns a new stable token for val (first sight only —
-// callers check lookup first so a value never gets minted twice).
-func (t *placeholderTable) register(val string) string {
+// register mints a new stable token for val (first sight only — callers
+// check lookup first so a value never gets minted twice).
+func (t *placeholderTable) register(val string) {
 	tok := fmt.Sprintf("[P%d]", len(t.tokens)+1)
 	t.tokens[val] = tok
 	t.reverse[tok] = val
-	return tok
 }
 
 // placeholderTokenRe matches a minted token ("[P3]") for expand's single pass.
