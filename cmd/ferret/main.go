@@ -1185,21 +1185,35 @@ func cmdReport() error {
 	}
 	mine.AttachDialogue(findings, corpus, dlgIdx, cmd.MaxGap)
 
+	// AttachOddsRatio (ferret-qus) folds the gated odds-ratio-vs-outcome signal
+	// onto each finding — a SECOND signal beside burn, not a replacement: burn
+	// stays the sort key above and throughout every render path below. Reuses
+	// the same dlgIdx dialogue index AttachDialogue just consumed.
+	mine.AttachOddsRatio(findings, corpus, dlgIdx, cmd.MaxGap, mine.MinOddsRatioSupport)
+
 	if c.format == fmtJSON {
 		type jf struct {
-			Motif        []string `json:"motif"`
-			Kind         string   `json:"kind"`
-			Action       string   `json:"action"`
-			Count        int      `json:"count"`
-			Sessions     int      `json:"sessions"`
-			FailRate     float64  `json:"failRate"`
-			Burn         int      `json:"burn"`
-			Surprise     float64  `json:"surprise"`
-			Outcome      string   `json:"outcome,omitempty"`
-			Hop2         string   `json:"hop2,omitempty"`
-			Hop1         string   `json:"hop1,omitempty"`
-			Repairs      int      `json:"repairs,omitempty"`
-			Accepts      int      `json:"accepts,omitempty"`
+			Motif    []string `json:"motif"`
+			Kind     string   `json:"kind"`
+			Action   string   `json:"action"`
+			Count    int      `json:"count"`
+			Sessions int      `json:"sessions"`
+			FailRate float64  `json:"failRate"`
+			Burn     int      `json:"burn"`
+			Surprise float64  `json:"surprise"`
+			Outcome  string   `json:"outcome,omitempty"`
+			Hop2     string   `json:"hop2,omitempty"`
+			Hop1     string   `json:"hop1,omitempty"`
+			Repairs  int      `json:"repairs,omitempty"`
+			Accepts  int      `json:"accepts,omitempty"`
+			// OddsRatio/OddsRatioN (ferret-qus): the odds-ratio-vs-outcome second
+			// signal alongside burn. OddsRatio omits when mine.AttachOddsRatio
+			// suppressed it (support below mine.MinOddsRatioSupport) — nil pointer,
+			// not a spurious number. OddsRatioN is the support count (a+b), emitted
+			// whenever it's nonzero even if the ratio itself was suppressed, so a
+			// thin-sample motif still reads "n=3" instead of vanishing.
+			OddsRatio    *float64 `json:"oddsRatio,omitempty"`
+			OddsRatioN   int      `json:"oddsRatioN,omitempty"`
 			Evidence     string   `json:"evidence"`
 			Fixed        bool     `json:"fixed,omitempty"`
 			Fix          string   `json:"fix,omitempty"`
@@ -1216,6 +1230,7 @@ func cmdReport() error {
 				Count: f.Count, Sessions: f.Sessions, FailRate: f.FailRate,
 				Burn: f.Burn, Surprise: f.Surprise,
 				Outcome: f.Outcome, Hop2: f.Hop2, Hop1: f.Hop1, Repairs: f.Repairs, Accepts: f.Accepts,
+				OddsRatio: f.OutcomeOddsRatio, OddsRatioN: f.OddsRatioSupport,
 				Evidence: exemplar(corpus, f.ExStream, f.ExSeq),
 			}
 			if e, ok := fixIdx[fixes.MotifKey(corpus.Tokens(f.IDs))]; ok {
@@ -1248,6 +1263,7 @@ func cmdReport() error {
 				Count: f.Count, Sessions: f.Sessions, FailRate: f.FailRate,
 				Burn:    f.Burn,
 				Outcome: f.Outcome, Hop2: f.Hop2, Repairs: f.Repairs, Accepts: f.Accepts,
+				OddsRatio: f.OutcomeOddsRatio, OddsRatioN: f.OddsRatioSupport,
 				Evidence: exemplar(corpus, f.ExStream, f.ExSeq),
 			})
 		}

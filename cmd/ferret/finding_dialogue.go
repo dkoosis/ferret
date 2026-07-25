@@ -133,6 +133,9 @@ func reportDialogueNote(f *mine.Finding) string {
 		parts = append(parts, fmt.Sprintf("r%d/a%d", f.Repairs, f.Accepts))
 	}
 	parts = append(parts, frictionParts(f.Friction)...)
+	if note, ok := oddsRatioNote(f); ok {
+		parts = append(parts, note)
+	}
 	if len(parts) == 0 {
 		return ""
 	}
@@ -165,6 +168,18 @@ func frictionParts(fr mine.Friction) []string {
 		parts = append(parts, fmt.Sprintf("ttg=%d", fr.TurnsToGoal))
 	}
 	return parts
+}
+
+// oddsRatioNote renders the odds-ratio-vs-outcome signal (ferret-qus,
+// mine.AttachOddsRatio) as a report token — "or:0.58(n=14)" — only when the
+// finding's OddsRatioSupport cleared the gate and OutcomeOddsRatio is trusted.
+// A suppressed (nil) ratio renders nothing, the same convention Outcome=="" and
+// Hop2=="" already use: no signal, no clutter.
+func oddsRatioNote(f *mine.Finding) (string, bool) {
+	if f.OutcomeOddsRatio == nil {
+		return "", false
+	}
+	return fmt.Sprintf("or:%.2f(n=%d)", *f.OutcomeOddsRatio, f.OddsRatioSupport), true
 }
 
 // hop2Rank ranks QPP grade strings so the worst (low) wins the per-session reduction.

@@ -44,6 +44,29 @@ type Finding struct {
 	// getting there". Zero = no friction signal. Set by AttachDialogue.
 	Friction Friction
 
+	// OutcomeOddsRatio is the motif's odds-ratio-vs-outcome signal (ferret-qus,
+	// spike ferret-567.4): a Laplace +0.5 smoothed 2x2 contingency test — the
+	// motif's host streams (success vs fail) against the corpus-wide labeled
+	// baseline. >1 means host streams succeed MORE than the rest of the corpus;
+	// <1 means the motif correlates with failure — the actionable direction
+	// burn-only structurally can't see, since burn optimizes for token cost, not
+	// workflow quality. This is a SECOND signal alongside Burn, not a
+	// replacement: Burn stays the default sort key.
+	//
+	// nil when OddsRatioSupport is below MinOddsRatioSupport: with too few
+	// labeled host streams, Laplace smoothing alone can produce a nontrivial
+	// ratio with ZERO motif-specific evidence behind it (the spike found 3/32
+	// real motifs at a=b=0 still showing a nontrivial |ratio-1|, purely
+	// reflecting the corpus base rate). Gate first, trust after — set by
+	// AttachOddsRatio.
+	OutcomeOddsRatio *float64
+
+	// OddsRatioSupport is a+b: the count of labeled host streams (Outcome !=
+	// "" / not unknown) the motif recurs in, success + fail. Reported even when
+	// OutcomeOddsRatio is suppressed (nil), so an annotation can render "n=3,
+	// too thin" instead of the field silently vanishing. Set by AttachOddsRatio.
+	OddsRatioSupport int
+
 	ExStream int // exemplar location
 	ExSeq    int
 }
@@ -137,6 +160,16 @@ const (
 // bytesPerToken is the standard rough tokenizer ratio: burn is reported in
 // tokens so it reads as "what this costs the model", not raw bytes.
 const bytesPerToken = 4
+
+// MinOddsRatioSupport is the default minimum labeled host-stream count (a+b) a
+// motif needs before AttachOddsRatio trusts its odds ratio (ferret-qus, spike
+// ferret-567.4's caveat). The spike's real corpus showed the failure mode at
+// support=0 (Laplace smoothing alone producing a nontrivial ratio) and a
+// legitimately-thin-but-real signal at support=5 (flagged, not trusted); its
+// cited actionable finding sat at support=14. 10 sits between those: enough
+// occurrences that the +0.5 prior stops dominating the observed counts, still
+// low enough to catch motifs before they're common.
+const MinOddsRatioSupport = 10
 
 // bucketKind maps a rank bucket to its Finding kind + default action.
 func bucketKind(bucket string) (FindingKind, Action) {
@@ -241,6 +274,105 @@ func aggregateDialogue(f *Finding, c *Corpus, idx map[string]StreamDialogue, max
 		}
 	}
 	return agg
+}
+
+// AttachOddsRatio folds the gated odds-ratio-vs-outcome signal onto each
+// finding (ferret-qus, spike ferret-567.4): a Laplace +0.5 smoothed 2x2
+// contingency test comparing the motif's host streams (containsMotif over
+// c.Streams, joined through idx — the same host grain AttachDialogue and
+// motifSurprise use) against the corpus-wide labeled baseline (every stream in
+// idx with a known success/fail outcome). This is a SEPARATE pass from
+// AttachDialogue, not folded into it: AttachDialogue's per-motif rollup needs
+// only the motif's own host streams, but the odds ratio also needs the
+// corpus-wide totals computed once up front. minSupport gates the result: a
+// motif whose labeled host streams (a+b) don't clear it gets OutcomeOddsRatio
+// = nil (suppressed/unknown) rather than a ratio Laplace smoothing alone can
+// fabricate. A nil idx is the off switch, same convention as AttachDialogue.
+func AttachOddsRatio(findings []*Finding, c *Corpus, idx map[string]StreamDialogue, maxGap, minSupport int) {
+	if idx == nil {
+		return
+	}
+	baseSuccess, baseFail := corpusOutcomeTotals(c, idx)
+	for _, f := range findings {
+		hostSuccess, hostFail := hostOutcomeCounts(f, c, idx, maxGap)
+		f.OddsRatioSupport = hostSuccess + hostFail
+		if f.OddsRatioSupport < minSupport {
+			f.OutcomeOddsRatio = nil
+			continue
+		}
+		ratio := oddsRatio(hostSuccess, hostFail, baseSuccess-hostSuccess, baseFail-hostFail)
+		f.OutcomeOddsRatio = &ratio
+	}
+}
+
+// corpusOutcomeTotals sums the corpus-wide labeled baseline (success, fail)
+// once across every stream the corpus and idx agree on — the (c,d) leg each
+// finding's host counts (a,b) subtract from to isolate on-motif vs off-motif
+// odds.
+func corpusOutcomeTotals(c *Corpus, idx map[string]StreamDialogue) (success, fail int) {
+	for _, key := range c.StreamKeys {
+		sd, ok := idx[key]
+		if !ok {
+			continue
+		}
+		s, fl := outcomeBucket(sd.Outcome)
+		switch {
+		case s:
+			success++
+		case fl:
+			fail++
+		}
+	}
+	return success, fail
+}
+
+// hostOutcomeCounts splits a motif's host streams (the same containsMotif
+// grain aggregateDialogue uses) into success/fail counts — the (a,b) leg of
+// the finding's 2x2 contingency row.
+func hostOutcomeCounts(f *Finding, c *Corpus, idx map[string]StreamDialogue, maxGap int) (success, fail int) {
+	for si, st := range c.Streams {
+		if !containsMotif(st, f.IDs, maxGap) {
+			continue
+		}
+		sd, ok := idx[c.StreamKeys[si]]
+		if !ok {
+			continue
+		}
+		s, fl := outcomeBucket(sd.Outcome)
+		switch {
+		case s:
+			success++
+		case fl:
+			fail++
+		}
+	}
+	return success, fail
+}
+
+// outcomeBucket classifies a StreamDialogue.Outcome string into the odds-ratio
+// success/fail split: "success" is success, "repair-heavy"/"abandoned" are
+// fail (both fell short of a clean accept), and "" (unknown/no signal) is
+// neither — excluded from support, same as the rest of the dialogue rollup.
+func outcomeBucket(o string) (isSuccess, isFail bool) {
+	switch o {
+	case "success":
+		return true, false
+	case "repair-heavy", "abandoned":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+// oddsRatio is the Laplace +0.5 smoothed 2x2 odds ratio: (a+0.5)(d+0.5) /
+// (b+0.5)(c+0.5), where hostSuccess/hostFail are the motif's host-stream split
+// and restSuccess/restFail are the rest of the labeled corpus. >1 == host
+// streams succeed more than the rest of the corpus; <1 == host streams
+// correlate with failure.
+func oddsRatio(hostSuccess, hostFail, restSuccess, restFail int) float64 {
+	a, b := float64(hostSuccess)+0.5, float64(hostFail)+0.5
+	c, d := float64(restSuccess)+0.5, float64(restFail)+0.5
+	return (a * d) / (b * c)
 }
 
 // outcomeSeverity ranks dialogue.Outcome strings so the worst (most negative) one
