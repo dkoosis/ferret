@@ -2,6 +2,7 @@ package event
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -136,37 +137,69 @@ func (w *Writer) finish() error {
 
 // Read streams events back from the artifact.
 //
-// A single truncated trailing record — the signature of an ingest interrupted
-// mid-write (SIGINT, disk-full, power loss) — is tolerated: every fully decoded
-// event ahead of it is delivered, and the dangling fragment is logged to stderr
-// and dropped rather than failing the whole read. Only the FINAL record may be
-// salvaged this way; a decode error with more input still pending is a genuinely
-// corrupt mid-stream record and is returned as a hard error.
+// The writer emits one JSON object per line, so Read decodes line-by-line
+// rather than running a single json.Decoder over the whole stream. A decoder
+// spanning multiple records can't tell a genuinely truncated tail from a
+// mid-stream object with unbalanced braces: a dangling key with no value
+// (e.g. `{"i":2,"p":`) makes the decoder swallow every following well-formed
+// object as that key's nested value until it runs out of input, then reports
+// the entire mess as one misleadingly-small "truncated trailing record"
+// salvage — silently dropping real records. Decoding line-by-line bounds a
+// malformed line to itself.
+//
+// A single truncated trailing line — the signature of an ingest interrupted
+// mid-write (SIGINT, disk-full, power loss) — is tolerated: every fully
+// decoded event ahead of it is delivered, and the dangling fragment is logged
+// to stderr and dropped rather than failing the whole read. Only the FINAL
+// line may be salvaged this way; a malformed line with more lines still
+// following is genuine mid-stream corruption — it is logged distinctly and
+// skipped, records after it are still delivered, and Read reports the
+// corruption as an error once the file is exhausted.
 func Read(path string, fn func(*Event) error) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	dec := json.NewDecoder(bufio.NewReaderSize(f, 1<<20))
-	for dec.More() {
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
+
+	var corrupt error
+	lineNo := 0
+	ok := scanner.Scan()
+	for ok {
+		lineNo++
+		line := append([]byte(nil), scanner.Bytes()...)
+		// Scan ahead now: whether another line follows determines if a
+		// decode failure on the current line is a final-line salvage or
+		// mid-stream corruption.
+		ok = scanner.Scan()
+
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) == 0 {
+			continue
+		}
 		var ev Event
-		if err := dec.Decode(&ev); err != nil {
-			// A truncated trailing object surfaces as an unexpected EOF (or a
-			// bare EOF mid-token). dec.More() returned true, so bytes were
-			// present, but the object never completed and no input follows.
-			// Salvage the events already streamed instead of poisoning the run.
-			if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
-				fmt.Fprintf(stderr, "ferret: %s: truncated trailing record dropped (1 fragment); re-ingest to repair\n", path)
-				return nil
+		if err := json.Unmarshal(trimmed, &ev); err != nil {
+			if ok {
+				fmt.Fprintf(stderr, "ferret: %s: line %d: malformed record skipped: %v\n", path, lineNo, err)
+				if corrupt == nil {
+					corrupt = fmt.Errorf("%s: line %d: malformed record: %w", path, lineNo, err)
+				}
+				continue
 			}
-			return err
+			fmt.Fprintf(stderr, "ferret: %s: truncated trailing record dropped (1 fragment); re-ingest to repair\n", path)
+			return nil
 		}
 		if err := fn(&ev); err != nil {
 			return err
 		}
 	}
-	return nil
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	return corrupt
 }
 
 // WriteManifest publishes the completeness sentinel atomically and durably.

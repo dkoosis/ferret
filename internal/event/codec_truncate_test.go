@@ -73,6 +73,37 @@ func TestReadRejectsMidStreamCorruption(t *testing.T) {
 	}
 }
 
+// TestReadSurvivesMidStreamCorruption asserts a malformed record that dangles
+// mid-value (e.g. a key with no value yet) does not swallow every well-formed
+// record that follows it as nested JSON — the historical json.Decoder-over-
+// whole-stream bug, where the decoder consumes subsequent good objects as the
+// dangling key's value until it runs out of input, then misreports the whole
+// mess as a single "truncated trailing record" salvage. Records after the
+// corrupt one must still reach the callback, and the corruption must be
+// reported distinctly from a genuine trailing-truncation salvage.
+func TestReadSurvivesMidStreamCorruption(t *testing.T) {
+	body := `{"i":1,"p":"proj","s":"sess","k":"tool","act":"Read"}` + "\n"
+	body += `{"i":2,"p":` + "\n" // dangling key with no value: would swallow the next object as nested JSON
+	body += `{"i":3,"p":"proj","s":"sess","k":"tool","act":"Edit"}` + "\n"
+	path := writeArtifact(t, body)
+
+	var got []int
+	var readErr error
+	out := hookStderr(t, func() {
+		readErr = Read(path, func(ev *Event) error { got = append(got, ev.Seq); return nil })
+	})
+
+	if readErr == nil {
+		t.Fatal("Read accepted mid-stream corruption silently; want a reported error")
+	}
+	if strings.Contains(out, "truncated trailing record dropped") {
+		t.Fatalf("mid-stream corruption misreported as trailing-truncation salvage: %q", out)
+	}
+	if len(got) != 2 || got[0] != 1 || got[1] != 3 {
+		t.Fatalf("Read delivered %v, want [1 3] (record after the corrupt one must not be dropped)", got)
+	}
+}
+
 // TestReadPropagatesCallbackError confirms a caller's own error short-circuits
 // the read and surfaces unchanged (not masked as a truncation).
 func TestReadPropagatesCallbackError(t *testing.T) {
