@@ -171,7 +171,7 @@ func TestRenderArgsPlaceholderMapping(t *testing.T) {
 	if got := renderArgs(input, ph); got != full {
 		t.Errorf("first occurrence = %q, want full value %q", got, full)
 	}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if got := renderArgs(input, ph); got != "file_path=[P1]" {
 			t.Errorf("repeat %d = %q, want file_path=[P1]", i, got)
 		}

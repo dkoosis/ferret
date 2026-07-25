@@ -1,6 +1,9 @@
 package mine
 
-import "testing"
+import (
+	"maps"
+	"testing"
+)
 
 // tb is one token with its measured byte cost, for building test corpora.
 type tb struct {
@@ -308,7 +311,7 @@ func TestAttachOddsRatioSurfacesLowBurnHighSignalMotif(t *testing.T) {
 		badKeys[i] = "p/bad" + string(rune('a'+i)) + "@"
 	}
 	badIdx := map[string]StreamDialogue{}
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		outcome := "abandoned" // fail bucket
 		if i < 2 {
 			outcome = "success"
@@ -344,15 +347,9 @@ func TestAttachOddsRatioSurfacesLowBurnHighSignalMotif(t *testing.T) {
 	c := bytesCorpusKeyed(allStreams, allKeys)
 
 	idx := map[string]StreamDialogue{}
-	for k, v := range badIdx {
-		idx[k] = v
-	}
-	for k, v := range priceyIdx {
-		idx[k] = v
-	}
-	for k, v := range padIdx {
-		idx[k] = v
-	}
+	maps.Copy(idx, badIdx)
+	maps.Copy(idx, priceyIdx)
+	maps.Copy(idx, padIdx)
 
 	cards := []*Card{
 		{IDs: idsFor(c, "bad1", "bad2"), Bucket: BucketScript},
@@ -434,11 +431,13 @@ func absFloat(f float64) float64 {
 // Laplace smoothing alone can produce a nontrivial ratio purely reflecting the
 // corpus base rate, with no motif-specific evidence behind it.
 func TestAttachOddsRatioSuppressesBelowMinSupport(t *testing.T) {
-	motifStreams := [][]tb{{{"m1", 1}, {"m2", 1}}}
-	motifKeys := []string{"p/unlabeled@"}
 	// The motif's only host stream carries NO dialogue signal at all (absent
 	// from idx) -- support must come back 0.
 	padStreams, padKeys := oddsRatioCorpus("p", 20)
+	motifStreams := make([][]tb, 1, 1+len(padStreams))
+	motifStreams[0] = []tb{{"m1", 1}, {"m2", 1}}
+	motifKeys := make([]string, 1, 1+len(padKeys))
+	motifKeys[0] = "p/unlabeled@"
 	padIdx := map[string]StreamDialogue{}
 	for i, k := range padKeys {
 		outcome := "success"

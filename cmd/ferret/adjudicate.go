@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/dkoosis/ferret/internal/analyst"
 	"github.com/dkoosis/ferret/internal/out"
@@ -87,29 +88,40 @@ func cmdAdjudicate() error {
 		return nil
 	}
 
-	cfg := analyst.Config{Model: cmd.Model, Timeout: cmd.Timeout}
-	ok, err := cfg.HasAPIKey()
+	res, err := runAdjudicateAnalyst(cmd.Model, cmd.Timeout, src.Session, buf.String(), ph)
 	if err != nil {
 		return err
 	}
-	if !ok {
-		return analyst.ErrNoAPIKey
-	}
-	ctx, stop := analystContext()
-	defer stop()
-	res, err := analyst.Run(ctx, cfg, src.Session, buf.String())
-	if err != nil {
-		return err
-	}
-	// The model only ever saw placeholder tokens for volatile values; expand any
-	// it echoes back into its own findings before dk sees them — a raw "[P1]"
-	// must never reach human-facing output.
-	expandFindings(res.Findings, ph)
 
 	if cmd.Format == fmtJSON {
 		return out.JSON(os.Stdout, res)
 	}
 	return writeAdjudicateText(os.Stdout, res)
+}
+
+// runAdjudicateAnalyst runs the LLM analyst call and expands any placeholder
+// token it echoes back — split out of cmdAdjudicate to keep it under the
+// statement-count lint ceiling.
+func runAdjudicateAnalyst(model string, timeout time.Duration, session, spineText string, ph *placeholderTable) (analyst.Result, error) {
+	cfg := analyst.Config{Model: model, Timeout: timeout}
+	ok, err := cfg.HasAPIKey()
+	if err != nil {
+		return analyst.Result{}, err
+	}
+	if !ok {
+		return analyst.Result{}, analyst.ErrNoAPIKey
+	}
+	ctx, stop := analystContext()
+	defer stop()
+	res, err := analyst.Run(ctx, cfg, session, spineText)
+	if err != nil {
+		return analyst.Result{}, err
+	}
+	// The model only ever saw placeholder tokens for volatile values; expand any
+	// it echoes back into its own findings before dk sees them — a raw "[P1]"
+	// must never reach human-facing output.
+	expandFindings(res.Findings, ph)
+	return res, nil
 }
 
 // writeAdjudicateText renders the verdicts densely: mismatches first (the
