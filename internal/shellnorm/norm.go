@@ -30,6 +30,12 @@ var trivial = map[string]bool{
 	"sleep": true, "exit": true,
 }
 
+// maxRecurseDepth bounds fromStmt's descent through nested compound commands
+// (subshells, blocks, if/while/for). Pathologically nested input degrades to
+// Segment{Cmd:"complex"} at the ceiling instead of mirroring its AST depth
+// into unbounded recursion.
+const maxRecurseDepth = 64
+
 // Split parses a bash command line into normalized segments.
 // fallback=true means the AST parse failed and a crude first-word
 // normalization was used instead.
@@ -44,14 +50,17 @@ func Split(command string) (segs []Segment, fallback bool) {
 	}
 	printer := syntax.NewPrinter()
 	for _, st := range file.Stmts {
-		segs = append(segs, fromStmt(st, printer)...)
+		segs = append(segs, fromStmt(st, printer, 0)...)
 	}
 	return segs, false
 }
 
-func fromStmt(st *syntax.Stmt, pr *syntax.Printer) []Segment {
+func fromStmt(st *syntax.Stmt, pr *syntax.Printer, depth int) []Segment {
 	if st == nil || st.Cmd == nil {
 		return nil
+	}
+	if depth > maxRecurseDepth {
+		return []Segment{{Cmd: "complex", Raw: printStmt(st, pr)}}
 	}
 	switch c := st.Cmd.(type) {
 	case *syntax.CallExpr:
@@ -62,36 +71,36 @@ func fromStmt(st *syntax.Stmt, pr *syntax.Printer) []Segment {
 	case *syntax.BinaryCmd:
 		switch c.Op {
 		case syntax.AndStmt, syntax.OrStmt:
-			return append(fromStmt(c.X, pr), fromStmt(c.Y, pr)...)
+			return append(fromStmt(c.X, pr, depth+1), fromStmt(c.Y, pr, depth+1)...)
 		case syntax.Pipe, syntax.PipeAll:
 			// a pipeline collapses to its first non-trivial command
-			if left := fromStmt(c.X, pr); len(left) > 0 {
+			if left := fromStmt(c.X, pr, depth+1); len(left) > 0 {
 				return left
 			}
-			return fromStmt(c.Y, pr)
+			return fromStmt(c.Y, pr, depth+1)
 		}
 	case *syntax.Subshell:
-		return fromStmts(c.Stmts, pr)
+		return fromStmts(c.Stmts, pr, depth+1)
 	case *syntax.Block:
-		return fromStmts(c.Stmts, pr)
+		return fromStmts(c.Stmts, pr, depth+1)
 	case *syntax.IfClause:
-		segs := fromStmts(c.Cond, pr)
-		return append(segs, fromStmts(c.Then, pr)...)
+		segs := fromStmts(c.Cond, pr, depth+1)
+		return append(segs, fromStmts(c.Then, pr, depth+1)...)
 	case *syntax.WhileClause:
-		segs := fromStmts(c.Cond, pr)
-		return append(segs, fromStmts(c.Do, pr)...)
+		segs := fromStmts(c.Cond, pr, depth+1)
+		return append(segs, fromStmts(c.Do, pr, depth+1)...)
 	case *syntax.ForClause:
-		return fromStmts(c.Do, pr)
+		return fromStmts(c.Do, pr, depth+1)
 	case *syntax.TimeClause:
-		return fromStmt(c.Stmt, pr)
+		return fromStmt(c.Stmt, pr, depth+1)
 	}
 	return nil
 }
 
-func fromStmts(sts []*syntax.Stmt, pr *syntax.Printer) []Segment {
+func fromStmts(sts []*syntax.Stmt, pr *syntax.Printer, depth int) []Segment {
 	out := make([]Segment, 0, len(sts))
 	for _, st := range sts {
-		out = append(out, fromStmt(st, pr)...)
+		out = append(out, fromStmt(st, pr, depth)...)
 	}
 	return out
 }
