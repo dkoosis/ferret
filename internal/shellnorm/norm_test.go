@@ -68,6 +68,25 @@ func TestSplitFallbackRuneBoundary(t *testing.T) {
 	}
 }
 
+// TestSplitDeepNestingDegradesToComplex covers pathologically nested bash
+// (e.g. thousands of nested subshells) that would otherwise mirror its depth
+// into fromStmt's recursion. Past the depth ceiling it must degrade to
+// Segment{Cmd:"complex"} instead of recursing further.
+func TestSplitDeepNestingDegradesToComplex(t *testing.T) {
+	n := 200
+	cmd := strings.Repeat("( ", n) + "cat f.json" + strings.Repeat(" )", n)
+	segs, fb := Split(cmd)
+	if fb {
+		t.Fatal("unexpected fallback (AST parse failure)")
+	}
+	if len(segs) != 1 {
+		t.Fatalf("want 1 segment, got %d: %v", len(segs), cmds(segs))
+	}
+	if segs[0].Cmd != "complex" {
+		t.Errorf("Split(%d-deep nesting)[0].Cmd = %q, want %q", n, segs[0].Cmd, "complex")
+	}
+}
+
 func TestSplitCompoundFlag(t *testing.T) {
 	segs, fb := Split("go vet ./... && go test ./...")
 	if fb {

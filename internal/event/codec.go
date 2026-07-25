@@ -2,6 +2,7 @@ package event
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -136,37 +137,132 @@ func (w *Writer) finish() error {
 
 // Read streams events back from the artifact.
 //
-// A single truncated trailing record — the signature of an ingest interrupted
-// mid-write (SIGINT, disk-full, power loss) — is tolerated: every fully decoded
-// event ahead of it is delivered, and the dangling fragment is logged to stderr
-// and dropped rather than failing the whole read. Only the FINAL record may be
-// salvaged this way; a decode error with more input still pending is a genuinely
-// corrupt mid-stream record and is returned as a hard error.
+// The writer emits one JSON object per line, so Read decodes line-by-line
+// rather than running a single json.Decoder over the whole stream. A decoder
+// spanning multiple records can't tell a genuinely truncated tail from a
+// mid-stream object with unbalanced braces: a dangling key with no value
+// (e.g. `{"i":2,"p":`) makes the decoder swallow every following well-formed
+// object as that key's nested value until it runs out of input, then reports
+// the entire mess as one misleadingly-small "truncated trailing record"
+// salvage — silently dropping real records. Decoding line-by-line bounds a
+// malformed line to itself.
+//
+// A single truncated trailing line — the signature of an ingest interrupted
+// mid-write (SIGINT, disk-full, power loss) — is tolerated: every fully
+// decoded event ahead of it is delivered, and the dangling fragment is logged
+// to stderr and dropped rather than failing the whole read. Only a final line
+// that the writer never finished — no trailing newline, the structural mark
+// of a write cut off mid-record — may be salvaged this way; a complete,
+// newline-terminated final line that fails to parse is genuine corruption
+// (garbage, not a cutoff) and is reported as an error like any other
+// malformed line. A malformed line with more lines still following is
+// likewise genuine mid-stream corruption — it is logged distinctly and
+// skipped, records after it are still delivered, and Read reports the
+// corruption as an error once the file is exhausted.
+//
+// Lines are read via a growing bufio.Reader rather than bufio.Scanner:
+// Scanner enforces a fixed max token size, but event.Prompt stores the full,
+// untruncated user-turn text (event.go), which can legitimately exceed any
+// fixed cap.
 func Read(path string, fn func(*Event) error) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	dec := json.NewDecoder(bufio.NewReaderSize(f, 1<<20))
-	for dec.More() {
-		var ev Event
-		if err := dec.Decode(&ev); err != nil {
-			// A truncated trailing object surfaces as an unexpected EOF (or a
-			// bare EOF mid-token). dec.More() returned true, so bytes were
-			// present, but the object never completed and no input follows.
-			// Salvage the events already streamed instead of poisoning the run.
-			if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
-				fmt.Fprintf(stderr, "ferret: %s: truncated trailing record dropped (1 fragment); re-ingest to repair\n", path)
-				return nil
-			}
-			return err
-		}
-		if err := fn(&ev); err != nil {
-			return err
-		}
+
+	r := bufio.NewReaderSize(f, 64*1024)
+
+	var corrupt error
+	lineNo := 0
+	line, ok, delimited, err := readLine(r)
+	if err != nil {
+		return err
 	}
-	return nil
+	for ok {
+		lineNo++
+		// Read ahead now: whether another line follows determines if a
+		// decode failure on the current line is a final-line salvage or
+		// mid-stream corruption.
+		next, nextOK, nextDelimited, err := readLine(r)
+		if err != nil {
+			return err
+		}
+
+		stop, stopErr := processLine(path, lineNo, line, nextOK, delimited, &corrupt, fn)
+		if stop {
+			return stopErr
+		}
+		line, ok, delimited = next, nextOK, nextDelimited
+	}
+	return corrupt
+}
+
+// processLine handles one already-read line on Read's behalf: skips blanks,
+// applies decodeLine's salvage rule, and invokes fn on a successful decode.
+// stop=true tells Read to return immediately with stopErr — either a clean
+// truncated-salvage stop (stopErr nil) or a propagated callback error;
+// *corrupt accumulates the first mid-stream corruption error seen so far.
+func processLine(path string, lineNo int, line []byte, hasMore, delimited bool, corrupt *error, fn func(*Event) error) (stop bool, stopErr error) {
+	trimmed := bytes.TrimSpace(line)
+	if len(trimmed) == 0 {
+		return false, nil
+	}
+	ev, truncated, lineErr := decodeLine(path, lineNo, trimmed, hasMore, delimited)
+	if truncated {
+		return true, nil
+	}
+	if lineErr != nil {
+		if *corrupt == nil {
+			*corrupt = lineErr
+		}
+		return false, nil
+	}
+	if err := fn(&ev); err != nil {
+		return true, err
+	}
+	return false, nil
+}
+
+// readLine reads one '\n'-delimited line from r, trailing delimiter
+// stripped. ok=false with err=nil signals clean EOF (no more data).
+// delimited reports whether a trailing '\n' actually terminated the line —
+// false means the reader hit EOF mid-line, the structural signature of a
+// write interrupted before it finished. bufio.Reader has no fixed max-line
+// ceiling (unlike bufio.Scanner): it grows its buffer as needed, bounded
+// only by available memory.
+func readLine(r *bufio.Reader) (line []byte, ok, delimited bool, err error) {
+	b, readErr := r.ReadBytes('\n')
+	if len(b) == 0 && errors.Is(readErr, io.EOF) {
+		return nil, false, false, nil
+	}
+	if readErr != nil && !errors.Is(readErr, io.EOF) {
+		return nil, false, false, readErr
+	}
+	if bytes.HasSuffix(b, []byte("\n")) {
+		return b[:len(b)-1], true, true, nil
+	}
+	// readErr == io.EOF with no trailing '\n': the file ended mid-line.
+	return b, true, false, nil
+}
+
+// decodeLine applies Read's salvage rule to one line: a malformed line with
+// more input still pending (hasMore) is mid-stream corruption — logged and
+// returned as an error so the caller can remember it and continue. A
+// malformed FINAL line is only the tolerated truncated-trailing-record case
+// when the write was structurally interrupted (!delimited, no trailing
+// newline); a complete-but-garbled final line (delimited) is corruption like
+// any other malformed line, not a salvage.
+func decodeLine(path string, lineNo int, trimmed []byte, hasMore, delimited bool) (ev Event, truncated bool, corrupt error) {
+	if err := json.Unmarshal(trimmed, &ev); err != nil {
+		if !hasMore && !delimited {
+			fmt.Fprintf(stderr, "ferret: %s: truncated trailing record dropped (1 fragment); re-ingest to repair\n", path)
+			return Event{}, true, nil
+		}
+		fmt.Fprintf(stderr, "ferret: %s: line %d: malformed record skipped: %v\n", path, lineNo, err)
+		return Event{}, false, fmt.Errorf("%s: line %d: malformed record: %w", path, lineNo, err)
+	}
+	return ev, false, nil
 }
 
 // WriteManifest publishes the completeness sentinel atomically and durably.

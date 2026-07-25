@@ -376,10 +376,21 @@ func judgeRecallRuns(ctx context.Context, runs []recallRun, judge recallJudgeFun
 	var firstErr error
 
 	for i, r := range runs {
+		if ctx.Err() != nil {
+			break
+		}
 		if len(r.Recalled) == 0 {
 			continue
 		}
 		sem <- struct{}{}
+		// sem<-struct{}{} can block on a full semaphore and only unblock once
+		// ctx is already canceled (a slot freed by another run's early exit) —
+		// re-check here so that race doesn't still launch one extra judge call
+		// (Codex adversarial review of #95).
+		if ctx.Err() != nil {
+			<-sem
+			break
+		}
 		wg.Go(func() {
 			defer func() { <-sem }()
 			findings, model, err := judge(ctx, r)

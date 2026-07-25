@@ -193,6 +193,26 @@ func TestRenderArgsPlaceholderMapping(t *testing.T) {
 	}
 }
 
+// TestPlaceholderTableExpandCollision is ferret-mls: expand must restore each
+// token from the ORIGINAL string in one pass, never rescanning text a prior
+// substitution injected. Both registered values here embed the other's token
+// literal, so a sequential-ReplaceAll implementation corrupts the output
+// under EITHER map iteration order — this reproduces regardless of the Go
+// map's randomized order, unlike a single-embedded-token repro.
+func TestPlaceholderTableExpandCollision(t *testing.T) {
+	ph := newPlaceholderTable()
+	v1 := "foo[P2]bar"
+	v2 := "baz[P1]qux"
+	ph.register(v1) // mints [P1]
+	ph.register(v2) // mints [P2]
+
+	got := ph.expand("[P1] [P2]")
+	want := v1 + " " + v2
+	if got != want {
+		t.Errorf("expand(%q) = %q, want %q (injected tokens must stay literal, not be re-expanded)", "[P1] [P2]", got, want)
+	}
+}
+
 // TestRenderArgsNilPlaceholderTableUnaffected proves the human/non-prompt path
 // (nil placeholder table) is untouched by ferret-5c0: the SCOPE GUARDRAIL — no
 // mapping, no token, full value every time.
