@@ -105,6 +105,62 @@ func TestRunFixesProposals_ReturnsZero_When_SessionHasNoSelfAudit(t *testing.T) 
 	}
 }
 
+// TestWriteProposalsText_ShellQuotesExample_When_ConfessionCarriesMetacharacters
+// guards against command injection via copy-paste (Codex flagged this shape on
+// PR #93, though its own claimed fix never actually landed — this is the real
+// one): a confessed-waste sentence is transcript-derived text, not a literal
+// ferret authored, so it can carry $(...), backticks, or a bare " that a naive
+// %q-quoted "confirm:" line would let the shell interpret when dk pastes it.
+func TestWriteProposalsText_ShellQuotesExample_When_ConfessionCarriesMetacharacters(t *testing.T) {
+	root := t.TempDir()
+	evil := `I did a redundant ask after a get miss - search alone would have sufficed ` +
+		"$(touch /tmp/pwned) `touch /tmp/pwned2` and it's bad"
+	writeSpineFixture(t, root, "-Users-dev-proj", "sess-evil.jsonl", []string{
+		`{"type":"user","sessionId":"sess-evil","message":{"role":"user","content":"go"}}`,
+		`{"type":"assistant","sessionId":"sess-evil","message":{"role":"assistant","content":[` +
+			`{"type":"text","text":` + mustJSONString(t, evil) + `}]}}`,
+	})
+
+	var buf bytes.Buffer
+	if err := runFixesProposals(&buf, root, "sess-evil", fmtText); err != nil {
+		t.Fatalf("runFixesProposals: %v", err)
+	}
+	out := buf.String()
+	confirmLine := ""
+	for line := range strings.SplitSeq(out, "\n") {
+		if strings.Contains(line, "confirm:") {
+			confirmLine = line
+			break
+		}
+	}
+	if confirmLine == "" {
+		t.Fatalf("no confirm: line in output:\n%s", out)
+	}
+	wantExample := "'" + strings.Replace(evil, "'", `'\''`, 1) + "'"
+	if !strings.Contains(confirmLine, "--example "+wantExample) {
+		t.Errorf("--example arg not single-quoted as one literal:\nwant substring: %s\ngot: %s", wantExample, confirmLine)
+	}
+}
+
+// TestShellQuote_RoundTrips_MetacharactersAndApostrophes is shellQuote's own
+// unit coverage: every output must be safe to pass, unmodified, to `sh -c`.
+func TestShellQuote_RoundTrips_MetacharactersAndApostrophes(t *testing.T) {
+	cases := []string{
+		"plain",
+		"$(rm -rf /)",
+		"`whoami`",
+		"it's got an apostrophe",
+		"a; b && c || d",
+		"",
+	}
+	for _, s := range cases {
+		q := shellQuote(s)
+		if len(q) < 2 || q[0] != '\'' || q[len(q)-1] != '\'' {
+			t.Errorf("shellQuote(%q) = %q, want outer single quotes", s, q)
+		}
+	}
+}
+
 // mustJSONString marshals s as a JSON string literal, so an inline transcript
 // fixture line can embed arbitrary text (quotes, dashes) without hand-escaping.
 func mustJSONString(t *testing.T, s string) string {

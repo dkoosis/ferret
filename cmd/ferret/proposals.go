@@ -100,8 +100,18 @@ func writeProposalsText(w io.Writer, session string, proposals []fixes.Proposal)
 	for _, p := range proposals {
 		sink.Row("%s -> %s  (%s)", p.IntentClass, p.Better, p.Tell)
 		sink.Row("  example: %s", p.Example)
-		sink.Row("  confirm: ferret fixes sub --intent %s --wrong <tool> --better %q --example %q --session %s",
-			p.IntentClass, p.Better, p.Example, session)
+		sink.Row("  confirm: ferret fixes sub --intent %s --wrong <tool> --better %s --example %s --session %s",
+			shellQuote(p.IntentClass), shellQuote(p.Better), shellQuote(p.Example), shellQuote(session))
 	}
 	return nil
+}
+
+// shellQuote wraps s in POSIX single quotes so it pastes into a shell as one
+// literal argument. %q (Go-string quoting) is NOT shell-safe: a transcript-
+// derived p.Example can carry $(...), backticks, or a bare " that survives
+// %q's escaping and still gets interpreted by the shell dk pastes the printed
+// "confirm:" line into. Single quotes suppress every shell metacharacter
+// except ' itself, which closes-escapes-reopens the quoted string.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
