@@ -64,13 +64,16 @@ func cmdAdjudicate() error {
 
 	// Resolve the canonical session id for labeling, then capture the spine the
 	// same builder the `spine` subcommand emits — the analyst reads exactly what
-	// a human would see.
+	// a human would see, except every tool-arg value is placeholder-mapped
+	// (ferret-5c0): a repeated volatile value (an absolute path, a URL) costs its
+	// full string once and a short token on every repeat within this prompt.
 	src, _, err := resolveSpineSource(root, cmd.Session)
 	if err != nil {
 		return err
 	}
+	ph := newPlaceholderTable()
 	var buf bytes.Buffer
-	if err := spine(&buf, root, cmd.Session); err != nil {
+	if err := spine(&buf, root, cmd.Session, ph); err != nil {
 		return err
 	}
 
@@ -98,6 +101,10 @@ func cmdAdjudicate() error {
 	if err != nil {
 		return err
 	}
+	// The model only ever saw placeholder tokens for volatile values; expand any
+	// it echoes back into its own findings before dk sees them — a raw "[P1]"
+	// must never reach human-facing output.
+	expandFindings(res.Findings, ph)
 
 	if cmd.Format == fmtJSON {
 		return out.JSON(os.Stdout, res)
@@ -129,6 +136,32 @@ func writeAdjudicateText(w io.Writer, res analyst.Result) error {
 	return nil
 }
 
+// expandFindings restores any placeholder token (ferret-5c0) an LLM finding
+// echoes back — the model's own words about a tool call may quote a path or
+// URL it only ever saw as a token — to its real value, in place. A nil ph (no
+// mapping happened) or one with nothing registered is a no-op via
+// placeholderTable.expand.
+func expandFindings(findings []analyst.Finding, ph *placeholderTable) {
+	for i := range findings {
+		f := &findings[i]
+		f.Task = ph.expand(f.Task)
+		f.Call = ph.expand(f.Call)
+		f.ToolUsed = ph.expand(f.ToolUsed)
+		f.Better = ph.expand(f.Better)
+		f.Why = ph.expand(f.Why)
+	}
+}
+
+// expandProposals is expandFindings' propose-mode twin: restores any
+// placeholder token echoed into a proposal's fix text or rationale.
+func expandProposals(proposals []analyst.Proposal, ph *placeholderTable) {
+	for i := range proposals {
+		p := &proposals[i]
+		p.Proposal = ph.expand(p.Proposal)
+		p.Why = ph.expand(p.Why)
+	}
+}
+
 // runPropose is the --propose branch (ferret-567 step 5): instead of judging
 // calls already made, it feeds the deterministic cost-leak ranking ('ferret
 // candidates') plus the spine to the analyst and returns one fix per task —
@@ -145,8 +178,11 @@ func runPropose(root string) error {
 	if err := candidates(&bundle, root, cmd.Session, fmtJSON, cmd.Top, ""); err != nil {
 		return err
 	}
+	// Same placeholder mapping as cmdAdjudicate (ferret-5c0): the propose prompt's
+	// spine half gets a fresh table per render pass.
+	ph := newPlaceholderTable()
 	var spineBuf bytes.Buffer
-	if err := spine(&spineBuf, root, cmd.Session); err != nil {
+	if err := spine(&spineBuf, root, cmd.Session, ph); err != nil {
 		return err
 	}
 
@@ -174,6 +210,8 @@ func runPropose(root string) error {
 	if err != nil {
 		return err
 	}
+	// Same reverse-mapping guarantee as cmdAdjudicate: dk never sees a raw token.
+	expandProposals(res.Proposals, ph)
 
 	if cmd.Format == fmtJSON {
 		return out.JSON(os.Stdout, res)
