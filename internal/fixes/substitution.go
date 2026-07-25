@@ -196,5 +196,11 @@ func writeSubs(path string, subs []Substitution) error {
 		_ = os.Remove(tmpName)
 		return err
 	}
-	return os.Rename(tmpName, path)
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	// fsync the parent dir so the publish rename is crash-durable — os.Rename
+	// alone only dirties the dir inode (mirrors internal/event's syncDir).
+	return syncDir(filepath.Dir(path))
 }

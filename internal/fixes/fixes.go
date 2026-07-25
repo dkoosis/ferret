@@ -26,6 +26,23 @@ import (
 // buffer instead of hijacking the process-global os.Stderr.
 var stderr io.Writer = os.Stderr
 
+// syncDir fsyncs a directory so a just-published rename or first-create within
+// it survives a crash/power-loss. os.Rename (and a new file's directory entry)
+// only mutates the directory; the dir inode itself must be fsync'd or the
+// change can be lost in the dirty-inode window (mirrors internal/event's
+// syncDir). It is a package var so a test can observe the publish path
+// invokes it.
+var syncDir = func(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		return errors.Join(err, d.Close())
+	}
+	return d.Close()
+}
+
 // FileName is the ledger's basename under the ferret data dir.
 const FileName = "fixes.jsonl"
 
@@ -229,6 +246,10 @@ func Append(path string, e Entry) error {
 		return lerr
 	}
 	defer release()
+
+	_, statErr := os.Stat(path)
+	firstCreate := errors.Is(statErr, os.ErrNotExist)
+
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return err
@@ -244,7 +265,15 @@ func Append(path string, e Entry) error {
 	if err := f.Sync(); err != nil {
 		return errors.Join(err, f.Close())
 	}
-	return f.Close()
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if firstCreate {
+		// The append itself just created fixes.jsonl: its directory entry is
+		// only durable once the parent dir inode is fsync'd (see syncDir).
+		return syncDir(filepath.Dir(path))
+	}
+	return nil
 }
 
 // Index maps each motif key to its most recently recorded fix. The ledger is
