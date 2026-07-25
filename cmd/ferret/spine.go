@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -293,17 +294,29 @@ func (t *placeholderTable) register(val string) string {
 	return tok
 }
 
+// placeholderTokenRe matches a minted token ("[P3]") for expand's single pass.
+var placeholderTokenRe = regexp.MustCompile(`\[P\d+\]`)
+
 // expand restores every placeholder token appearing in s to its real value —
 // the human-facing inverse of register. Safe on a nil table (renders s
 // unchanged) so callers on the human/non-mapped path never need a nil check.
+//
+// Substitution happens in one pass over the original s (ReplaceAllStringFunc
+// never rescans a replacement it just inserted), so a restored value that
+// happens to contain another token's literal text can't be corrupted by
+// which token a sequential ReplaceAll loop happened to visit first
+// (ferret-mls: prior per-token ReplaceAll loop was order-dependent on Go's
+// randomized map iteration).
 func (t *placeholderTable) expand(s string) string {
 	if t == nil || len(t.reverse) == 0 {
 		return s
 	}
-	for tok, val := range t.reverse {
-		s = strings.ReplaceAll(s, tok, val)
-	}
-	return s
+	return placeholderTokenRe.ReplaceAllStringFunc(s, func(tok string) string {
+		if val, ok := t.reverse[tok]; ok {
+			return val
+		}
+		return tok
+	})
 }
 
 // scalarString unwraps a JSON string to its raw text (so command="go test" reads
