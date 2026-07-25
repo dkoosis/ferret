@@ -493,13 +493,40 @@ var toolNameHeadRe = regexp.MustCompile(`^([^(\n]+)\(`)
 const transcriptCallFloor = 2
 
 // isTranscriptShaped reports whether s carries enough CC-transcript markers — ⏺
-// tool-call density, corroborated by a ⎿ result or ❯ embedded user turn — to
-// read as a pasted prior interaction rather than opaque code/log content.
+// tool-call density, corroborated by a ⎿ result or ❯ embedded user turn, AND at
+// least one ⏺ segment that actually parses as a call (name+paren) — to read as
+// a pasted prior interaction rather than prose that merely mentions the
+// glyphs. Codex flagged (PR #93) that glyph-count-alone lets adversarial/
+// coincidental prose (e.g. documentation discussing these very markers) trip
+// the detector; the call-shape check is the structural corroboration the
+// original comment promised but didn't yet enforce.
 func isTranscriptShaped(s string) bool {
 	if strings.Count(s, "⏺") < transcriptCallFloor {
 		return false
 	}
-	return strings.Contains(s, "⎿") || strings.Contains(s, "❯")
+	if !strings.Contains(s, "⎿") && !strings.Contains(s, "❯") {
+		return false
+	}
+	return hasCallShapedSegment(s)
+}
+
+// hasCallShapedSegment reports whether at least one ⏺-marked segment in s
+// parses as a real call (toolNameHeadRe: name immediately followed by "(").
+func hasCallShapedSegment(s string) bool {
+	markers := transcriptMarkerRe.FindAllStringIndex(s, -1)
+	for i, m := range markers {
+		if s[m[0]:m[1]] != "⏺" {
+			continue
+		}
+		end := len(s)
+		if i+1 < len(markers) {
+			end = markers[i+1][0]
+		}
+		if toolNameHeadRe.MatchString(strings.TrimSpace(s[m[1]:end])) {
+			return true
+		}
+	}
+	return false
 }
 
 // ParseEmbeddedInteraction parses a long-paste turn into its embedded-

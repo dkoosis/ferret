@@ -289,6 +289,16 @@ func TestParseEmbeddedInteractionRejectsPlainPaste(t *testing.T) {
 	if _, ok := ParseEmbeddedInteraction(oneGlyph); ok {
 		t.Error("a single ⏺ glyph with no corroborating density must not fire")
 	}
+	// Prose that discusses the marker glyphs (documentation, a code review)
+	// without any segment actually shaped like a call must not fire either —
+	// glyph-count + any-corroborating-marker alone was a false-positive gap
+	// Codex flagged (PR #93); a real call-shaped segment is now required too.
+	glyphProse := strings.Repeat("padding text to clear the length floor for this case ", 20) +
+		"the ⏺ marker opens a tool call, a second ⏺ mention shows the same thing, " +
+		"and ⎿ opens its result, per the docs"
+	if _, ok := ParseEmbeddedInteraction(glyphProse); ok {
+		t.Error("prose merely mentioning ⏺/⎿ with no call-shaped segment must not fire")
+	}
 }
 
 // TestTagMoveStillLongPasteOnTranscriptShapedPaste guards the non-goal boundary:

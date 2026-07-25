@@ -75,6 +75,27 @@ func TestDetectProposals_ReturnsNil_When_WasteWordsButNoSpecificArchetype(t *tes
 	}
 }
 
+// TestDetectAskAfterMiss_MatchesShouldntHave_NotJustRedundant covers the
+// "shouldn't have" waste-word phrasing SelfAuditTell's gate already
+// recognizes — the archetype detector previously required the narrower
+// redundant/unnecessary wording and silently produced no proposal for this
+// equally-valid confession (Codex, PR #93).
+func TestDetectAskAfterMiss_MatchesShouldntHave_NotJustRedundant(t *testing.T) {
+	got := DetectProposals("sess", "I shouldn't have asked again after a miss - search alone would have sufficed.")
+	if len(got) != 1 || got[0].IntentClass != "ask-after-miss" {
+		t.Fatalf("got %+v, want one ask-after-miss proposal", got)
+	}
+}
+
+// TestSelfAuditTell_CallCountAcrossNewline covers a call-count confession
+// whose two clauses land on separate lines — callCountRe previously used a
+// non-dotall "." that can't cross a newline (Codex, PR #93).
+func TestSelfAuditTell_CallCountAcrossNewline(t *testing.T) {
+	if !SelfAuditTell("Floor was 4.\nI spent 6 tool calls this task.") {
+		t.Error("SelfAuditTell: want true for a call-count confession split across lines")
+	}
+}
+
 // TestSelfAuditTell reports the three self-audit signal shapes fire, and
 // ordinary text doesn't.
 func TestSelfAuditTell(t *testing.T) {

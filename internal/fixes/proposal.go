@@ -50,7 +50,9 @@ func (p Proposal) ToSubstitution() Substitution {
 // match.
 var (
 	// callCountRe: an explicit call-budget confession ("floor was 4; I spent 6").
-	callCountRe = regexp.MustCompile(`(?i)\bfloor\s+was\s+\d+\b.{0,60}?\bspent\s+\d+\b`)
+	// (?s) so the gap between the two clauses can cross a newline — a real
+	// self-audit often puts them on separate lines (Codex, PR #93).
+	callCountRe = regexp.MustCompile(`(?is)\bfloor\s+was\s+\d+\b.{0,60}?\bspent\s+\d+\b`)
 	// wasteWordsRe: the vocabulary of self-audit admission.
 	wasteWordsRe = regexp.MustCompile(`(?i)\b(redundant|wasted?|unnecessary|should(?:n't| not)\s+have)\b`)
 	// numberedWasteRe: a numbered list line naming waste explicitly.
@@ -80,13 +82,16 @@ func containsAllFold(s string, subs ...string) bool {
 
 // detectAskAfterMiss matches the archetype: a redundant second ask fired
 // after a lookup miss, where a search alone would have covered it. Requires
-// "redundant"/"unnecessary" + "ask" + "miss" + "search" all in the same
-// sentence — narrow on purpose, precision over recall.
+// "ask" + "miss" + "search" plus a waste-word admission (the same vocabulary
+// SelfAuditTell's gate uses — was previously a hardcoded redundant/unnecessary
+// check that missed "shouldn't have" phrasing the gate itself recognizes;
+// Codex, PR #93) all in the same sentence — narrow on purpose, precision over
+// recall.
 func detectAskAfterMiss(sentence string) (Proposal, bool) {
 	if !containsAllFold(sentence, "ask", "miss", "search") {
 		return Proposal{}, false
 	}
-	if !containsAllFold(sentence, "redundant") && !containsAllFold(sentence, "unnecessary") {
+	if !wasteWordsRe.MatchString(sentence) {
 		return Proposal{}, false
 	}
 	return Proposal{
