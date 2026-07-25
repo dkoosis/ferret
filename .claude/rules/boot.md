@@ -1,47 +1,33 @@
 # Boot
-updated: 2026-07-19
+updated: 2026-07-25
 
 *Project working-memory. Maintained for future-me: current state + live frontier + traps that still bite. Resolved lanes pruned — history lives in beads/PRs.*
 
-## lane: LiveAdjudicator
-→ next: **plan bbp.11** (agency-calibration axis) — exploratory, `requires_plan`; own-scorer vs fold into bbp.7. `bd show ferret-bbp.11`.
-↑ so that ferret scores the agent's initiative-calibration (over/under-action), a new measurable-behavior axis toward the ★.
-‡ bbp.11: plan first (no anchor, unknown move-set). 567 has no children — decompose before dispatch.
+## lane: (none open)
+Both roadmap epics essentially done — **ferret-bbp CLOSED**, **ferret-kuv 4/5** (only child left is ❄-deferred). ferret is at the end of its charted 2-phase roadmap (NORTH_STAR: bbp → kuv).
+→ next: a decision, not a task. Either close the kuv epic (its last child **kuv.9** — user re-prompt friction vs pivot scoring — is deferred: build it or drop it) or chart a new direction. ✗ open a build lane before the destination is picked.
+~ *Vocabulary (agent behavior axes):* "initiative" = how readily it acts (dial 1); "autonomy" = how far without approval (dial 2) — two axes, don't collapse into one scale. bbp.11 scores *calibration* (was the initiative right for the moment), orthogonal to both.
 ~ dk drives forks himself — hand them crisply, ✗ pre-decide ratified semantics.
 
 ## State
-- main @ `319a8cc`, origin synced. PR queue EMPTY — #77–81 merged 2026-07-20. Branches/worktrees/stashes pruned. `.tmp/`+`tmp/` gitignored.
-- Scorers live in **`internal/score/`** (landmark/quality/conform all there — ratified, design-doc D2). New scorers go here.
+- main @ `3092176`, origin synced. PR queue EMPTY. Local branches pruned to `main` only (6 stale loto/team branches deleted this session — content merged via #95 squash). `.fo/` now gitignored.
+- Scorers live in **`internal/score/`** (landmark/quality/conform/qpp all there — ratified, design-doc D2). New scorers go here.
 - `/team` = one shared tree + loto (worktrees retired). No concurrent `make check`; primary verifies once at wave end.
 
 ## Frontier — where the work is
 
-**ferret-bbp** (epic, in_progress) — User-turn repair/acceptance tagger: read intent from the *human's words*, not just tool sequences. **Deterministic spine COMPLETE** (#49–52): boundary guard → per-segment Outcome → TurnContext/AttributeHop → Hop2 QPP → surfaced on `mine.Finding` (rank/report/out). The **consumer clause** of the retrieval-outcome contract below.
-- ✓ shipped: bbp.1 (compaction-carrier boundary guard) · bbp.2 (per-seg Outcome rollup) · bbp.3 (TurnContext, un-stubbed AttributeHop) · bbp.4 (det. Hop2 QPP scorer, `internal/score/qpp.go`) · bbp.6 (de-island dialogue+hop onto `mine.Finding`, emit seam `cmd/ferret/finding_dialogue.go`)
-- ✓ **bbp.7 SHIPPED** (#54) — v2 13-move taxonomy (7 outcome-bearing + 6 catalog), carrier pre-filters, behavior-preserving repair→reject split via `IsRepairMove`, `episode.Classify` extended.
-- ✓ **bbp.9 SHIPPED** (#59) — MoveClarify populated on the `ferret dialogue` path (AssistantAskedQuestion → PriorAgentQuestion); retrieval/Finding path still clarify-inert (no assistant NL in events).
-- ✓ **bbp.10/.12/.13 SHIPPED** (#58/57/56) — deterministic friction metrics over segments · abandonment-by-topic-switch wired into per-segment dialogueOutcomeNote · GoodAbandon self-contradictory-label suppression in retrieval CLI.
-- ✓ **bbp.5 SHIPPED** (#53) — staged Hop1 judge: deterministic floor, paid LLM (results-blind Q3 coverage judge, AgentRewardBench bias guards) only on floor-undecidable episodes; grades joinable with Hop2 QPP.
-- ✓ **bbp.14 SHIPPED** (#74) — `helped` adjudicator: det precedence lattice (`helped|ignored|misled|conflict|no_signal`) as data + `internal/retrievalevent/` leaf pkg (schema-guarded JSONL reader, vendored golden fixture). Design ratified (decision nug `f7977bfc1afa`).
-- ✓ **bbp.15 SHIPPED** (#78) — `judge_fingerprint` on `Hop1Result` (shared `score.LLMFingerprint{model,prompt_hash}`, pinned `rules_hash` over floor+coverage prompt).
-- ✓ **bbp.16 SHIPPED** (#79) — live `ts→segment` join (mechanism A: `Segment.FirstTS/LastTS` interval containment) + `ferret helped` CLI. bbp.14 no longer fixture-only.
-- ✓ **bbp.17 SHIPPED** (#81) — per-event read-adjacency; adjacent repair supplies leg `Tell` (reading 2) → `misled` fires on clean search→pushback; `conflict` outranks when the segment shipped. Adjudicator now emits all 5 verdicts on live data.
-- → **remaining:** **bbp.11** (agency-calibration axis, P3, exploratory/requires_plan — reads the AGENT's initiative-calibration, orthogonal to bbp's human-intent read).
-- bbp regex-first; ✗ emotion detector (dev jargon "kill/dead/braindead" ≠ affect)
+**ferret-bbp — CLOSED.** User-turn repair/acceptance tagger: read intent from the *human's words*, not just tool sequences. Full deterministic spine + v2 taxonomy + Hop1/Hop2 judges + `helped` adjudicator + agent-initiative scorer all shipped (#49–91). Detail in the ledger below. This was ferret's side of the retrieval-outcome contract.
 
-Under epic **ferret-kuv** (container, ✗ dispatch): **567** (metrics-engine for a Claude analyst — per-candidate bundle + proposal loop, in_progress, UNTOUCHED all session). **kuv.3 SHIPPED** (#77) + **kuv.15 SHIPPED** (#80, substitution ledger `ferret fixes sub/subs` — confirmed mismatches dedup into executable `intent→better` rules w/ occurrence count). Loop closed: adjudicate flags → dk validates → `fixes sub` records → hook/CLAUDE.md nudge consumes.
+**ferret-kuv** (epic, open) — Intent-grounded tool-improvement harness. 4/5 children shipped (kuv.3/.14/.15/567 done). Only **kuv.9** left, ❄-deferred (user re-prompt friction vs pivot scoring). Epic closes once kuv.9 is built-or-dropped. **567** (metrics-engine for a Claude analyst) shipped its children (567.1/.2). Substitution-ledger loop CLOSED: adjudicate flags → dk validates → `ferret fixes sub` records → hook/CLAUDE.md nudge consumes.
 
-**Retrieval-outcome contract (trixi⇄ferret)** — drafted 2026-06-29 → `~/Projects/dk/Project/trixi/specs/retrieval-outcome-contract-design.md`. The validation seam:
-`trixi/observe.2.1` emits retrieval-event JSONL (producer) → `ferret/bbp` joins to task segments + adjudicates outcome (consumer) → `search-loop.4` reads back via interrupted-time-series (reader).
-Decided calls: `schema_version`/record · sidecar JSONL not the CC transcript · per-task-segment grain (store fine, roll up) · `config_fingerprint` as ITS segment-key · key = `(session_id, agent_id, ts)`, carry `agent_type`. **Ratified 2026-07-02** (Trixi feedback round): `gate` on search rows · `kind: search|read` rows w/ `search_ref` FK · `judge_fingerprint` on ferret's outcome record (ours — carries into Hop1 judge design) · golden fixture as contract test (ferret vendors it; build ingest against the fixture, ✗ trixi's SQLite interim — producer conformance = `tx-dii8m`). Out of scope: `observe.2.2` (Q3 prompt→query, upstream). **ferret's side of this contract = the bbp epic.**
+**Retrieval-outcome contract (trixi⇄ferret)** — ferret's consumer side = the bbp epic, now SHIPPED. Spec: `~/Projects/dk/Project/trixi/specs/retrieval-outcome-contract-design.md`. Seam: `trixi/observe.2.1` emits retrieval-event JSONL (producer) → `ferret/bbp` joins to segments + adjudicates (consumer, done) → `search-loop.4` reads back via interrupted-time-series (reader, upstream). Golden fixture is the contract test (ferret vendors it). Producer conformance = `tx-dii8m`.
 
 ## Live traps
-- **agent_id/agent_type are the ONLY parent↔subagent discriminator** — `session_id` + `transcript_path` are SHARED (claude-code-guide-confirmed). Anything keying retrieval/attribution per-agent MUST carry `agent_id` (it's Trap 2 in the contract; bbp.3 TurnContext attribution rides on it).
-- **/team shared-tree clobber** — a wave agent relocating a *peer's* untracked files via a flat-basename scratch dir can silently destroy untracked work (lost kuv.10's `internal/score/landmark.go`, 6-19). Filed **`ccp-l1nf`** (cc-plugins, P1). loto is a no-op *within* a wave (shared identity, loto-fs84); write-set disjointness is the only guard and it's leaky for untracked files. ✗ reach outside your write-set.
+- **agent_id/agent_type are the ONLY parent↔subagent discriminator** — `session_id` + `transcript_path` are SHARED (claude-code-guide-confirmed). Anything keying retrieval/attribution per-agent MUST carry `agent_id`.
+- **/team shared-tree clobber** — a wave agent relocating a *peer's* untracked files via a flat-basename scratch dir can silently destroy untracked work (lost kuv.10's `internal/score/landmark.go`, 6-19). Filed **`ccp-l1nf`** (cc-plugins, P1). loto is a no-op *within* a wave (shared identity); write-set disjointness is the only guard, leaky for untracked files. ✗ reach outside your write-set.
 - **Branch-staleness diff** — a branch that LOOKS like a huge diff vs main is usually a stale merge-base fooling the *three-dot* diff. Real tell = two-dot tree diff: `git diff main <branch>`.
-- nilaway debt at `gates.go:242` / `golden.go:111` — CLEARED by #48 (provably nil-safe). ✗ re-chase as a regression.
-- **`codex-review.yml` fails at infra level** (~30s run, no review posted) — recurring across PRs; the `@codex review` comment trigger doesn't land a verdict. ✗ wait on it or treat as a gate. `make check` (local) is the gate (ci-on-demand.md).
-- **bbp impl lint tail** — adding fields to a hot struct (`mine.Finding`→152B) trips `rangeValCopy` on *existing* value-range loops; integration beads tend to push a func past gocognit 15. Cheap to fix at wave verify (index-range + helper-extract), but expect it.
+- **`codex-review.yml` fails at infra level** (~30s run, no review posted) — recurring; the `@codex review` comment trigger doesn't land a verdict. ✗ wait on it or treat as a gate. `make check` (local) is the gate (ci-on-demand.md).
+- **Hot-struct lint tail** — adding fields to a hot struct (`mine.Finding`) trips `rangeValCopy` on *existing* value-range loops; integration beads push a func past gocognit 15. Cheap to fix at wave verify (index-range + helper-extract), expect it.
 
 ## dk read (stable, 30+ sessions)
 Dry fenced grants, zero corrections → trust-the-loop. Surface deviations, ✗ ask permission mid-build. On **open design** dk drives + wants the *why* before a model-changing/destructive call; hand him the approve/merge fork crisply (he ends on "next?"). When dk states a ground-truth fact, verify-then-proceed — ✗ re-litigate.
@@ -50,4 +36,5 @@ Dry fenced grants, zero corrections → trust-the-loop. Surface deviations, ✗ 
 - read-before-edit/write hookify guard — top ferret-scan burn finding (`Edit!⇝Read` + `Write!⇝Read⇝Write`, ~670k). Build as a hook, log in the ferret fix ledger. Harness-side, not a ferret bead. Done-status unverified.
 
 ## Shipped ledger
-kuv.15 substitution ledger (#80) · bbp.16 live ts→segment join + helped CLI (#79) · bbp.15 judge_fingerprint on Hop1Result (#78) · kuv.3 analyst-assumes-snipe (#77) · bbp.14 helped adjudicator (#74) · bbp.13 GoodAbandon-label suppress (#56) · bbp.12 abandonment-by-topic-switch (#57) · bbp.10 det friction metrics (#58) · bbp.9 clarify population (#59) · bbp.7 v2 taxonomy (#54) · bbp deterministic spine #49–52 (bbp.1/.2/.3/.4/.6) · landmark wave kuv.10/vy7/afm/t5d (#45–47) · sq.2 judge+golden + d28 spec (#41) · kuv.5 quality axes (#44) · kuv.4 conformance (#27) · kuv.2 segmentation · kuv.1 spine (#23) · d01 prompt-text capture (#34) · bbp tagger (#33) · 9 go-bug-audit fixes (#31) · nilaway clear (#48).
+**bbp epic (closed):** agent-initiative scorer bbp.11 (#83/85/87) + no-pushback over-init bbp.18 (#86) · bbp.21 shipped-artifact tell (#91) · bbp.20 query-mode recall roots (#90) · bbp.19 transcript-paste parse (#93) · bbp.17 read-adjacency 5-verdict (#81) · bbp.16 ts→segment join + helped CLI (#79) · bbp.15 judge_fingerprint (#78) · bbp.14 helped adjudicator (#74) · bbp.13/.12/.10/.9 (#56/57/58/59) · bbp.7 v2 taxonomy (#54) · bbp.5 staged Hop1 judge (#53) · spine bbp.1/.2/.3/.4/.6 (#49–52).
+**kuv + misc:** kuv.16 confessed-waste proposals (#93) · kuv.15 substitution ledger (#80) · 567.2 conformance leak-multiplicand (#88) · kuv.3 analyst-assumes-snipe (#77) · izo recall-trace mode (#84) · qus odds-ratio signal + 5c0 placeholder-mapping (#94) · 8bb 'next:' hints (#92) · dic trixi-ask store-reach · backlog wave 1 bug fixes 9iu/kzg/ffc/mls/cc3 (#95, #89) · landmark wave kuv.10/vy7/afm/t5d (#45–47) · kuv.5 quality axes (#44) · kuv.4 conformance (#27) · kuv.2 segmentation · kuv.1 spine (#23) · nilaway clear (#48).
