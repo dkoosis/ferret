@@ -44,7 +44,9 @@ func cmdSpine() error {
 	if err != nil {
 		return err
 	}
-	return spine(os.Stdout, root, cmd.Session)
+	// nil: the human `ferret spine` CLI path renders every value in full,
+	// unchanged by ferret-5c0's prompt-bound placeholder mapping.
+	return spine(os.Stdout, root, cmd.Session, nil)
 }
 
 // spineCounts tallies what the spine emitted — printed as a trailer so a reader
@@ -58,7 +60,12 @@ type spineCounts struct {
 // text, each tool call (name + key args, truncated), and each tool result
 // (status + size). It reuses transcript.ReadLines/Raw for decoding and tolerates
 // a malformed line rather than aborting (a truncated final line is common).
-func spine(w io.Writer, root, session string) error {
+//
+// ph carries the ferret-5c0 placeholder table for tool-call args: nil for the
+// human `ferret spine` CLI path (renders every value in full, unchanged); a
+// fresh *placeholderTable for an LLM-prompt-bound render (adjudicate.go), so
+// this one render pass's repeated volatile values compress to tokens.
+func spine(w io.Writer, root, session string, ph *placeholderTable) error {
 	src, distinct, err := resolveSpineSource(root, session)
 	if err != nil {
 		return err
@@ -79,7 +86,7 @@ func spine(w io.Writer, root, session string) error {
 
 	var c spineCounts
 	if err := transcript.ReadLines(src.Path, func(line []byte) error {
-		emitSpineLine(bw, line, &c)
+		emitSpineLine(bw, line, &c, ph)
 		return nil
 	}); err != nil {
 		return err
@@ -98,7 +105,7 @@ func spine(w io.Writer, root, session string) error {
 // assistant/user messages carry spine content; everything else (summaries,
 // system, meta) is skipped. Decode failures bump a counter and are dropped — a
 // best-effort line-level tolerance matching the raw-transcript reality.
-func emitSpineLine(bw *bufio.Writer, line []byte, c *spineCounts) {
+func emitSpineLine(bw *bufio.Writer, line []byte, c *spineCounts, ph *placeholderTable) {
 	var raw transcript.Raw
 	if err := json.Unmarshal(line, &raw); err != nil {
 		c.decodeErrs++
@@ -118,7 +125,7 @@ func emitSpineLine(bw *bufio.Writer, line []byte, c *spineCounts) {
 		case blockTypeText:
 			emitText(bw, raw.Type, blk, c)
 		case "tool_use":
-			emitToolUse(bw, blk, c)
+			emitToolUse(bw, blk, c, ph)
 		case "tool_result":
 			emitToolResult(bw, blk, c)
 		}
@@ -156,9 +163,9 @@ func emitText(bw *bufio.Writer, lineType string, blk *transcript.Block, c *spine
 }
 
 // emitToolUse writes a tool call: name + the most salient argument, truncated.
-func emitToolUse(bw *bufio.Writer, blk *transcript.Block, c *spineCounts) {
+func emitToolUse(bw *bufio.Writer, blk *transcript.Block, c *spineCounts, ph *placeholderTable) {
 	c.calls++
-	if args := renderArgs(blk.Input); args != "" {
+	if args := renderArgs(blk.Input, ph); args != "" {
 		fmt.Fprintf(bw, "[call] %s  %s\n", blk.Name, args)
 		return
 	}
@@ -218,7 +225,15 @@ func resolveSpineSource(root, session string) (transcript.Source, int, error) {
 // argument as key=value (the bash command, the file path, the search pattern…),
 // falling back to the whole object compacted. Truncated to spineArgCap so a giant
 // Write payload or pasted blob can't blow the spine's density budget.
-func renderArgs(input json.RawMessage) string {
+//
+// ph is the per-render placeholder table (ferret-5c0): nil (the human `ferret
+// spine` CLI path) renders every occurrence in full, exactly as before this
+// change. Non-nil (the LLM-prompt-bound render path — adjudicate/hop1/
+// over-initiative) renders the first distinct value in full and every repeat
+// within the same render pass as that value's stable short token, so a
+// volatile constant (a repo's absolute path, a scratch dir) that recurs across
+// many tool calls pays its full string cost once instead of on every call.
+func renderArgs(input json.RawMessage, ph *placeholderTable) string {
 	if len(input) == 0 {
 		return ""
 	}
@@ -231,10 +246,64 @@ func renderArgs(input json.RawMessage) string {
 		"prompt", "description", "old_string", "content",
 	} {
 		if v, ok := m[k]; ok {
-			return truncateRunes(k+"="+scalarString(v), spineArgCap)
+			val := scalarString(v)
+			if ph != nil {
+				if tok, seen := ph.lookup(val); seen {
+					return k + "=" + tok
+				}
+				ph.register(val)
+			}
+			return truncateRunes(k+"="+val, spineArgCap)
 		}
 	}
 	return truncateRunes(compactJSON(input), spineArgCap)
+}
+
+// placeholderTable interns volatile tool-arg values seen while rendering ONE
+// spine into a prompt-bound token stream (ferret-5c0, following PostHog's
+// _simplify_window_id/_simplify_url pattern). The first render of a distinct
+// value pays its full string cost — that's what establishes, in context, what
+// the token stands for; every later repeat within the same render pass costs
+// only a few bytes ("[P3]") instead of the value again. reverse lets a caller
+// restore a token-bearing string (e.g. an LLM finding that echoes a token back
+// in its own words) to the real value before it reaches a human — dk must
+// never see a raw placeholder token, only the LLM prompt should.
+type placeholderTable struct {
+	tokens  map[string]string // value -> token, minted on first sight
+	reverse map[string]string // token -> value
+}
+
+// newPlaceholderTable returns an empty table, ready for one render pass.
+func newPlaceholderTable() *placeholderTable {
+	return &placeholderTable{tokens: map[string]string{}, reverse: map[string]string{}}
+}
+
+// lookup reports the stable token already minted for val, if any.
+func (t *placeholderTable) lookup(val string) (string, bool) {
+	tok, ok := t.tokens[val]
+	return tok, ok
+}
+
+// register mints and returns a new stable token for val (first sight only —
+// callers check lookup first so a value never gets minted twice).
+func (t *placeholderTable) register(val string) string {
+	tok := fmt.Sprintf("[P%d]", len(t.tokens)+1)
+	t.tokens[val] = tok
+	t.reverse[tok] = val
+	return tok
+}
+
+// expand restores every placeholder token appearing in s to its real value —
+// the human-facing inverse of register. Safe on a nil table (renders s
+// unchanged) so callers on the human/non-mapped path never need a nil check.
+func (t *placeholderTable) expand(s string) string {
+	if t == nil || len(t.reverse) == 0 {
+		return s
+	}
+	for tok, val := range t.reverse {
+		s = strings.ReplaceAll(s, tok, val)
+	}
+	return s
 }
 
 // scalarString unwraps a JSON string to its raw text (so command="go test" reads

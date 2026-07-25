@@ -1,6 +1,9 @@
 package mine
 
-import "testing"
+import (
+	"maps"
+	"testing"
+)
 
 // tb is one token with its measured byte cost, for building test corpora.
 type tb struct {
@@ -273,6 +276,206 @@ func TestFindingsSplitsRoutineBySurprise(t *testing.T) {
 					got[0].Kind, got[0].Action, tc.wantKind, tc.wantAction, tc.surprise, tc.cut)
 			}
 		})
+	}
+}
+
+// oddsRatioCorpus builds a Corpus of nStreams single-token streams (motif
+// "z" alone, so it never matches any real motif), for padding the labeled
+// corpus-wide baseline in odds-ratio tests without affecting host counts.
+func oddsRatioCorpus(prefix string, n int) ([][]tb, []string) {
+	streams := make([][]tb, n)
+	keys := make([]string, n)
+	for i := range streams {
+		streams[i] = []tb{{"z", 1}}
+		keys[i] = prefix + "/pad" + string(rune('a'+i)) + "@"
+	}
+	return streams, keys
+}
+
+// TestAttachOddsRatioSurfacesLowBurnHighSignalMotif guards ferret-qus: a cheap
+// (low-burn) motif whose host streams correlate strongly with failure gets a
+// meaningful odds ratio, while an expensive (high-burn) motif with too few
+// labeled host streams to trust is suppressed — so ranking findings by
+// |OutcomeOddsRatio-1| surfaces the low-burn motif on top, exactly the
+// burn-only-buries-it case the ferret-567.4 spike measured (a 5-step
+// git-workflow motif ranked 30th by burn but showing a 36% fail rate vs 25%
+// corpus base). Burn-only ordering itself must stay unchanged (asserted first).
+func TestAttachOddsRatioSurfacesLowBurnHighSignalMotif(t *testing.T) {
+	// "bad" motif: cheap (burn ~2), 12 host streams, mostly-fail (2 success / 10
+	// fail) -- well past MinOddsRatioSupport and starkly worse than the corpus
+	// base rate.
+	badStreams := make([][]tb, 12)
+	badKeys := make([]string, 12)
+	for i := range badStreams {
+		badStreams[i] = []tb{{"bad1", 1}, {"bad2", 1}}
+		badKeys[i] = "p/bad" + string(rune('a'+i)) + "@"
+	}
+	badIdx := map[string]StreamDialogue{}
+	for i := range 12 {
+		outcome := "abandoned" // fail bucket
+		if i < 2 {
+			outcome = "success"
+		}
+		badIdx[badKeys[i]] = StreamDialogue{Outcome: outcome}
+	}
+
+	// "pricey" motif: expensive (burn ~2000), but only 3 host streams -- below
+	// MinOddsRatioSupport, so it must come back suppressed regardless of how
+	// its thin sample looks.
+	priceyStreams := [][]tb{
+		{{"pricey1", 1000}, {"pricey2", 1000}},
+		{{"pricey1", 1000}, {"pricey2", 1000}},
+		{{"pricey1", 1000}, {"pricey2", 1000}},
+	}
+	priceyKeys := []string{"p/px_a@", "p/px_b@", "p/px_c@"}
+	priceyIdx := map[string]StreamDialogue{
+		"p/px_a@": {Outcome: "success"},
+		"p/px_b@": {Outcome: "success"},
+		"p/px_c@": {Outcome: "abandoned"},
+	}
+
+	// Pad the corpus-wide labeled baseline with plain successes so the
+	// contingency table has a real "rest of corpus" leg to compare against.
+	padStreams, padKeys := oddsRatioCorpus("p", 8)
+	padIdx := map[string]StreamDialogue{}
+	for _, k := range padKeys {
+		padIdx[k] = StreamDialogue{Outcome: "success"}
+	}
+
+	allStreams := append(append(append([][]tb{}, badStreams...), priceyStreams...), padStreams...)
+	allKeys := append(append(append([]string{}, badKeys...), priceyKeys...), padKeys...)
+	c := bytesCorpusKeyed(allStreams, allKeys)
+
+	idx := map[string]StreamDialogue{}
+	maps.Copy(idx, badIdx)
+	maps.Copy(idx, priceyIdx)
+	maps.Copy(idx, padIdx)
+
+	cards := []*Card{
+		{IDs: idsFor(c, "bad1", "bad2"), Bucket: BucketScript},
+		{IDs: idsFor(c, "pricey1", "pricey2"), Bucket: BucketScript},
+	}
+	got := Findings(c, cards, 3, nil, 0)
+	if got[0].Kind == "" {
+		t.Fatalf("Findings returned no kind, setup broken")
+	}
+	// Burn-only default ordering is unchanged: the expensive motif still
+	// outranks the cheap one by Burn.
+	byMotif := func(tok string) *Finding {
+		t.Helper()
+		want := idsFor(c, tok)[0]
+		for _, f := range got {
+			if f.IDs[0] == want {
+				return f
+			}
+		}
+		t.Fatalf("no finding rooted at %q", tok)
+		return nil
+	}
+	bad := byMotif("bad1")
+	pricey := byMotif("pricey1")
+	if pricey.Burn <= bad.Burn {
+		t.Fatalf("pricey.Burn=%d should stay > bad.Burn=%d (default sort unaffected)", pricey.Burn, bad.Burn)
+	}
+	if got[0].IDs[0] != pricey.IDs[0] {
+		t.Fatalf("default Findings order must still rank by burn first (pricey first), got motif rooted at %v", got[0].IDs)
+	}
+
+	AttachOddsRatio(got, c, idx, 3, MinOddsRatioSupport)
+
+	if bad.OddsRatioSupport != 12 {
+		t.Errorf("bad.OddsRatioSupport = %d, want 12 (2 success + 10 fail host streams)", bad.OddsRatioSupport)
+	}
+	if bad.OutcomeOddsRatio == nil {
+		t.Fatalf("bad.OutcomeOddsRatio = nil, want a trusted ratio (support=12 clears MinOddsRatioSupport=%d)", MinOddsRatioSupport)
+	}
+	if *bad.OutcomeOddsRatio >= 1.0 {
+		t.Errorf("bad.OutcomeOddsRatio = %.4f, want < 1 (host streams correlate with failure)", *bad.OutcomeOddsRatio)
+	}
+
+	if pricey.OddsRatioSupport != 3 {
+		t.Errorf("pricey.OddsRatioSupport = %d, want 3 (below MinOddsRatioSupport=%d)", pricey.OddsRatioSupport, MinOddsRatioSupport)
+	}
+	if pricey.OutcomeOddsRatio != nil {
+		t.Errorf("pricey.OutcomeOddsRatio = %.4f, want nil (suppressed: support=3 < MinOddsRatioSupport=%d)",
+			*pricey.OutcomeOddsRatio, MinOddsRatioSupport)
+	}
+
+	// The point of the feature: ranking by |ratio-1| (only among TRUSTED
+	// ratios) surfaces the cheap, fail-correlated motif — burn-only structurally
+	// cannot, since pricey outranks bad on burn alone.
+	if bad.OutcomeOddsRatio == nil {
+		t.Fatal("bad ratio unexpectedly nil, cannot compare signal strength")
+	}
+	badSignal := absFloat(*bad.OutcomeOddsRatio - 1.0)
+	if pricey.OutcomeOddsRatio != nil {
+		t.Fatalf("pricey ratio should be suppressed (nil) so it can't even enter the |ratio-1| ranking")
+	}
+	if badSignal <= 0 {
+		t.Errorf("bad |ratio-1| = %.4f, want a nonzero, meaningful deviation from 1", badSignal)
+	}
+}
+
+// absFloat is a tiny local abs, so the test doesn't reach for math.Abs over a
+// single call site.
+func absFloat(f float64) float64 {
+	if f < 0 {
+		return -f
+	}
+	return f
+}
+
+// TestAttachOddsRatioSuppressesBelowMinSupport guards the ferret-567.4 spike's
+// core caveat: a motif with ZERO labeled host streams (a=b=0) must report
+// OutcomeOddsRatio as nil (suppressed/unknown), never a spurious value —
+// Laplace smoothing alone can produce a nontrivial ratio purely reflecting the
+// corpus base rate, with no motif-specific evidence behind it.
+func TestAttachOddsRatioSuppressesBelowMinSupport(t *testing.T) {
+	// The motif's only host stream carries NO dialogue signal at all (absent
+	// from idx) -- support must come back 0.
+	padStreams, padKeys := oddsRatioCorpus("p", 20)
+	motifStreams := make([][]tb, 1, 1+len(padStreams))
+	motifStreams[0] = []tb{{"m1", 1}, {"m2", 1}}
+	motifKeys := make([]string, 1, 1+len(padKeys))
+	motifKeys[0] = "p/unlabeled@"
+	padIdx := map[string]StreamDialogue{}
+	for i, k := range padKeys {
+		outcome := "success"
+		if i%4 == 0 {
+			outcome = "repair-heavy"
+		}
+		padIdx[k] = StreamDialogue{Outcome: outcome}
+	}
+
+	c := bytesCorpusKeyed(append(motifStreams, padStreams...), append(motifKeys, padKeys...))
+	cards := []*Card{{IDs: idsFor(c, "m1", "m2"), Bucket: BucketScript}}
+	got := Findings(c, cards, 3, nil, 0)
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1", len(got))
+	}
+
+	AttachOddsRatio(got, c, padIdx, 3, MinOddsRatioSupport)
+
+	f := got[0]
+	if f.OddsRatioSupport != 0 {
+		t.Errorf("OddsRatioSupport = %d, want 0 (motif's only host stream carries no dialogue signal)", f.OddsRatioSupport)
+	}
+	if f.OutcomeOddsRatio != nil {
+		t.Errorf("OutcomeOddsRatio = %.4f, want nil (suppressed: support=0 < MinOddsRatioSupport=%d) -- "+
+			"the spike's core caveat: Laplace smoothing alone must not leak through as a spurious ratio",
+			*f.OutcomeOddsRatio, MinOddsRatioSupport)
+	}
+}
+
+// TestAttachOddsRatioNilIndexIsOff proves the off switch, mirroring
+// TestAttachDialogueNilIndexIsOff: a nil index leaves both new fields at zero.
+func TestAttachOddsRatioNilIndexIsOff(t *testing.T) {
+	c := bytesCorpusKeyed([][]tb{{{"a", 1}, {"b", 1}}}, []string{"p/s1@"})
+	got := Findings(c, []*Card{{IDs: idsFor(c, "a", "b"), Bucket: BucketScript}}, 3, nil, 0)
+	AttachOddsRatio(got, c, nil, 3, MinOddsRatioSupport)
+	f := got[0]
+	if f.OutcomeOddsRatio != nil || f.OddsRatioSupport != 0 {
+		t.Errorf("nil index should leave odds-ratio fields zero, got support=%d ratio=%v", f.OddsRatioSupport, f.OutcomeOddsRatio)
 	}
 }
 

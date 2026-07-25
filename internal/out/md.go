@@ -29,6 +29,14 @@ type MDFinding struct {
 	Hop2    string // worst Hop2 retrieval grade across host sessions: low | mid | high
 	Repairs int    // repair-tagged user turns across host sessions
 	Accepts int    // accept-tagged user turns across host sessions
+
+	// OddsRatio/OddsRatioN (ferret-qus): the odds-ratio-vs-outcome second signal
+	// alongside Burn, resolved from mine.Finding.OutcomeOddsRatio /
+	// OddsRatioSupport. OddsRatio is nil when the motif's labeled host-stream
+	// support didn't clear mine.MinOddsRatioSupport — rendered as no signal, not
+	// a spurious number.
+	OddsRatio  *float64 // nil = suppressed/unknown (support below the gate)
+	OddsRatioN int      // labeled host-stream support (a+b) backing OddsRatio
 }
 
 // usdPerToken prices burn in dollars for the human report. burn counts the
@@ -132,6 +140,9 @@ func mdDialogueNote(f MDFinding) string {
 	}
 	if f.Repairs > 0 || f.Accepts > 0 {
 		parts = append(parts, fmt.Sprintf("repairs %d · accepts %d", f.Repairs, f.Accepts))
+	}
+	if f.OddsRatio != nil {
+		parts = append(parts, fmt.Sprintf("odds-ratio %.2f (n=%d)", *f.OddsRatio, f.OddsRatioN))
 	}
 	return strings.Join(parts, " · ")
 }
