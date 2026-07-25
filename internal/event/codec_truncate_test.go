@@ -2,6 +2,7 @@ package event
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -101,6 +102,60 @@ func TestReadSurvivesMidStreamCorruption(t *testing.T) {
 	}
 	if len(got) != 2 || got[0] != 1 || got[1] != 3 {
 		t.Fatalf("Read delivered %v, want [1 3] (record after the corrupt one must not be dropped)", got)
+	}
+}
+
+// TestReadRejectsGarbledFinalRecordDelimited asserts a complete,
+// newline-terminated final line that fails to parse is NOT misclassified as
+// the tolerated truncated-trailing-record case — only a final line missing
+// its trailing delimiter (a physically interrupted write) is salvageable; a
+// fully-written garbled line is genuine corruption and must error like any
+// other malformed line (Codex adversarial review of #95: the line-by-line
+// rewrite had widened the salvage rule to cover every final-line decode
+// error, not just an actually-interrupted write).
+func TestReadRejectsGarbledFinalRecordDelimited(t *testing.T) {
+	body := `{"i":1,"p":"proj","s":"sess","k":"tool","act":"Read"}` + "\n"
+	body += `not json at all` + "\n" // complete line, newline-terminated, but not JSON
+	path := writeArtifact(t, body)
+
+	var got []int
+	out := hookStderr(t, func() {
+		err := Read(path, func(ev *Event) error { got = append(got, ev.Seq); return nil })
+		if err == nil {
+			t.Fatal("Read accepted a complete-but-garbled final record as a salvageable truncation; want an error")
+		}
+	})
+	if strings.Contains(out, "truncated trailing record dropped") {
+		t.Fatalf("delimited garbled final line misreported as trailing-truncation salvage: %q", out)
+	}
+	if len(got) != 1 || got[0] != 1 {
+		t.Fatalf("Read delivered %v, want [1]", got)
+	}
+}
+
+// TestReadHandlesOversizedLine asserts a single event line larger than any
+// small fixed buffer ceiling still round-trips: event.Prompt stores the
+// full, untruncated user-turn text (event.go), so a large pasted prompt can
+// legitimately exceed a Scanner-style fixed cap (Codex adversarial review of
+// #95: the line-by-line rewrite had introduced a hard 1 MiB line ceiling via
+// bufio.Scanner that didn't exist under the prior json.Decoder).
+func TestReadHandlesOversizedLine(t *testing.T) {
+	big := strings.Repeat("x", 2<<20) // 2 MiB — bigger than the old scanner cap
+	body := fmt.Sprintf(`{"i":1,"p":"proj","s":"sess","k":"prompt","q":%q}`+"\n", big)
+	path := writeArtifact(t, body)
+
+	var got int
+	if err := Read(path, func(ev *Event) error {
+		got++
+		if len(ev.Prompt) != len(big) {
+			t.Errorf("Prompt len = %d, want %d (line truncated)", len(ev.Prompt), len(big))
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if got != 1 {
+		t.Fatalf("Read yielded %d events, want 1", got)
 	}
 }
 

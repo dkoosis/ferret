@@ -265,7 +265,10 @@ func TestJudgeRecallRuns_BoundsConcurrency(t *testing.T) {
 // TestJudgeRecallRuns_StopsLaunchingAfterCancel: once the context is canceled
 // (e.g. Ctrl-C), the launch loop must stop dispatching further judge calls —
 // each one costs a keychain-read subprocess spawn on macOS — instead of
-// racing through the rest of the batch (ferret-kzg).
+// racing through the rest of the batch (ferret-kzg). This also covers the
+// narrower race Codex flagged in review: canceling while the loop is
+// blocked on a full semaphore must not still let the about-to-unblock send
+// launch one more goroutine once a slot frees.
 func TestJudgeRecallRuns_StopsLaunchingAfterCancel(t *testing.T) {
 	const n = 20
 	const maxConcurrency = 8 // mirrors judgeRecallRuns' internal semaphore size
@@ -300,7 +303,7 @@ func TestJudgeRecallRuns_StopsLaunchingAfterCancel(t *testing.T) {
 	if got >= n {
 		t.Errorf("judge called %d/%d times — cancellation had no effect on the launch loop", got, n)
 	}
-	if got > maxConcurrency+1 {
-		t.Errorf("judge called %d times after cancellation, want <= %d (one may already be in flight)", got, maxConcurrency+1)
+	if got > maxConcurrency {
+		t.Errorf("judge called %d times after cancellation, want <= %d (the loop must re-check ctx after the semaphore send unblocks, not just before)", got, maxConcurrency)
 	}
 }
