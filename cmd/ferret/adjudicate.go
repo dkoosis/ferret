@@ -376,6 +376,9 @@ func judgeRecallRuns(ctx context.Context, runs []recallRun, judge recallJudgeFun
 	var firstErr error
 
 	for i, r := range runs {
+		if ctx.Err() != nil {
+			break
+		}
 		if len(r.Recalled) == 0 {
 			continue
 		}

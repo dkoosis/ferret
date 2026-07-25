@@ -261,3 +261,46 @@ func TestJudgeRecallRuns_BoundsConcurrency(t *testing.T) {
 		t.Errorf("max concurrent judge calls = %d, want <= 8", got)
 	}
 }
+
+// TestJudgeRecallRuns_StopsLaunchingAfterCancel: once the context is canceled
+// (e.g. Ctrl-C), the launch loop must stop dispatching further judge calls —
+// each one costs a keychain-read subprocess spawn on macOS — instead of
+// racing through the rest of the batch (ferret-kzg).
+func TestJudgeRecallRuns_StopsLaunchingAfterCancel(t *testing.T) {
+	const n = 20
+	const maxConcurrency = 8 // mirrors judgeRecallRuns' internal semaphore size
+	runs := recallRunsWithFragments(n)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	release := make(chan struct{})
+	var calledCount int64
+
+	judge := func(_ context.Context, r recallRun) ([]analyst.Finding, string, error) {
+		if atomic.AddInt64(&calledCount, 1) <= maxConcurrency {
+			<-release // hold the semaphore saturated until the test cancels + releases
+		}
+		return []analyst.Finding{{Task: r.RunID}}, "test-model", nil
+	}
+
+	go func() {
+		for atomic.LoadInt64(&calledCount) < maxConcurrency {
+			time.Sleep(time.Millisecond)
+		}
+		cancel()
+		close(release)
+	}()
+
+	if _, err := judgeRecallRuns(ctx, runs, judge); err != nil {
+		t.Fatalf("judgeRecallRuns: %v", err)
+	}
+
+	got := atomic.LoadInt64(&calledCount)
+	if got >= n {
+		t.Errorf("judge called %d/%d times — cancellation had no effect on the launch loop", got, n)
+	}
+	if got > maxConcurrency+1 {
+		t.Errorf("judge called %d times after cancellation, want <= %d (one may already be in flight)", got, maxConcurrency+1)
+	}
+}
