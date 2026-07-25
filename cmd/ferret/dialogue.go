@@ -214,12 +214,24 @@ func tagUserTurn(line []byte, res *dlgResult, moves *[]dialogue.Move, turnIdx *i
 		AgentAskedPermission: st.agentAskedPermission,
 	})
 	st.consume() // the human turn has read the window: clear it for the next
-	res.Signals = append(res.Signals, dialogue.Signal{
+	sig := dialogue.Signal{
 		Turn: *turnIdx, Move: move, Cue: cue,
 		Text:     truncateRunes(prompt, dialogueCap),
 		Cause:    cause,
 		CauseCue: causeCue,
-	})
+	}
+	// A long-paste turn may itself be a pasted CC interaction (ferret-bbp.19): parse
+	// it against the RAW prompt (real newlines/whitespace intact), not a
+	// space-collapsed copy — ParseEmbeddedInteraction's marker scan tolerates
+	// either, but the raw text is what a human paste actually looked like. ok is
+	// false for a plain code/log long-paste, so Embedded stays nil (no false
+	// promotion on the existing dialogue goldens).
+	if move == dialogue.MoveLongPaste {
+		if ei, ok := dialogue.ParseEmbeddedInteraction(prompt); ok {
+			sig.Embedded = ei
+		}
+	}
+	res.Signals = append(res.Signals, sig)
 	*moves = append(*moves, move)
 	switch {
 	case dialogue.IsRepairMove(move):
@@ -255,7 +267,12 @@ func writeDialogueText(w io.Writer, res dlgResult) error {
 		if s.Cause != "" {
 			cause = fmt.Sprintf(" ⚑agent:%s", s.Cause)
 		}
-		fmt.Fprintf(bw, "[turn %d] %-8s%s%s  %s\n", s.Turn, s.Move, cue, cause, s.Text)
+		embedded := ""
+		if s.Embedded != nil {
+			embedded = fmt.Sprintf(" embedded(calls=%d tools=[%s] userTurns=%d)",
+				s.Embedded.Calls, strings.Join(s.Embedded.Tools, ", "), s.Embedded.UserTurns)
+		}
+		fmt.Fprintf(bw, "[turn %d] %-8s%s%s%s  %s\n", s.Turn, s.Move, cue, cause, embedded, s.Text)
 	}
 	outcome := string(res.Outcome)
 	if res.Shipped != "" {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -117,6 +118,89 @@ func TestRunDialogueShippedTellUpgradesUnknown(t *testing.T) {
 	}
 	if strings.Contains(out, "outcome=unknown") {
 		t.Errorf("bare outcome=unknown must not survive the shipped-tell join\n%s", out)
+	}
+}
+
+// transcriptShapedPasteJSON is a synthetic long-paste turn shaped like a pasted
+// CC interaction — 6 inner ⏺ tool-call lines across 3 distinct tools, ⎿ result
+// lines, and one ❯ embedded user meta-turn — matching the ferret-bbp.19 AC shape
+// (the 43ad3b27 evidence case: a trixi-ask misfire paste carrying inner tool
+// calls + a buried human aside that flattened to opaque long-paste text). Built
+// as a Go string literal (not inline JSON) so newlines are real and then
+// json.Marshal'd into the transcript line, keeping the fixture legible.
+func transcriptShapedPasteText() string {
+	filler := strings.Repeat("some ordinary padding text to clear the length floor for this fixture case ", 8)
+	return filler + "\n" +
+		"⏺ trixi ask(query)\n⎿ result: 3 hits\n" +
+		"⏺ trixi get(id)\n⎿ result: ok\n" +
+		"⏺ trixi search(term)\n⎿ result: ok\n" +
+		"⏺ trixi ask(query2)\n⎿ result: ok\n" +
+		"⏺ trixi get(id2)\n⎿ result: ok\n" +
+		"⏺ trixi search(term2)\n⎿ result: ok\n" +
+		"❯ wait, that's not what I asked for\n"
+}
+
+// TestRunDialogueTranscriptShapedPasteReportsEmbeddedStats is the ferret-bbp.19
+// end-to-end check: a long-paste turn carrying a pasted CC interaction (⏺/⎿/❯
+// markers) is still tagged long-paste (no new lens/move) but reports the
+// embedded-interaction stats — inner call count, inner tool names, inner user
+// meta-turn — in the rendered text output.
+func TestRunDialogueTranscriptShapedPasteReportsEmbeddedStats(t *testing.T) {
+	root := t.TempDir()
+	pasteJSON, err := json.Marshal(transcriptShapedPasteText())
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeSpineFixture(t, root, "-Users-dev-proj", "sess-transcript.jsonl", []string{
+		`{"type":"user","sessionId":"sess-transcript","message":{"role":"user","content":` + string(pasteJSON) + `}}`,
+	})
+
+	var buf bytes.Buffer
+	if err := runDialogue(&buf, root, "sess-transcript", fmtText); err != nil {
+		t.Fatalf("runDialogue: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "[turn 0] "+string(dialogue.MoveLongPaste)) {
+		t.Fatalf("want turn 0 tagged long-paste, got:\n%s", out)
+	}
+	if !strings.Contains(out, "embedded(calls=6") {
+		t.Errorf("want embedded call count >= 6 rendered, got:\n%s", out)
+	}
+	for _, tool := range []string{"trixi ask", "trixi get", "trixi search"} {
+		if !strings.Contains(out, tool) {
+			t.Errorf("want inner tool name %q rendered, got:\n%s", tool, out)
+		}
+	}
+	if !strings.Contains(out, "userTurns=1") {
+		t.Errorf("want inner user meta-turn count rendered, got:\n%s", out)
+	}
+}
+
+// TestRunDialoguePlainLongPasteStaysPlain guards the ferret-bbp.19 non-goal: a
+// plain long code-fence paste (no CC transcript markers) must still tag
+// long-paste with NO embedded stats rendered — no false promotion on the
+// existing dialogue goldens.
+func TestRunDialoguePlainLongPasteStaysPlain(t *testing.T) {
+	root := t.TempDir()
+	plainPaste := "```\n" + strings.Repeat("some code line goes here and there\n", 30) + "```"
+	pasteJSON, err := json.Marshal(plainPaste)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeSpineFixture(t, root, "-Users-dev-proj", "sess-plain-paste.jsonl", []string{
+		`{"type":"user","sessionId":"sess-plain-paste","message":{"role":"user","content":` + string(pasteJSON) + `}}`,
+	})
+
+	var buf bytes.Buffer
+	if err := runDialogue(&buf, root, "sess-plain-paste", fmtText); err != nil {
+		t.Fatalf("runDialogue: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "[turn 0] "+string(dialogue.MoveLongPaste)) {
+		t.Fatalf("want turn 0 tagged long-paste, got:\n%s", out)
+	}
+	if strings.Contains(out, "embedded(") {
+		t.Errorf("plain code-fence paste must not report embedded stats, got:\n%s", out)
 	}
 }
 
