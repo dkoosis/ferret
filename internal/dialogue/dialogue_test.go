@@ -1,6 +1,7 @@
 package dialogue
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -226,6 +227,87 @@ func TestLongPaste(t *testing.T) {
 	}
 	if got, _ := TagMove("- one\n- two\n- three"); got != MoveNeutral {
 		t.Errorf("short list = %q, want neutral (under length floor)", got)
+	}
+}
+
+// transcriptPasteFixture builds a synthetic long-paste turn shaped like a pasted
+// CC interaction: 6 inner ⏺ tool-call lines (3 distinct tools, each called
+// twice), a ⎿ result line under each, and one ❯ embedded user meta-turn — the
+// ferret-bbp.19 evidence shape (recall-misfire paste carrying inner tool calls +
+// a buried human aside). Filler padding clears the longPasteRunes floor without
+// itself tripping any dialogue cue in the lead window.
+func transcriptPasteFixture() string {
+	filler := strings.Repeat("some ordinary padding text to clear the length floor for this fixture case ", 8)
+	return filler + "\n" +
+		"⏺ trixi ask(query)\n⎿ result: 3 hits\n" +
+		"⏺ trixi get(id)\n⎿ result: ok\n" +
+		"⏺ trixi search(term)\n⎿ result: ok\n" +
+		"⏺ trixi ask(query2)\n⎿ result: ok\n" +
+		"⏺ trixi get(id2)\n⎿ result: ok\n" +
+		"⏺ trixi search(term2)\n⎿ result: ok\n" +
+		"❯ wait, that's not what I asked for\n"
+}
+
+// TestParseEmbeddedInteraction covers the transcript-shaped long-paste path
+// (ferret-bbp.19): a paste carrying ⏺/⎿/❯ markers at structural density yields
+// the inner call count, distinct tool names, and inner user-meta-turn count.
+func TestParseEmbeddedInteraction(t *testing.T) {
+	ei, ok := ParseEmbeddedInteraction(transcriptPasteFixture())
+	if !ok {
+		t.Fatal("ParseEmbeddedInteraction: want ok=true for transcript-shaped paste")
+	}
+	if ei.Calls < 6 {
+		t.Errorf("Calls = %d, want >= 6", ei.Calls)
+	}
+	wantTools := []string{"trixi ask", "trixi get", "trixi search"}
+	for _, want := range wantTools {
+		if !slices.Contains(ei.Tools, want) {
+			t.Errorf("Tools = %v, want to contain %q", ei.Tools, want)
+		}
+	}
+	if ei.UserTurns != 1 {
+		t.Errorf("UserTurns = %d, want 1", ei.UserTurns)
+	}
+}
+
+// TestParseEmbeddedInteractionRejectsPlainPaste guards the negative case: a
+// plain long code-fence or bulleted-list paste (no CC transcript markers) must
+// NOT be promoted to a transcript read — no false promotion on the existing
+// dialogue goldens (ferret-bbp.19 AC).
+func TestParseEmbeddedInteractionRejectsPlainPaste(t *testing.T) {
+	longList := strings.Repeat("- item with enough text to clear the length floor here\n", 30)
+	if _, ok := ParseEmbeddedInteraction(longList); ok {
+		t.Error("plain bulleted paste must not parse as a transcript-shaped interaction")
+	}
+	longFence := "```\n" + strings.Repeat("some code line goes here and there\n", 30) + "```"
+	if _, ok := ParseEmbeddedInteraction(longFence); ok {
+		t.Error("plain code-fence paste must not parse as a transcript-shaped interaction")
+	}
+	// A single stray glyph (no density, no corroborating marker) must not fire —
+	// "marker + structure, not glyph alone" (bead constraint).
+	oneGlyph := strings.Repeat("padding text to clear the length floor for this case ", 20) + "⏺ mentioned once in passing"
+	if _, ok := ParseEmbeddedInteraction(oneGlyph); ok {
+		t.Error("a single ⏺ glyph with no corroborating density must not fire")
+	}
+	// Prose that discusses the marker glyphs (documentation, a code review)
+	// without any segment actually shaped like a call must not fire either —
+	// glyph-count + any-corroborating-marker alone was a false-positive gap
+	// Codex flagged (PR #93); a real call-shaped segment is now required too.
+	glyphProse := strings.Repeat("padding text to clear the length floor for this case ", 20) +
+		"the ⏺ marker opens a tool call, a second ⏺ mention shows the same thing, " +
+		"and ⎿ opens its result, per the docs"
+	if _, ok := ParseEmbeddedInteraction(glyphProse); ok {
+		t.Error("prose merely mentioning ⏺/⎿ with no call-shaped segment must not fire")
+	}
+}
+
+// TestTagMoveStillLongPasteOnTranscriptShapedPaste guards the non-goal boundary:
+// a transcript-shaped paste still classifies as MoveLongPaste (no new Move/lens
+// — ferret-bbp.19 shape), just with richer stats available via
+// ParseEmbeddedInteraction.
+func TestTagMoveStillLongPasteOnTranscriptShapedPaste(t *testing.T) {
+	if got, _ := TagMove(transcriptPasteFixture()); got != MoveLongPaste {
+		t.Errorf("transcript-shaped paste move = %q, want long-paste", got)
 	}
 }
 

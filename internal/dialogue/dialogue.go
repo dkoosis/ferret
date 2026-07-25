@@ -180,6 +180,25 @@ type Signal struct {
 	// "" when no initiative-calibration signal; CauseCue is the phrase that matched.
 	Cause    AgentCause `json:"cause,omitempty"`
 	CauseCue string     `json:"causeCue,omitempty"`
+	// Embedded carries the parsed inner-interaction stats when this long-paste
+	// turn is itself a pasted CC transcript rather than opaque content
+	// (ferret-bbp.19). nil for every other move and for a plain (non-transcript-
+	// shaped) long-paste — populated by the caller via ParseEmbeddedInteraction.
+	Embedded *EmbeddedInteraction `json:"embedded,omitempty"`
+}
+
+// EmbeddedInteraction is the parsed structure of a long-paste turn that is
+// itself a pasted CC interaction — ⏺ tool-call / ⎿ result / ❯ embedded user
+// meta-turn markers — rather than opaque code/log content (ferret-bbp.19).
+// Evidence: trixi session 43ad3b27 (2026-07-21), dk pasted a trixi-ask misfire
+// carrying inner tool calls + a buried meta-question that flattened to opaque
+// long-paste text, misdirecting the candidate ranker. Cross-session join (the
+// paste's ORIGIN transcript) is an explicit non-goal here — this only reads
+// what the paste itself carries.
+type EmbeddedInteraction struct {
+	Calls     int      `json:"calls"`               // inner ⏺ tool-call line count
+	Tools     []string `json:"tools,omitempty"`     // distinct tool-name+command-head, first-seen order
+	UserTurns int      `json:"userTurns,omitempty"` // inner ❯ embedded user meta-turn count
 }
 
 // IsRepairMove reports whether a move counts as a repair for Outcome purposes —
@@ -434,7 +453,8 @@ func TagMoveContext(turn string, ctx MoveContext) (Move, string) {
 }
 
 // longPaste reports whether s is a long structured paste — over longPasteRunes with
-// list or fenced-code markers — so a bulk paste reads as content, not instruction.
+// list, fenced-code, or CC-transcript markers — so a bulk paste reads as content,
+// not instruction.
 func longPaste(s string) (cue string, ok bool) {
 	if !overRunes(s, longPasteRunes) {
 		return "", false
@@ -445,7 +465,112 @@ func longPaste(s string) (cue string, ok bool) {
 	if strings.Count(s, "- ")+strings.Count(s, "* ")+strings.Count(s, "• ") >= 3 {
 		return "list-markers", true
 	}
+	if isTranscriptShaped(s) {
+		return "cc-transcript", true
+	}
 	return "", false
+}
+
+// transcriptMarkerRe matches any of the three CC transcript-rendering markers a
+// paste of a prior CC interaction carries: ⏺ opens a tool-call, ⎿ opens its
+// result, ❯ opens an embedded user turn. Position-based (not line-anchored):
+// TagMoveContext collapses whitespace (including newlines) before the residual
+// long-paste check runs, so a marker scan must not depend on "^"/"$" surviving
+// that collapse — it walks marker OCCURRENCES and slices the text between them
+// instead, which is robust whether or not the original newlines survived.
+var transcriptMarkerRe = regexp.MustCompile(`⏺|⎿|❯`)
+
+// toolNameHeadRe extracts the tool-name + command head from a ⏺ segment's
+// captured text: the run up to the first "(" (a call's opening paren).
+var toolNameHeadRe = regexp.MustCompile(`^([^(\n]+)\(`)
+
+// transcriptCallFloor is the minimum inner ⏺ tool-call count that reads as
+// STRUCTURAL density rather than one stray glyph mention. Glyph renderings can
+// vary across paste sources (bead constraint: "match on marker + structure, not
+// glyph alone"), so isTranscriptShaped never trusts a single bare ⏺ — it
+// requires call DENSITY corroborated by a ⎿ result or ❯ user-turn marker
+// somewhere in the text.
+const transcriptCallFloor = 2
+
+// isTranscriptShaped reports whether s carries enough CC-transcript markers — ⏺
+// tool-call density, corroborated by a ⎿ result or ❯ embedded user turn, AND at
+// least one ⏺ segment that actually parses as a call (name+paren) — to read as
+// a pasted prior interaction rather than prose that merely mentions the
+// glyphs. Codex flagged (PR #93) that glyph-count-alone lets adversarial/
+// coincidental prose (e.g. documentation discussing these very markers) trip
+// the detector; the call-shape check is the structural corroboration the
+// original comment promised but didn't yet enforce.
+func isTranscriptShaped(s string) bool {
+	if strings.Count(s, "⏺") < transcriptCallFloor {
+		return false
+	}
+	if !strings.Contains(s, "⎿") && !strings.Contains(s, "❯") {
+		return false
+	}
+	return hasCallShapedSegment(s)
+}
+
+// hasCallShapedSegment reports whether at least one ⏺-marked segment in s
+// parses as a real call (toolNameHeadRe: name immediately followed by "(").
+func hasCallShapedSegment(s string) bool {
+	markers := transcriptMarkerRe.FindAllStringIndex(s, -1)
+	for i, m := range markers {
+		if s[m[0]:m[1]] != "⏺" {
+			continue
+		}
+		end := len(s)
+		if i+1 < len(markers) {
+			end = markers[i+1][0]
+		}
+		if toolNameHeadRe.MatchString(strings.TrimSpace(s[m[1]:end])) {
+			return true
+		}
+	}
+	return false
+}
+
+// ParseEmbeddedInteraction parses a long-paste turn into its embedded-
+// interaction stats: inner tool calls, distinct tool names, and inner user
+// meta-turns (ferret-bbp.19). ok is false when s is not transcript-shaped — a
+// plain code/log dump stays a bare long-paste, no false promotion.
+func ParseEmbeddedInteraction(s string) (*EmbeddedInteraction, bool) {
+	if !isTranscriptShaped(s) {
+		return nil, false
+	}
+	markers := transcriptMarkerRe.FindAllStringIndex(s, -1)
+	ei := &EmbeddedInteraction{}
+	seen := make(map[string]bool, len(markers))
+	for i, m := range markers {
+		end := len(s)
+		if i+1 < len(markers) {
+			end = markers[i+1][0]
+		}
+		content := strings.TrimSpace(s[m[1]:end])
+		switch s[m[0]:m[1]] {
+		case "⏺":
+			ei.Calls++
+			name := toolNameHead(content)
+			if name == "" || seen[name] {
+				continue
+			}
+			seen[name] = true
+			ei.Tools = append(ei.Tools, name)
+		case "❯":
+			ei.UserTurns++
+		}
+	}
+	return ei, true
+}
+
+// toolNameHead extracts the tool-name + command head from one ⏺ segment's
+// captured text: the run up to the first "(" (a call's opening paren), trimmed.
+// Absent a paren, the whole trimmed segment, capped to a short window so a
+// runaway segment can't dominate the Tools list.
+func toolNameHead(seg string) string {
+	if m := toolNameHeadRe.FindStringSubmatch(seg); m != nil {
+		return strings.TrimSpace(m[1])
+	}
+	return leadWindow(seg, 40)
 }
 
 // isLong reports whether s exceeds the short-turn threshold (rune-count short

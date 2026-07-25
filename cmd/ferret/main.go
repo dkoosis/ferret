@@ -325,6 +325,11 @@ var CLI struct {
 			Data   string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
 			Format string `help:"Output format: text|json." default:"text" name:"format"`
 		} `cmd:"" help:"List recorded substitution rules (intent→better, occurrence count)."`
+		Proposals struct {
+			Session string `help:"Session ID prefix (required)." required:"" name:"session"`
+			Root    string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
+			Format  string `help:"Output format: text|json." default:"text" name:"format"`
+		} `cmd:"" help:"Mine assistant self-audit text for confessed call-waste; prints candidate substitutions for dk to confirm via 'fixes sub' (regex/heuristic only, no LLM leg, no auto-record). ferret-kuv.16."`
 	} `cmd:"" help:"Fix ledger: record motif→fix, then 'report --since-fixes' computes burn-delta."`
 
 	Reach struct {
@@ -455,6 +460,8 @@ func main() {
 		err = cmdFixesSub()
 	case "fixes subs":
 		err = cmdFixesSubs()
+	case "fixes proposals":
+		err = cmdFixesProposals()
 	case "reach":
 		err = cmdReach()
 	case "recurrence":
