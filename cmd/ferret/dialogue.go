@@ -214,6 +214,13 @@ func tagUserTurn(line []byte, res *dlgResult, moves *[]dialogue.Move, turnIdx *i
 		AgentAskedPermission: st.agentAskedPermission,
 	})
 	st.consume() // the human turn has read the window: clear it for the next
+	appendUserSignal(res, moves, turnIdx, move, cue, prompt, cause, causeCue)
+}
+
+// appendUserSignal builds and records the Signal for one genuine user turn,
+// including the repair/accept tally and the long-paste embedded-interaction
+// parse. Split out of tagUserTurn to keep its cognitive complexity in check.
+func appendUserSignal(res *dlgResult, moves *[]dialogue.Move, turnIdx *int, move dialogue.Move, cue, prompt string, cause dialogue.AgentCause, causeCue string) {
 	sig := dialogue.Signal{
 		Turn: *turnIdx, Move: move, Cue: cue,
 		Text:     truncateRunes(prompt, dialogueCap),

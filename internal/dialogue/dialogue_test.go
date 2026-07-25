@@ -1,6 +1,7 @@
 package dialogue
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -260,14 +261,7 @@ func TestParseEmbeddedInteraction(t *testing.T) {
 	}
 	wantTools := []string{"trixi ask", "trixi get", "trixi search"}
 	for _, want := range wantTools {
-		found := false
-		for _, got := range ei.Tools {
-			if got == want {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(ei.Tools, want) {
 			t.Errorf("Tools = %v, want to contain %q", ei.Tools, want)
 		}
 	}
