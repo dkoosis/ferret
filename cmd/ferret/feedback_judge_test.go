@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math/rand"
 	"os"
@@ -273,5 +274,37 @@ func TestReadEventsTolerantSkipsSchemaMismatch(t *testing.T) {
 	}
 	if events[0].EventID != "evt-good" || events[1].EventID != "evt-good-2" {
 		t.Errorf("readEventsTolerant events = %+v, want evt-good then evt-good-2 in order", events)
+	}
+}
+
+// TestReadEventsTolerantSharesTornLineHandlingWithScanNewLines: a trailing
+// line with no newline (the producer still mid-write — a realistic race,
+// since the retrieval-live file is shared and actively appended across every
+// concurrent session) must be silently withheld, exactly like scanNewLines'
+// live-tail contract — NOT parsed-and-rejected as if it were bad data. This
+// pins the S1 self-review finding: readEventsTolerant now reuses scanNewLines
+// directly rather than a parallel bufio.Scanner reimplementation, which
+// treated a torn final line as a complete (and then unparseable) token —
+// a silent divergence that would have logged an ordinary write race as if it
+// were corrupt/mismatched-schema data.
+func TestReadEventsTolerantSharesTornLineHandlingWithScanNewLines(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+
+	good, err := json.Marshal(searchEvent("evt-good", "s1", "n1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(good) + "\n" + `{"schema_version":1,"kind":"search","event_id":"evt-torn","session_id":"s1"` // no closing brace, no trailing newline
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := readEventsTolerant(path)
+	if err != nil {
+		t.Fatalf("readEventsTolerant: %v", err)
+	}
+	if len(events) != 1 || events[0].EventID != "evt-good" {
+		t.Fatalf("readEventsTolerant = %+v, want exactly evt-good (the torn trailing line withheld, not parsed-and-rejected)", events)
 	}
 }

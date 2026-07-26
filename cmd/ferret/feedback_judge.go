@@ -8,8 +8,6 @@ package main
 // stdin), and bank an AskCandidate when feedback.Select's disagreement fires.
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -82,44 +80,33 @@ func resolveFeedbackJudgeInputs(root, session, eventsFile string) (judgeSessionI
 	return judgeSessionInputs{res: res, events: events, turns: turns}, nil
 }
 
-// readEventsTolerant reads path as a JSONL retrieval-event feed, decoding
-// each line tolerantly: a decode error or schema_version mismatch is logged
-// to stderr and the row is skipped, not fatal. Mirrors feedback_prep.go's
-// scanNewLines/decodeScanLine tolerance (a live tail must not wedge on one
-// bad or future-schema row) instead of retrievalevent.ReadEvents' fatal
-// contract (Trap 1 — the right call for the batch/offline reader
-// cmd/ferret/helped.go uses as-is, a different use case where an unnoticed
-// shape drift should be loud). Symmetry matters here specifically: without
-// it, a future schema bump would leave `prep` working (it just skips the
-// new-shape rows) while `judge` died on every settled event it was handed —
-// a silent, permanent feature outage that would only ever show up as "the
-// tap stopped asking."
+// readEventsTolerant reads path as a JSONL retrieval-event feed end to end
+// (from offset 0), by REUSING scanNewLines' exact tolerance contract — decode
+// errors, schema_version mismatches, AND its torn-final-line handling — so
+// judge's read degrades identically to prep's live tail, by construction,
+// rather than risking silent semantic drift between two independent
+// implementations of "skip a bad row" (a self-review finding: an earlier
+// version of this function reimplemented the scan with bufio.Scanner, which
+// treats a final line with no trailing newline as a complete token — unlike
+// scanNewLines, which correctly withholds it as still-mid-write. Since the
+// retrieval-live file is shared and actively appended across every one of
+// dk's concurrent sessions, catching it mid-write is a realistic, not
+// hypothetical, race — and the Scanner version would have misreported that
+// ordinary race as "skipping unparseable/mismatched-schema line", a false
+// alarm scanNewLines' version doesn't produce).
+//
+// judge has no cursor to persist (it re-reads the whole file fresh on every
+// invocation, unlike prep's offset-tracked tail), so only the decoded events
+// are kept; the byte offsets scanNewLines pairs them with (which prep's
+// settled-tail bookkeeping needs) are discarded here.
 func readEventsTolerant(path string) ([]retrievalevent.Event, error) {
-	f, err := os.Open(path)
+	found, _, err := scanNewLines(path, 0)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-
-	var events []retrievalevent.Event
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
-	lineNo := 0
-	for scanner.Scan() {
-		lineNo++
-		line := bytes.TrimSpace(scanner.Bytes())
-		if len(line) == 0 {
-			continue
-		}
-		var e retrievalevent.Event
-		if uerr := json.Unmarshal(line, &e); uerr != nil || e.SchemaVersion != retrievalevent.SchemaVersion {
-			fmt.Fprintf(os.Stderr, "feedback: %s:%d: skipping unparseable/mismatched-schema line\n", path, lineNo)
-			continue
-		}
-		events = append(events, e)
-	}
-	if serr := scanner.Err(); serr != nil {
-		return nil, serr
+	events := make([]retrievalevent.Event, len(found))
+	for i := range found {
+		events[i] = found[i].event
 	}
 	return events, nil
 }
