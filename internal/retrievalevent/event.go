@@ -21,6 +21,15 @@ const (
 	KindRead   = "read"
 )
 
+// AgentTypeParent is the agent_type the producer stamps on the main agent's own
+// rows — the human-facing agent, as opposed to a spawned subagent (general-
+// purpose, Explore, …). session_id is SHARED across a parent and its subagents
+// (contract Trap 2), so agent_type is the discriminator any consumer keying on
+// "the human's own retrieval" must filter by; session_id alone admits every
+// subagent's searches. See internal/retrievalevent/testdata/retrieval-golden.jsonl
+// (a general-purpose subagent search rides the parent's session_id).
+const AgentTypeParent = "parent"
+
 // AttributionSessionFallback flags a row whose agent_id could not be resolved
 // to a specific agent within the join window, so agent_id was set to
 // session_id as a self-describing degraded key. This collapses the

@@ -40,7 +40,39 @@ func searchEvent(id, session string, nugIDs ...string) retrievalevent.Event {
 		EventID:       id,
 		TS:            "2026-07-25T15:00:00Z",
 		SessionID:     session,
+		AgentType:     retrievalevent.AgentTypeParent, // the human's own agent by default
 		Returned:      returned,
+	}
+}
+
+// TestPrepScanExcludesSubagentAndSessionFallback: session_id is SHARED between a
+// parent and its subagents, so a subagent's search (agent_type != parent) and a
+// session-fallback row (agent_id degraded, unattributable) must never enter the
+// pending map — grading one as the human's own retrieval and asking about it
+// would record a garbage gold label. Regression test for ferret-5g7.
+func TestPrepScanExcludesSubagentAndSessionFallback(t *testing.T) {
+	subagent := searchEvent("evt-subagent", "s1", "n1")
+	subagent.AgentType = "general-purpose"
+
+	fallback := searchEvent("evt-fallback", "s1", "n2")
+	fallback.Attribution = retrievalevent.AttributionSessionFallback
+
+	parent := searchEvent("evt-parent", "s1", "n3")
+
+	found := []scannedEvent{
+		{event: subagent, offset: 0},
+		{event: fallback, offset: 100},
+		{event: parent, offset: 200},
+	}
+	_, next := prepScan("s1", cursorState{}, found, settledTailTurns)
+	if _, tracked := next.Pending["evt-subagent"]; tracked {
+		t.Error("a subagent search (agent_type != parent) must be excluded")
+	}
+	if _, tracked := next.Pending["evt-fallback"]; tracked {
+		t.Error("a session-fallback row must be excluded")
+	}
+	if _, tracked := next.Pending["evt-parent"]; !tracked {
+		t.Errorf("the parent's own search must be tracked, got %+v", next.Pending)
 	}
 }
 

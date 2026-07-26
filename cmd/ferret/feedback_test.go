@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -54,6 +56,41 @@ func TestResolveRetrievalEventsPathIgnoresUnrelatedFiles(t *testing.T) {
 	want := filepath.Join(dir, "retrieval-live-2026-07.jsonl")
 	if got != want {
 		t.Errorf("resolveRetrievalEventsPath = %q, want %q", got, want)
+	}
+}
+
+// TestFeedbackPrepFreshEnvIsSilentNoOp: on a project whose events dir holds no
+// retrieval-live-*.jsonl yet (a fresh env before trixi's producer has fired),
+// `feedback prep` must print {"pending":false} and exit 0 — the ordinary
+// empty-feed state, NOT an error the async Stop hook turns into an exit-2 nag
+// every turn. Regression test for ferret-ql1.
+func TestFeedbackPrepFreshEnvIsSilentNoOp(t *testing.T) {
+	emptyEvents := t.TempDir() // no retrieval-live-*.jsonl inside
+	CLI.Feedback.Prep.Session = "s1"
+	CLI.Feedback.Prep.Data = t.TempDir()
+	CLI.Feedback.Prep.Events = emptyEvents
+	t.Cleanup(func() { CLI.Feedback.Prep.Session, CLI.Feedback.Prep.Data, CLI.Feedback.Prep.Events = "", "", "" })
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := os.Stdout
+	os.Stdout = w
+	runErr := cmdFeedbackPrep()
+	_ = w.Close()
+	os.Stdout = saved
+	out, _ := io.ReadAll(r)
+
+	if runErr != nil {
+		t.Fatalf("fresh-env prep must not error, got %v", runErr)
+	}
+	var res prepResult
+	if err := json.Unmarshal(out, &res); err != nil {
+		t.Fatalf("prep output %q not valid prepResult JSON: %v", out, err)
+	}
+	if res.Pending {
+		t.Errorf("fresh-env prep must report pending=false, got %+v", res)
 	}
 }
 

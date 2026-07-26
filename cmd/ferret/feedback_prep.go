@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/dkoosis/ferret/internal/feedback"
 	"github.com/dkoosis/ferret/internal/retrievalevent"
 )
 
@@ -101,11 +102,36 @@ func cmdFeedbackPrep() error {
 		return err
 	}
 	eventsFile, err := resolveFeedbackEventsPath(cmd.Events)
+	if errors.Is(err, errNoRetrievalEvents) {
+		// No retrieval-live-*.jsonl exists yet — a fresh project/session before
+		// trixi has emitted its first event. That is the ordinary empty-feed
+		// state, not a pipeline failure: report nothing pending and exit 0 so the
+		// async Stop hook stays silent instead of asyncRewake-nagging Claude with
+		// an exit-2 diagnostic every turn. A genuinely unreadable events dir still
+		// surfaces its own error below.
+		return json.NewEncoder(os.Stdout).Encode(prepResult{Pending: false})
+	}
 	if err != nil {
 		return err
 	}
 
 	cPath := cursorPath(data, cmd.Session)
+
+	// Serialize the whole load→scan→save cursor cycle against a concurrent prep
+	// for the SAME session. feedback-stop.sh runs async (settings.json), so a
+	// slow prep on turn N can still be mid-cycle when turn N+1's Stop hook fires
+	// another; without this lock both could load the same offset, double-emit the
+	// same search_event_id (two PAID relevance-judge runs), and clobber each
+	// other's Pending/offset on save. This is the async-overlap the sibling bank
+	// (internal/feedback/bank.go) also documents — prep's cursor, unlike the
+	// bank, can't tolerate the race because a double-emit costs money, so it
+	// takes the lock rather than accepting last-write-wins.
+	unlock, err := feedback.Lock(cPath + ".lock")
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	cur := loadCursor(cPath)
 	base := filepath.Base(eventsFile)
 	if cur.File != base {
@@ -150,8 +176,10 @@ func loadCursor(path string) cursorState {
 
 // saveCursor publishes the cursor atomically (temp+fsync+rename+dir-fsync,
 // mirrors internal/feedback/budget.go's writeState) — read-modify-write
-// scratch state, not a log. No flock: `prep` is the only writer, and one
-// session never runs two Stop hooks concurrently.
+// scratch state, not a log. The atomic rename guards a reader against a torn
+// write; serialization against a concurrent prep for the same session (async
+// Stop hooks CAN overlap) is the caller's job — cmdFeedbackPrep holds a
+// per-session flock across the whole load→scan→save cycle.
 func saveCursor(path string, st cursorState) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -259,6 +287,24 @@ func decodeScanLine(path string, line []byte, lineStart int64) (scannedEvent, bo
 	return scannedEvent{event: e, offset: lineStart}, true
 }
 
+// isParentSessionSearch reports whether e is a kind:search row this session's
+// human actually issued — the only rows the tap may ask dk about. session_id is
+// SHARED between a parent agent and its subagents (contract Trap 2), so matching
+// on session_id alone admits every subagent's searches; a subagent retrieval
+// graded and asked about as the human's own produces a garbage gold label. We
+// therefore also require the parent agent_type and exclude session-fallback rows
+// (agent_id degraded, can't be attributed — the same rows AdjudicateEvents drops
+// from per-agent verdicts, so emitting one here would only cost a judge run that
+// finds no matching record). Erring strict — a parent row with an unexpectedly
+// empty agent_type is skipped — costs at most one missed ask, versus asking
+// about a search the human never made.
+func isParentSessionSearch(e *retrievalevent.Event, session string) bool {
+	return e.Kind == retrievalevent.KindSearch &&
+		e.SessionID == session &&
+		e.AgentType == retrievalevent.AgentTypeParent &&
+		e.Attribution != retrievalevent.AttributionSessionFallback
+}
+
 // prepScan is feedback prep's pure core: given loaded cursor state and the
 // newly-scanned events since its offset, filters to this session's non-empty
 // kind:search rows, folds fresh ones into the pending map, ages every
@@ -272,7 +318,7 @@ func prepScan(session string, cur cursorState, found []scannedEvent, waitThresho
 	for i := range found {
 		se := &found[i]
 		e := &se.event
-		if e.Kind != retrievalevent.KindSearch || e.SessionID != session || len(e.Returned) == 0 {
+		if !isParentSessionSearch(e, session) || len(e.Returned) == 0 {
 			continue
 		}
 		if _, exists := next.Pending[e.EventID]; exists {
