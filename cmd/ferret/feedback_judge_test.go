@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/dkoosis/ferret/internal/analyst"
@@ -232,5 +234,44 @@ func TestTurnsBack(t *testing.T) {
 		if got := turnsBack(segs, c.owner); got != c.want {
 			t.Errorf("turnsBack(segs, %d) = %d, want %d", c.owner, got, c.want)
 		}
+	}
+}
+
+// TestReadEventsTolerantSkipsSchemaMismatch: a line with a schema_version
+// that doesn't match retrievalevent.SchemaVersion (a future producer bump, or
+// a corrupt row), and an unparseable line, are both skipped — not fatal, the
+// same tolerance feedback_prep.go's scanNewLines already has. Without this
+// symmetry, a future schema bump would leave prep working (it already
+// tolerates the same way) while judge died on every settled event handed to
+// it — a silent, permanent feature outage (specialist review finding).
+func TestReadEventsTolerantSkipsSchemaMismatch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	writeJSONL(t, path, searchEvent("evt-good", "s1", "n1"))
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"schema_version":99,"kind":"search","event_id":"evt-future","session_id":"s1"}` + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("not json at all\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	writeJSONL(t, path, searchEvent("evt-good-2", "s1", "n2"))
+
+	events, err := readEventsTolerant(path)
+	if err != nil {
+		t.Fatalf("readEventsTolerant: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("readEventsTolerant returned %d events, want 2 (schema-mismatch and unparseable lines skipped), got %+v", len(events), events)
+	}
+	if events[0].EventID != "evt-good" || events[1].EventID != "evt-good-2" {
+		t.Errorf("readEventsTolerant events = %+v, want evt-good then evt-good-2 in order", events)
 	}
 }

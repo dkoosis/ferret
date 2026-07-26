@@ -47,8 +47,13 @@ const settledTailTurns = 2
 // still pending — so WaitsSeen is always "how many Stop firings this event
 // has existed through," and settledTailTurns compares directly against that
 // count (see its doc comment for why 2 is the right number, not 3). Keyed by
-// EventID in cursorState.Pending. Bounded by the ask budget (at most a
-// handful can ever accumulate before Reserve's caps stop mattering).
+// EventID in cursorState.Pending. NOT bounded by the ask budget — Reserve is
+// only consulted in `check`, never here. prepScan drains at most one entry
+// per call (oldestSettled, FIFO), so the map could in principle grow across a
+// session that sustains more than one new search per turn faster than it
+// settles+drains. Accepted as low practical harm for a single-user tool (no
+// size cap or FIFO eviction added — a speculative defense against a load
+// pattern this tap was never built for).
 type pendingSearch struct {
 	NugIDs          []string `json:"nug_ids"`
 	FirstSeenOffset int64    `json:"first_seen_offset"`

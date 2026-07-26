@@ -39,7 +39,14 @@ if [ -z "$SESSION_ID" ]; then
   exit 0
 fi
 
-PREP_OUT=$(ferret feedback prep --session "$SESSION_ID" 2>&1) || fail "feedback prep failed: $PREP_OUT"
+# Capture stdout ONLY — stderr flows through to this hook's own stderr
+# untouched, not merged in. A merged 2>&1 would risk a coincidental stderr
+# diagnostic (e.g. a corrupt-cursor self-heal warning) breaking the jq parse
+# below, silently dropping an ask that prep already committed (cursor
+# advanced, pending entry deleted) — a real, not hypothetical, failure mode.
+if ! PREP_OUT=$(ferret feedback prep --session "$SESSION_ID"); then
+  fail "feedback prep failed (see stderr above)"
+fi
 
 PENDING=$(jq -r '.pending // false' <<<"$PREP_OUT" 2>/dev/null)
 if [ "$PENDING" != "true" ]; then
@@ -79,7 +86,12 @@ while IFS= read -r NUG_ID; do
 done < <(jq -r '.nug_ids[]? // empty' <<<"$PREP_OUT")
 
 if [ "$FETCHED" -eq 0 ]; then
-  fail "every returned nug failed to fetch for search event $SEARCH_EVENT_ID (404/pruned or a systemic trixi problem — see the per-nug lines above) — nothing to judge"
+  # Every returned nug failed to fetch — the common, benign case is ordinary
+  # settled-tail delay (nugs can get pruned/consolidated between the search
+  # and judge finally running); NOT by itself evidence of a systemic trixi
+  # problem, which would already have been diagnosable per-nug above. Exit
+  # quietly rather than asyncRewake-waking Claude over routine nug churn.
+  exit 0
 fi
 
 # A here-string (<<<), not `echo "$CANDIDATES" | ...`: some shells' echo

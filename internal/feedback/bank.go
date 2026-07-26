@@ -28,12 +28,16 @@ func PendingPath(dataDir, session string) string {
 
 // SavePending publishes the one pending AskCandidate for a session,
 // atomically (temp+fsync+rename — mirrors budget.go's writeState). No flock:
-// this file has exactly one writer (`judge`, on a Select disagreement) and
-// exactly one reader-and-deleter (`check`, on the next UserPromptSubmit),
-// never concurrent within a session — PendingPath is keyed by session, so two
-// sessions never share a file, and within one session the Stop hook and the
-// UserPromptSubmit hook never run at the same instant (they gate opposite
-// ends of a turn boundary).
+// NOT because writer/reader never overlap — with async:true a backgrounded
+// judge CAN genuinely overlap a check call (or another judge, if two Stop
+// hooks settle in quick succession), so "never concurrent" would be false.
+// Safety instead comes from the rename itself being atomic: a reader
+// (LoadPending) always sees either the old file or the new one whole, never
+// a torn write, and if two SavePending calls race, the last rename simply
+// wins. The worst case under overlap is one benign lost candidate (an
+// earlier one silently overwritten before check ever read it) — acceptable
+// for a budget-capped, at-most-a-few-asks-per-day feature; a flock would
+// only guard against a harm this design already tolerates.
 func SavePending(path string, c AskCandidate) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err

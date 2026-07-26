@@ -8,6 +8,8 @@ package main
 // stdin), and bank an AskCandidate when feedback.Select's disagreement fires.
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -73,11 +75,53 @@ func resolveFeedbackJudgeInputs(root, session, eventsFile string) (judgeSessionI
 	if err != nil {
 		return judgeSessionInputs{}, err
 	}
-	events, err := retrievalevent.ReadEvents(eventsFile)
+	events, err := readEventsTolerant(eventsFile)
 	if err != nil {
 		return judgeSessionInputs{}, err
 	}
 	return judgeSessionInputs{res: res, events: events, turns: turns}, nil
+}
+
+// readEventsTolerant reads path as a JSONL retrieval-event feed, decoding
+// each line tolerantly: a decode error or schema_version mismatch is logged
+// to stderr and the row is skipped, not fatal. Mirrors feedback_prep.go's
+// scanNewLines/decodeScanLine tolerance (a live tail must not wedge on one
+// bad or future-schema row) instead of retrievalevent.ReadEvents' fatal
+// contract (Trap 1 — the right call for the batch/offline reader
+// cmd/ferret/helped.go uses as-is, a different use case where an unnoticed
+// shape drift should be loud). Symmetry matters here specifically: without
+// it, a future schema bump would leave `prep` working (it just skips the
+// new-shape rows) while `judge` died on every settled event it was handed —
+// a silent, permanent feature outage that would only ever show up as "the
+// tap stopped asking."
+func readEventsTolerant(path string) ([]retrievalevent.Event, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var events []retrievalevent.Event
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	lineNo := 0
+	for scanner.Scan() {
+		lineNo++
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var e retrievalevent.Event
+		if uerr := json.Unmarshal(line, &e); uerr != nil || e.SchemaVersion != retrievalevent.SchemaVersion {
+			fmt.Fprintf(os.Stderr, "feedback: %s:%d: skipping unparseable/mismatched-schema line\n", path, lineNo)
+			continue
+		}
+		events = append(events, e)
+	}
+	if serr := scanner.Err(); serr != nil {
+		return nil, serr
+	}
+	return events, nil
 }
 
 // readStdinCandidates decodes the [{"id":"...","text":"..."}] candidate
