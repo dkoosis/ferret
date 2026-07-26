@@ -10,22 +10,14 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/dkoosis/ferret/internal/durable"
 )
 
 // syncDir fsyncs a directory so a just-published rename within it survives a
-// crash/power-loss. os.Rename only mutates the directory entry; the dir inode
-// must itself be fsync'd or the rename can be lost in the dirty-inode window.
-// It is a package var so tests can observe that the publish path invokes it.
-var syncDir = func(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	if err := d.Sync(); err != nil {
-		return errors.Join(err, d.Close())
-	}
-	return d.Close()
-}
+// crash/power-loss (see durable.SyncDir). A package var so a test can observe
+// that the publish path invokes it.
+var syncDir = durable.SyncDir
 
 // removeFile is the os.Remove seam so a test can force a temp-cleanup failure
 // and assert it is surfaced rather than silently swallowed.
@@ -239,7 +231,7 @@ func readLine(r *bufio.Reader) (line []byte, ok, delimited bool, err error) {
 	if readErr != nil && !errors.Is(readErr, io.EOF) {
 		return nil, false, false, readErr
 	}
-	if bytes.HasSuffix(b, []byte("\n")) {
+	if len(b) > 0 && b[len(b)-1] == '\n' {
 		return b[:len(b)-1], true, true, nil
 	}
 	// readErr == io.EOF with no trailing '\n': the file ended mid-line.

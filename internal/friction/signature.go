@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/dkoosis/ferret/internal/durable"
 )
 
 // SigFileName is the basename of the known-signatures file under the ferret data
@@ -136,15 +138,11 @@ func sortedSignatures(labels map[string]string) []Signature {
 	return sigs
 }
 
-// writeSignaturesAtomic writes the full signature set to path atomically: a temp
-// file in the same dir, fsync'd and renamed into place, then the parent dir
-// fsync'd so the rename survives a crash. Mirrors cmd/gen-corpus writeAtomic
-// (that helper lives in package main and is not importable). A same-dir temp
-// keeps the rename atomic (no cross-device copy).
+// writeSignaturesAtomic writes the full signature set to path atomically via
+// durable.WriteTempRename (temp+fsync+rename), then fsyncs the parent dir so the
+// rename survives a crash. A rewrite, not an append, because the set is
+// recomputed whole.
 func writeSignaturesAtomic(path string, sigs []Signature) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	var buf bytes.Buffer
 	for _, s := range sigs {
 		b, err := json.Marshal(s)
@@ -154,43 +152,12 @@ func writeSignaturesAtomic(path string, sigs []Signature) error {
 		buf.Write(b)
 		buf.WriteByte('\n')
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
-	if err != nil {
+	if err := durable.WriteTempRename(path, buf.Bytes()); err != nil {
 		return err
 	}
-	tmp := f.Name()
-	renamed := false
-	defer func() {
-		if !renamed {
-			_ = f.Close()
-			_ = os.Remove(tmp)
-		}
-	}()
-	if _, err := f.Write(buf.Bytes()); err != nil {
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return err
-	}
-	renamed = true
 	return syncDir(filepath.Dir(path))
 }
 
-// syncDir fsyncs a directory so a just-published rename within it is durable.
-// A package var so a test can observe/override it. Mirrors event/codec.go.
-var syncDir = func(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	if err := d.Sync(); err != nil {
-		return errors.Join(err, d.Close())
-	}
-	return d.Close()
-}
+// syncDir fsyncs a directory so a just-published rename within it is durable
+// (see durable.SyncDir). A package var so a test can observe/override it.
+var syncDir = durable.SyncDir

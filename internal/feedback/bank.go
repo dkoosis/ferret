@@ -8,11 +8,12 @@ package feedback
 // consumes-and-deletes.
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/dkoosis/ferret/internal/durable"
 )
 
 // PendingFilePrefix names the per-session pending-ask file under the ferret
@@ -39,42 +40,11 @@ func PendingPath(dataDir, session string) string {
 // for a budget-capped, at-most-a-few-asks-per-day feature; a flock would
 // only guard against a harm this design already tolerates.
 func SavePending(path string, c AskCandidate) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	b, err := json.Marshal(c)
 	if err != nil {
 		return err
 	}
-	tmpName := tmp.Name()
-	bw := bufio.NewWriter(tmp)
-	b, merr := json.Marshal(c)
-	if merr != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return merr
-	}
-	if _, werr := bw.Write(b); werr != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return werr
-	}
-	if err := bw.Flush(); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(tmpName)
+	if err := durable.WriteTempRename(path, b); err != nil {
 		return err
 	}
 	return syncDir(filepath.Dir(path))
