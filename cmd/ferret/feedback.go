@@ -21,11 +21,20 @@ import (
 var errFeedbackSessionRequired = errors.New("feedback: --session PREFIX required")
 
 // nugTextCap bounds each candidate nug's body text sent to the relevance
-// judge, via the shared truncateRunes helper (spine.go) — same mechanism
-// overinitiative.go's overInitPromptCap uses. Nug bodies carry the actual
-// content the judge grades (not just a prompt), so this cap is looser than
-// overInitPromptCap's 600.
-const nugTextCap = 2000
+// judge, via the shared truncateRunes helper (spine.go). Sized against
+// spineTextCap (4000, spine.go) — the "a judge/reader needs to see a whole
+// prose block" precedent — not overInitPromptCap (600, overinitiative.go),
+// which only needs enough of an opening prompt to identify its scope. Real
+// nug bodies observed in this bead's Step 18 dry run ran 4.6K-25K chars; a
+// smaller cap risks truncating away the exact passage that would have made a
+// long-but-relevant nug grade correctly, systematically under-grading long
+// nugs as mismatch for reasons that have nothing to do with retrieval
+// quality — a measurement bug, not just a cost saver. 4000 trades some
+// per-call token cost (candidates run through the relevance judge on every
+// settled search, not just ones that end up firing an ask) for not silently
+// biasing SearchFit against long-but-good nugs; revisit if judge cost proves
+// to matter more in practice than this bias risk.
+const nugTextCap = 4000
 
 // retrievalLiveGlob is the live retrieval-event feed's monthly-rotated
 // filename pattern under the events dir (Design: "Cursor/offset state for the
@@ -63,25 +72,18 @@ func resolveRetrievalEventsPath(dir string) (string, error) {
 	return matches[len(matches)-1], nil
 }
 
-// resolveFeedbackEventsDir resolves the --events flag (a directory; empty =
-// defaultEventsDir) — split from resolveRetrievalEventsPath so a caller that
-// wants the resolved DIR (not yet the one file within it) can stop here.
-func resolveFeedbackEventsDir(dir string) (string, error) {
-	if dir != "" {
-		return dir, nil
-	}
-	return defaultEventsDir()
-}
-
-// resolveFeedbackEventsPath resolves --events all the way to one concrete
-// retrieval-live file: the dir (default or explicit), then the lexically-last
-// match within it.
+// resolveFeedbackEventsPath resolves the --events flag (a directory; empty =
+// defaultEventsDir) to one concrete retrieval-live file: the dir (default or
+// explicit), then the lexically-last match within it.
 func resolveFeedbackEventsPath(dir string) (string, error) {
-	d, err := resolveFeedbackEventsDir(dir)
-	if err != nil {
-		return "", err
+	if dir == "" {
+		d, err := defaultEventsDir()
+		if err != nil {
+			return "", err
+		}
+		dir = d
 	}
-	return resolveRetrievalEventsPath(d)
+	return resolveRetrievalEventsPath(dir)
 }
 
 // cursorPath returns the per-session retrieval-tail cursor file path under a

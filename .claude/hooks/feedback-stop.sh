@@ -52,24 +52,34 @@ if [ -z "$SEARCH_EVENT_ID" ]; then
 fi
 
 # Loop trixi get over each returned nug id, assembling the [{id,text}]
-# candidates judge reads on stdin. A single nug 404ing (pruned/consolidated
-# between the search and this hook firing) is logged and skipped, not fatal —
-# one missing body must not kill the whole judge run.
+# candidates judge reads on stdin. A single nug failing (404: pruned/
+# consolidated between the search and this hook firing, but also possibly a
+# systemic trixi problem) is logged — with trixi's own error text, so a
+# systemic failure is diagnosable from this script's own stderr rather than
+# reading as N separate unexplained 404s — and skipped, not fatal: one
+# missing body must not kill the whole judge run. One temp file for the whole
+# loop (not per-iteration) captures each attempt's stderr separately from its
+# stdout (a plain 2>&1 merge risks corrupting the JSON payload if trixi ever
+# logs a warning to stderr on an otherwise-successful call, as `trixi ask`
+# does elsewhere); the trap cleans it up on any exit path, including `fail`.
+TRIXI_ERR_FILE=$(mktemp)
+trap 'rm -f "$TRIXI_ERR_FILE"' EXIT
 CANDIDATES="[]"
 FETCHED=0
 while IFS= read -r NUG_ID; do
   [ -z "$NUG_ID" ] && continue
-  if BODY_JSON=$(trixi get "$NUG_ID" --json 2>/dev/null); then
+  if BODY_JSON=$(trixi get "$NUG_ID" --json 2>"$TRIXI_ERR_FILE"); then
     BODY=$(jq -r '.body // empty' <<<"$BODY_JSON")
     CANDIDATES=$(jq -c --arg id "$NUG_ID" --arg text "$BODY" '. + [{id:$id, text:$text}]' <<<"$CANDIDATES")
     FETCHED=$((FETCHED + 1))
   else
-    echo "feedback-stop: trixi get $NUG_ID failed (pruned/consolidated?) — skipping" >&2
+    TRIXI_ERR=$(cat "$TRIXI_ERR_FILE" 2>/dev/null)
+    echo "feedback-stop: trixi get $NUG_ID failed — skipping: ${TRIXI_ERR:-no error detail}" >&2
   fi
 done < <(jq -r '.nug_ids[]? // empty' <<<"$PREP_OUT")
 
 if [ "$FETCHED" -eq 0 ]; then
-  fail "every returned nug 404'd for search event $SEARCH_EVENT_ID — nothing to judge"
+  fail "every returned nug failed to fetch for search event $SEARCH_EVENT_ID (404/pruned or a systemic trixi problem — see the per-nug lines above) — nothing to judge"
 fi
 
 # A here-string (<<<), not `echo "$CANDIDATES" | ...`: some shells' echo

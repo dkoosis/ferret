@@ -22,22 +22,33 @@ import (
 	"github.com/dkoosis/ferret/internal/retrievalevent"
 )
 
-// settledTailTurns is the number of subsequent prep calls a freshly-seen
-// kind:search event must sit in the pending map before it is handed to judge
-// (P-review P1 fix). A misled verdict is inferred from a repair tell adjacent
-// to a LATER turn than the search's own (score.HelpedRecord.Correlational
-// doc); at the search's own Stop hook that tell hasn't happened yet, so
-// judging immediately would systematically miss every misled case. 2 (the
-// search's own Stop, plus at least one full subsequent user turn's Stop) is a
-// tunable default, not a configurable knob — no speculative config surface
-// for one user (craft).
+// settledTailTurns is the number of Stop-hook firings a freshly-seen
+// kind:search event must have existed through — COUNTING the firing that
+// discovered it — before it is handed to judge (P-review P1 fix). A misled
+// verdict is inferred from a repair tell adjacent to a LATER turn than the
+// search's own (score.HelpedRecord.Correlational doc); at the search's own
+// Stop hook that tell hasn't happened yet, so judging immediately would
+// systematically miss every misled case.
+//
+// 2 is the minimum that is actually sufficient, not a conservative round
+// number: CC appends a user's next prompt to the transcript before Claude
+// starts responding to it, so by the time the Stop hook for turn N+1 fires,
+// sessionUserTurns/repairAdjacency can already see and classify turn N+1's
+// reply to the turn-N search. Waiting a 3rd firing buys no additional
+// correctness — it only delays the ask by one extra turn, worsening the
+// already-flagged TurnsBack staleness (ferret-162). Tunable default, not a
+// configurable knob — no speculative config surface for one user (craft).
 const settledTailTurns = 2
 
 // pendingSearch is one kind:search event prep has SEEN (session matches,
 // non-empty returned[]) but is holding until its behavioral tail has had a
-// chance to land. Keyed by EventID in cursorState.Pending. Bounded by the ask
-// budget (at most a handful can ever accumulate before Reserve's caps stop
-// mattering).
+// chance to land. WaitsSeen starts at 1 at discovery (the discovering Stop
+// firing counts as the first), then ages by 1 on every later prep call while
+// still pending — so WaitsSeen is always "how many Stop firings this event
+// has existed through," and settledTailTurns compares directly against that
+// count (see its doc comment for why 2 is the right number, not 3). Keyed by
+// EventID in cursorState.Pending. Bounded by the ask budget (at most a
+// handful can ever accumulate before Reserve's caps stop mattering).
 type pendingSearch struct {
 	NugIDs          []string `json:"nug_ids"`
 	FirstSeenOffset int64    `json:"first_seen_offset"`
@@ -200,7 +211,7 @@ func scanNewLines(path string, offset int64) (found []scannedEvent, newOffset in
 	pos := offset
 	for {
 		line, rerr := r.ReadBytes('\n')
-		if rerr != nil && rerr != io.EOF {
+		if rerr != nil && !errors.Is(rerr, io.EOF) {
 			return found, pos, rerr
 		}
 		if isTornLine(line, rerr) {
@@ -211,7 +222,7 @@ func scanNewLines(path string, offset int64) (found []scannedEvent, newOffset in
 		if se, ok := decodeScanLine(path, line, lineStart); ok {
 			found = append(found, se)
 		}
-		if rerr == io.EOF {
+		if errors.Is(rerr, io.EOF) {
 			break
 		}
 	}
@@ -272,13 +283,14 @@ func prepScan(session string, cur cursorState, found []scannedEvent, waitThresho
 		next.Pending[e.EventID] = &pendingSearch{
 			NugIDs:          ids,
 			FirstSeenOffset: se.offset,
-			WaitsSeen:       0,
+			WaitsSeen:       1, // this discovering Stop firing IS the first (see doc comment)
 		}
 	}
 
 	// Age every entry that existed BEFORE this call's fresh finds above — a
-	// freshly-discovered event's first wait starts on the NEXT call, not this
-	// one (it has not yet survived a subsequent Stop fire).
+	// freshly-discovered event already counted its own (discovering) firing
+	// above, so it is not double-counted here; only entries that survived
+	// from a PRIOR call age further.
 	for id := range cur.Pending {
 		if p, ok := next.Pending[id]; ok {
 			p.WaitsSeen++

@@ -204,38 +204,30 @@ func TestPrepScanFiltersOtherSessionAndEmptyReturned(t *testing.T) {
 }
 
 // TestPrepScanSettledTailHoldsFreshEventThenEmits: a freshly-seen event is
-// held (pending:false) on its first `settledTailTurns` calls and only emitted
-// once its waits_seen reaches the threshold — the P-review P1 fix. This
-// prevents judging a search before its behavioral tail (a later turn's
-// repair/accept) has had a chance to land.
+// held (pending:false) on its discovering call, then emitted on the very next
+// call once waits_seen reaches the threshold — the P-review P1 fix, pinned to
+// EXACTLY 2 total Stop firings (not 3): CC appends the human's next prompt to
+// the transcript before Claude starts responding to it, so by the second
+// Stop firing repairAdjacency can already see and classify that reply. A 3rd
+// firing would buy no correctness and only stale the ask further (see
+// settledTailTurns' doc comment).
 func TestPrepScanSettledTailHoldsFreshEventThenEmits(t *testing.T) {
 	const threshold = 2
 	ev := searchEvent("evt-a", "s1", "n1", "n2")
 
-	// Call 1: fresh discovery. Held.
+	// Call 1 (the search's own Stop): fresh discovery. Held — only 1 firing so far.
 	res1, cur1 := prepScan("s1", cursorState{}, []scannedEvent{{event: ev, offset: 0}}, threshold)
 	if res1.Pending {
 		t.Fatalf("call 1 (fresh discovery) must be held, got %+v", res1)
 	}
-	if p := cur1.Pending["evt-a"]; p == nil || p.WaitsSeen != 0 {
-		t.Fatalf("call 1: evt-a must enter pending with waits_seen=0, got %+v", cur1.Pending)
+	if p := cur1.Pending["evt-a"]; p == nil || p.WaitsSeen != 1 {
+		t.Fatalf("call 1: evt-a must enter pending with waits_seen=1 (this firing counts as the first), got %+v", cur1.Pending)
 	}
 
-	// Call 2..threshold: no new file content, event ages one wait per call.
-	cur := cur1
-	for i := 1; i < threshold; i++ {
-		var res prepResult
-		res, cur = prepScan("s1", cur, nil, threshold)
-		if res.Pending {
-			t.Fatalf("call %d must still be held (waits_seen=%d < threshold=%d), got %+v",
-				i+1, cur.Pending["evt-a"].WaitsSeen, threshold, res)
-		}
-	}
-
-	// Final call: threshold reached, must emit.
-	final, after := prepScan("s1", cur, nil, threshold)
+	// Call 2 (the next full user turn's Stop): 2 firings now — must emit.
+	final, after := prepScan("s1", cur1, nil, threshold)
 	if !final.Pending || final.SearchEventID != "evt-a" {
-		t.Fatalf("final call must emit evt-a once settled, got %+v", final)
+		t.Fatalf("call 2 must emit evt-a once settled, got %+v", final)
 	}
 	if len(final.NugIDs) != 2 {
 		t.Errorf("emitted nug_ids = %v, want the 2 originally returned", final.NugIDs)
@@ -250,17 +242,20 @@ func TestPrepScanSettledTailHoldsFreshEventThenEmits(t *testing.T) {
 // (FIFO, one per call) — the accepted default for multiple eligible events in
 // one scan window.
 func TestPrepScanFIFOOrdersMultiplePending(t *testing.T) {
-	const threshold = 1
+	const threshold = 2
 	found := []scannedEvent{
 		{event: searchEvent("evt-first", "s1", "n1"), offset: 0},
 		{event: searchEvent("evt-second", "s1", "n2"), offset: 200},
 	}
-	_, cur := prepScan("s1", cursorState{}, found, threshold)
+	res0, cur := prepScan("s1", cursorState{}, found, threshold)
+	if res0.Pending {
+		t.Fatalf("both events are freshly discovered (waits_seen=1 < threshold=2) — must be held, got %+v", res0)
+	}
 	if len(cur.Pending) != 2 {
 		t.Fatalf("both events must be tracked simultaneously, got %+v", cur.Pending)
 	}
 
-	// Age both past threshold.
+	// Age both past threshold — FIFO, one emission per call.
 	res1, cur2 := prepScan("s1", cur, nil, threshold)
 	if !res1.Pending || res1.SearchEventID != "evt-first" {
 		t.Fatalf("oldest (evt-first) must emit first, got %+v", res1)

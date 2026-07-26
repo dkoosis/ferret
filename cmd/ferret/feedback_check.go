@@ -9,6 +9,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -50,11 +51,23 @@ func cmdFeedbackCheck() error {
 }
 
 // runFeedbackCheck is feedback check's testable core: load the pending
-// candidate, one-shot-consume the bank file (cleared whether the ask is
-// granted or denied — a denied candidate is never retried; Reserve's own
-// re-ask latch already prevents re-asking the same target, so leaving the file
-// behind would only spend a Reserve call on it again next turn for no gain),
-// then spend the budget and report the decision.
+// candidate, spend the budget, THEN one-shot-consume the bank file (cleared
+// whether the ask is granted or denied — a denied candidate is never
+// retried; Reserve's own re-ask latch already prevents re-asking the same
+// target, so leaving the file behind would only spend a Reserve call on it
+// again next turn for no gain).
+//
+// Reserve runs BEFORE the clear, deliberately: Reserve is the authoritative,
+// budget-recording decision, and it must not be discarded by a later I/O
+// failure. If ClearPending itself then fails, that is logged but does NOT
+// invalidate an already-computed, already-recorded decision — the bank file
+// is left behind as harmless orphaned scratch (the next check call would
+// just find it again, call Reserve again for the same now-latched target,
+// get a clean "already asked" denial, and retry the clear). The reverse
+// order (clear-then-reserve) was tried first and rejected: a Reserve error
+// AFTER the file is already gone loses the candidate permanently, with the
+// budget never even recorded — strictly worse than a self-healing stale
+// file.
 func runFeedbackCheck(reserve reserveAsk, budgetPath, pendingPath, session string, now time.Time) (checkResult, error) {
 	cand, ok, err := feedback.LoadPending(pendingPath)
 	if err != nil {
@@ -64,13 +77,14 @@ func runFeedbackCheck(reserve reserveAsk, budgetPath, pendingPath, session strin
 		return checkResult{}, nil
 	}
 
-	clearErr := feedback.ClearPending(pendingPath)
 	granted, rerr := reserve(budgetPath, session, cand.TargetRef, now)
 	if rerr != nil {
 		return checkResult{}, rerr
 	}
-	if clearErr != nil {
-		return checkResult{}, clearErr
+	if err := feedback.ClearPending(pendingPath); err != nil {
+		// Non-fatal: the decision above is already correct (and, if granted,
+		// already recorded in the budget) — a failed clear must not discard it.
+		fmt.Fprintf(os.Stderr, "feedback check: %s: clearing pending bank: %v\n", pendingPath, err)
 	}
 	if !granted {
 		return checkResult{}, nil

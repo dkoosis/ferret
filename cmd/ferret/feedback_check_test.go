@@ -1,11 +1,16 @@
 package main
 
 import (
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/dkoosis/ferret/internal/feedback"
 )
+
+// errCheckReserveBoom is a static sentinel for the faked Reserve failure
+// (err113: no dynamic errors).
+var errCheckReserveBoom = errors.New("boom")
 
 var checkNow = time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
 
@@ -77,6 +82,30 @@ func TestRunFeedbackCheck_DeniedStillClears(t *testing.T) {
 	}
 	if _, ok, _ := feedback.LoadPending(pendingPath); ok {
 		t.Error("bank file must be gone even when the ask is denied")
+	}
+}
+
+// TestRunFeedbackCheck_ReserveErrorLeavesBankForRetry: when Reserve itself
+// errors (e.g. a transient I/O failure on the budget file), the bank file
+// must NOT be cleared — clearing before a confirmed decision would lose the
+// candidate permanently with the budget never even recorded. Reserve runs
+// before the clear specifically so this failure is retryable, not silent
+// data loss (self-review finding).
+func TestRunFeedbackCheck_ReserveErrorLeavesBankForRetry(t *testing.T) {
+	dir := t.TempDir()
+	pendingPath := feedback.PendingPath(dir, "s1")
+	if err := feedback.SavePending(pendingPath, feedback.AskCandidate{TargetRef: "evt-1", Question: "q"}); err != nil {
+		t.Fatal(err)
+	}
+	reserve := func(path, session, target string, now time.Time) (bool, error) {
+		return false, errCheckReserveBoom
+	}
+	_, err := runFeedbackCheck(reserve, feedback.BudgetPath(dir), pendingPath, "s1", checkNow)
+	if err == nil {
+		t.Fatal("a Reserve error must surface, not be swallowed")
+	}
+	if _, ok, loadErr := feedback.LoadPending(pendingPath); loadErr != nil || !ok {
+		t.Errorf("bank file must survive a Reserve error for a future retry, ok=%v err=%v", ok, loadErr)
 	}
 }
 
