@@ -3,10 +3,12 @@ updated: 2026-07-25
 
 *Project working-memory. Maintained for future-me: current state + live frontier + traps that still bite. Resolved lanes pruned — history lives in beads/PRs.*
 
-## lane: (none open)
-Both roadmap epics essentially done — **ferret-bbp CLOSED**, **ferret-kuv 4/5** (only child left is ❄-deferred). ferret is at the end of its charted 2-phase roadmap (NORTH_STAR: bbp → kuv).
-→ next: a decision, not a task. Either close the kuv epic (its last child **kuv.9** — user re-prompt friction vs pivot scoring — is deferred: build it or drop it) or chart a new direction. ✗ open a build lane before the destination is picked.
-~ *Vocabulary (agent behavior axes):* "initiative" = how readily it acts (dial 1); "autonomy" = how far without approval (dial 2) — two axes, don't collapse into one scale. bbp.11 scores *calibration* (was the initiative right for the moment), orthogonal to both.
+## lane: ferret-wf9 — in-session feedback tap (NEW, phase 3)
+bbp + kuv **both CLOSED** (kuv.9 dropped — subsumed by bbp's correction-language signal; grounding source PULSE rejected). Charted a phase-3 epic: **ferret-wf9** — solicit t=0 human labels inline to calibrate the scorers. Plan reviewed by dk (in flight).
+→ **The design (settled):** ferret is label-starved — every scorer proxies "did this help the human?". Ask a one-char valence pulse *in-band* (Claude asks; dk one-chars the reply — plugins CANNOT collect a keystroke, verified: no "userprompt widget", CC's 👍/👎 unexposed), join it to the friction moment (ts→segment), record a gold label. Inline-first; idle-timing (idle-minder pattern) is a v2 non-goal.
+→ 5 children, DAG wired. Ready: **oz4** (label ledger, clean start — mirrors internal/fixes), **un4** (state+budget latch), **1jg** (target selector). Gated: b2b (ask hook), j33 (capture+join). Spec: `~/Projects/dk/Project/ferret/plans/in-session-feedback.md`.
+⚠ **Placement:** new selector/scorer code → `internal/score/` (ratified D2, not `internal/mine/`); the label ledger → persistence pkg mirroring `internal/fixes` (fsync+flock). Spec leaves exact pkg open — pin at build.
+~ *Vocabulary (agent behavior axes):* "initiative" = how readily it acts (dial 1); "autonomy" = how far without approval (dial 2) — two axes, don't collapse. bbp.11 scores *calibration*, orthogonal to both.
 ~ dk drives forks himself — hand them crisply, ✗ pre-decide ratified semantics.
 
 ## State
@@ -18,7 +20,9 @@ Both roadmap epics essentially done — **ferret-bbp CLOSED**, **ferret-kuv 4/5*
 
 **ferret-bbp — CLOSED.** User-turn repair/acceptance tagger: read intent from the *human's words*, not just tool sequences. Full deterministic spine + v2 taxonomy + Hop1/Hop2 judges + `helped` adjudicator + agent-initiative scorer all shipped (#49–91). Detail in the ledger below. This was ferret's side of the retrieval-outcome contract.
 
-**ferret-kuv** (epic, open) — Intent-grounded tool-improvement harness. 4/5 children shipped (kuv.3/.14/.15/567 done). Only **kuv.9** left, ❄-deferred (user re-prompt friction vs pivot scoring). Epic closes once kuv.9 is built-or-dropped. **567** (metrics-engine for a Claude analyst) shipped its children (567.1/.2). Substitution-ledger loop CLOSED: adjudicate flags → dk validates → `ferret fixes sub` records → hook/CLAUDE.md nudge consumes.
+**ferret-kuv — CLOSED.** Intent-grounded tool-improvement harness. All children shipped or dropped (kuv.3/.14/.15/.16/567 done; **kuv.9 dropped** — its correction-language signal was subsumed by bbp, grounding source PULSE rejected). **567** (metrics-engine for a Claude analyst) shipped its children (567.1/.2). Substitution-ledger loop CLOSED: adjudicate flags → dk validates → `ferret fixes sub` records → hook/CLAUDE.md nudge consumes.
+
+**ferret-wf9 — OPEN (phase 3, the live lane).** In-session feedback tap: solicit t=0 human labels inline (Claude asks in-band, dk one-chars, ferret joins to the friction moment + records a gold label) to calibrate the label-starved scorers. 5 children, DAG wired; oz4/un4/1jg ready. Detail in the top lane block + the vault spec.
 
 **Retrieval-outcome contract (trixi⇄ferret)** — ferret's consumer side = the bbp epic, now SHIPPED. Spec: `~/Projects/dk/Project/trixi/specs/retrieval-outcome-contract-design.md`. Seam: `trixi/observe.2.1` emits retrieval-event JSONL (producer) → `ferret/bbp` joins to segments + adjudicates (consumer, done) → `search-loop.4` reads back via interrupted-time-series (reader, upstream). Golden fixture is the contract test (ferret vendors it). Producer conformance = `tx-dii8m`.
 
