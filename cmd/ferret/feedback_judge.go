@@ -272,18 +272,7 @@ func runFeedbackJudge(ctx context.Context, cfg analyst.Config, judge relevanceJu
 		return judgeResult{}, nil // unclassifiable — never manufacture a disagreement from missing data
 	}
 
-	moment := feedback.Moment{Tool: "get_nug", Query: ev.Query, TurnsBack: turnsBack(res.Segments, ownerIdx)}
+	moment := feedback.Moment{Tool: "get_nug", Query: ev.Query}
 	cand, fires := feedback.Select(*rec, fit, moment)
 	return judgeResult{Fired: fires, Ask: cand}, nil
-}
-
-// turnsBack counts how many user turns ago segs[ownerIdx] was opened, relative
-// to the session's most recent segment — Moment.TurnsBack's source (rendered
-// into the ask's one-liner). A negative/out-of-range ownerIdx (no owning
-// segment) reports 0 rather than a nonsensical negative count.
-func turnsBack(segs []score.Segment, ownerIdx int) int {
-	if ownerIdx < 0 || ownerIdx >= len(segs) {
-		return 0
-	}
-	return len(segs) - 1 - ownerIdx
 }
