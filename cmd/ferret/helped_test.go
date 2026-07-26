@@ -1,12 +1,27 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/dkoosis/ferret/internal/dialogue"
 	"github.com/dkoosis/ferret/internal/retrievalevent"
 )
+
+// writeUserTurnsTranscript writes a minimal session jsonl carrying one user
+// turn at answerTS with the given content, for sessionUserTurns to walk.
+func writeUserTurnsTranscript(t *testing.T, answerTS, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.jsonl")
+	line := `{"type":"user","timestamp":"` + answerTS + `","sessionId":"s","message":{"role":"user","content":"` + content + `"}}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
 
 func ts(t *testing.T, s string) time.Time {
 	t.Helper()
@@ -51,6 +66,47 @@ func TestRepairAdjacency(t *testing.T) {
 	}
 	if adj["C"] {
 		t.Error("C: no read → want NOT adjacent")
+	}
+}
+
+// TestSessionUserTurnsExcludesProbeAnswer is the ferret-j33 §6/P0-2
+// repair-adjacency contamination test: a granted ask answered
+// "no — it clearly wasn't relevant" tags itself MoveRepair under plain
+// sessionUserTurns (no exclude), and repairAdjacency then wrongly marks the
+// PRECEDING search repair-adjacent — a false misled signal manufactured by
+// the probe answer's own raw text, not by anything the human said about that
+// search. With the label-derived exclude map, the turn is skipped entirely
+// and the search is no longer marked repair-adjacent.
+func TestSessionUserTurnsExcludesProbeAnswer(t *testing.T) {
+	const answerTS = "2026-07-26T12:00:03Z"
+	path := writeUserTurnsTranscript(t, answerTS, "no — it clearly wasn't relevant")
+
+	events := []retrievalevent.Event{
+		{SchemaVersion: 1, Kind: retrievalevent.KindSearch, EventID: "A", TS: "2026-07-26T12:00:00Z"},
+		{SchemaVersion: 1, Kind: retrievalevent.KindRead, EventID: "ra", TS: "2026-07-26T12:00:01Z",
+			SearchRef: &retrievalevent.SearchRef{EventID: "A"}},
+	}
+
+	baseline, err := sessionUserTurns(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(baseline) != 1 || baseline[0].move != dialogue.MoveRepair {
+		t.Fatalf("contaminated baseline: want one MoveRepair turn, got %+v", baseline)
+	}
+	if adj := repairAdjacency(events, baseline); !adj["A"] {
+		t.Error("contaminated baseline: want search A wrongly flagged repair-adjacent")
+	}
+
+	excluded, err := sessionUserTurns(path, map[string]bool{answerTS: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(excluded) != 0 {
+		t.Fatalf("excluded probe answer must be skipped outright, got %+v", excluded)
+	}
+	if adj := repairAdjacency(events, excluded); adj["A"] {
+		t.Error("with the probe turn excluded, search A must NOT be repair-adjacent")
 	}
 }
 

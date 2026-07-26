@@ -59,17 +59,28 @@ type judgeSessionInputs struct {
 
 // resolveFeedbackJudgeInputs segments the session transcript and loads the
 // retrieval-event feed — the same segment+events resolution cmdHelped does,
-// scoped to one judge invocation.
-func resolveFeedbackJudgeInputs(root, session, eventsFile string) (judgeSessionInputs, error) {
+// scoped to one judge invocation. data resolves this session's already-
+// recorded labels (ferret-j33 §6, P0-2), which de-contaminate BOTH read paths
+// exactly as cmdHelped does offline: `adjust` folds an earlier probe answer
+// out of segmentation (SegmentSourceExcluding — else its spurious segment
+// could become the owning segment whose Prompt this judge hands the live
+// relevance API for a LATER search), and `exclude` skips it in sessionUserTurns
+// (else its raw text injects a false repair-adjacency signal into the same
+// search's live Disagree computation).
+func resolveFeedbackJudgeInputs(root, session, eventsFile, data string) (judgeSessionInputs, error) {
 	src, _, err := resolveSpineSource(root, session)
 	if err != nil {
 		return judgeSessionInputs{}, err
 	}
-	res, err := score.SegmentSource(src)
+	adjust, exclude, err := sessionProbeAdjustments(src, data)
 	if err != nil {
 		return judgeSessionInputs{}, err
 	}
-	turns, err := sessionUserTurns(src.Path)
+	res, err := score.SegmentSourceExcluding(src, adjust)
+	if err != nil {
+		return judgeSessionInputs{}, err
+	}
+	turns, err := sessionUserTurns(src.Path, exclude)
 	if err != nil {
 		return judgeSessionInputs{}, err
 	}
@@ -149,7 +160,7 @@ func cmdFeedbackJudge() error {
 	if err != nil {
 		return err
 	}
-	in, err := resolveFeedbackJudgeInputs(root, cmd.Session, eventsFile)
+	in, err := resolveFeedbackJudgeInputs(root, cmd.Session, eventsFile, data)
 	if err != nil {
 		return err
 	}

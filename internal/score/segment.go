@@ -140,10 +140,22 @@ type segmenter struct {
 	callOwner  map[string]int // tool_use id → owning segment index, for output-byte attribution
 	outOrphan  int            // result bytes for an unowned tool_use id (deduped/forked)
 	decodeErr  int
+	// probeAdjust maps a transcript line timestamp to a replacement prompt text —
+	// the ferret-j33 de-contamination hop. When a user line's raw.Timestamp is a
+	// key, its extracted prompt is substituted BEFORE the boundary/carrier gate
+	// below, so a probe answer segments on its clean remainder (or, for a bare-
+	// token answer whose remainder is "", folds into the same no-boundary carrier
+	// path a tool_result envelope takes) instead of opening a segment keyed on the
+	// raw "y - now fix the tests" text. nil for every caller but SegmentSourceExcluding.
+	probeAdjust map[string]string
 }
 
 // feed decodes one transcript line and folds its blocks into the segmentation.
 // Mirrors emitSpineLine's tolerance: a bad line bumps decodeErr and is dropped.
+// Split into feedUser/feedAssistant (self-review: the combined branch had
+// crept past the cognitive-complexity/nesting budget once the ferret-j33
+// probe-adjust substitution landed) so each role's folding logic reads as its
+// own flat unit.
 func (s *segmenter) feed(line []byte) {
 	var raw transcript.Raw
 	if err := json.Unmarshal(line, &raw); err != nil {
@@ -153,27 +165,49 @@ func (s *segmenter) feed(line []byte) {
 	if raw.IsMeta || raw.Message == nil {
 		return
 	}
-	if raw.Type != "assistant" && raw.Type != "user" {
-		return
+	switch raw.Type {
+	case "user":
+		s.feedUser(&raw)
+	case "assistant":
+		s.feedAssistant(&raw)
 	}
+}
 
-	if raw.Type == "user" {
-		if prompt := turn.PromptText(raw.Message.Content); prompt != "" {
-			if skip, kind, label := turn.ClassifyBoundary(prompt); skip {
-				s.addContinuation(kind, label)
-				return
-			}
-			s.openSegment(prompt)
-			return
-		}
-		// A user line with no genuine text is a tool_result carrier: it opens no
-		// boundary, but its result payloads are the output cost — attribute each
-		// to the task that issued the matching call.
+// feedUser folds one user transcript line into the segmentation: a genuine
+// prompt (after the ferret-j33 probe-adjust substitution, adjustedPrompt)
+// either continues the current segment (a non-boundary fold) or opens a new
+// one; an empty prompt is a tool_result carrier — or a probe-adjusted
+// bare-token answer folded to "" — and only attributes output bytes, never a
+// boundary.
+func (s *segmenter) feedUser(raw *transcript.Raw) {
+	prompt := s.adjustedPrompt(raw)
+	if prompt == "" {
 		s.scanResults(raw.Message.Content)
 		return
 	}
+	if skip, kind, label := turn.ClassifyBoundary(prompt); skip {
+		s.addContinuation(kind, label)
+		return
+	}
+	s.openSegment(prompt)
+}
 
-	// assistant line: count tool calls and scan thinking for pivot hints.
+// adjustedPrompt extracts raw's prompt text, substituting the ferret-j33
+// probe-adjust replacement when raw's timestamp is a key in s.probeAdjust
+// (a nil map — every caller but SegmentSourceExcluding — simply never
+// matches, so this degrades to a plain turn.PromptText call). Applied BEFORE
+// feedUser's boundary/carrier gate, so a bare-token answer's empty
+// replacement routes to the same no-boundary carrier path a tool_result
+// envelope takes, rather than opening a new empty-Prompt segment.
+func (s *segmenter) adjustedPrompt(raw *transcript.Raw) string {
+	if replacement, ok := s.probeAdjust[raw.Timestamp]; ok {
+		return replacement
+	}
+	return turn.PromptText(raw.Message.Content)
+}
+
+// feedAssistant counts tool calls and scans thinking for pivot hints.
+func (s *segmenter) feedAssistant(raw *transcript.Raw) {
 	for i := range raw.Message.Content {
 		blk := &raw.Message.Content[i]
 		switch blk.Type {
@@ -368,7 +402,18 @@ func (s *segmenter) result(src transcript.Source) Result {
 // the same rules. cmd/ resolves a session prefix to a transcript.Source and calls
 // this; leaf scorers consume the returned Result.
 func SegmentSource(src transcript.Source) (Result, error) {
-	var sm segmenter
+	return SegmentSourceExcluding(src, nil)
+}
+
+// SegmentSourceExcluding is SegmentSource with an optional probe-adjustment map
+// (ferret-j33 de-contamination): transcript-line timestamp → replacement prompt
+// text for turns the answer-side ledger has confirmed were feedback-tap probe
+// answers, not genuine task turns. nil behaves identically to SegmentSource —
+// every existing caller (quality/segments/dialogue/candidates) keeps calling
+// the plain wrapper, unaffected. See segmenter.probeAdjust and feed's user
+// branch for where the substitution is applied.
+func SegmentSourceExcluding(src transcript.Source, probeAdjust map[string]string) (Result, error) {
+	sm := segmenter{probeAdjust: probeAdjust}
 	if err := transcript.ReadLines(src.Path, func(line []byte) error {
 		sm.feed(line)
 		return nil

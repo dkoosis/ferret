@@ -100,3 +100,9 @@ func cursorPath(dataDir, session string) string {
 func pendingBankPath(dataDir, session string) string {
 	return feedback.PendingPath(dataDir, session)
 }
+
+// armedBankPath returns the per-session armed-ask bank file path — a thin
+// alias over feedback.ArmedPath, mirroring pendingBankPath (ferret-j33).
+func armedBankPath(dataDir, session string) string {
+	return feedback.ArmedPath(dataDir, session)
+}

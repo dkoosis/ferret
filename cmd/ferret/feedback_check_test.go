@@ -23,7 +23,7 @@ func TestRunFeedbackCheck_NoPendingFile(t *testing.T) {
 		called = true
 		return true, nil
 	}
-	got, err := runFeedbackCheck(reserve, feedback.BudgetPath(dir), feedback.PendingPath(dir, "s1"), "s1", checkNow)
+	got, err := runFeedbackCheck(reserve, feedback.BudgetPath(dir), feedback.PendingPath(dir, "s1"), feedback.ArmedPath(dir, "s1"), "s1", checkNow)
 	if err != nil {
 		t.Fatalf("runFeedbackCheck: %v", err)
 	}
@@ -51,7 +51,8 @@ func TestRunFeedbackCheck_GrantedClearsAndReturnsQuestion(t *testing.T) {
 		}
 		return true, nil
 	}
-	got, err := runFeedbackCheck(reserve, feedback.BudgetPath(dir), pendingPath, "s1", checkNow)
+	armedPath := feedback.ArmedPath(dir, "s1")
+	got, err := runFeedbackCheck(reserve, feedback.BudgetPath(dir), pendingPath, armedPath, "s1", checkNow)
 	if err != nil {
 		t.Fatalf("runFeedbackCheck: %v", err)
 	}
@@ -60,6 +61,13 @@ func TestRunFeedbackCheck_GrantedClearsAndReturnsQuestion(t *testing.T) {
 	}
 	if _, ok, _ := feedback.LoadPending(pendingPath); ok {
 		t.Error("bank file must be gone after a granted check")
+	}
+	armed, ok, err := feedback.LoadArmed(armedPath)
+	if err != nil || !ok {
+		t.Fatalf("a granted check must arm the candidate for `answer`, ok=%v err=%v", ok, err)
+	}
+	if armed.TargetRef != cand.TargetRef || armed.Question != cand.Question {
+		t.Errorf("armed candidate = %+v, want the granted candidate %+v", armed, cand)
 	}
 }
 
@@ -73,7 +81,8 @@ func TestRunFeedbackCheck_DeniedStillClears(t *testing.T) {
 		t.Fatal(err)
 	}
 	reserve := func(path, session, target string, now time.Time) (bool, error) { return false, nil }
-	got, err := runFeedbackCheck(reserve, feedback.BudgetPath(dir), pendingPath, "s1", checkNow)
+	armedPath := feedback.ArmedPath(dir, "s1")
+	got, err := runFeedbackCheck(reserve, feedback.BudgetPath(dir), pendingPath, armedPath, "s1", checkNow)
 	if err != nil {
 		t.Fatalf("runFeedbackCheck: %v", err)
 	}
@@ -82,6 +91,9 @@ func TestRunFeedbackCheck_DeniedStillClears(t *testing.T) {
 	}
 	if _, ok, _ := feedback.LoadPending(pendingPath); ok {
 		t.Error("bank file must be gone even when the ask is denied")
+	}
+	if _, ok, _ := feedback.LoadArmed(armedPath); ok {
+		t.Error("a denied check must NOT arm a candidate")
 	}
 }
 
@@ -100,7 +112,7 @@ func TestRunFeedbackCheck_ReserveErrorLeavesBankForRetry(t *testing.T) {
 	reserve := func(path, session, target string, now time.Time) (bool, error) {
 		return false, errCheckReserveBoom
 	}
-	_, err := runFeedbackCheck(reserve, feedback.BudgetPath(dir), pendingPath, "s1", checkNow)
+	_, err := runFeedbackCheck(reserve, feedback.BudgetPath(dir), pendingPath, feedback.ArmedPath(dir, "s1"), "s1", checkNow)
 	if err == nil {
 		t.Fatal("a Reserve error must surface, not be swallowed")
 	}

@@ -327,6 +327,31 @@ func TestIsRepairMove(t *testing.T) {
 	}
 }
 
+// TestIsBenignNo pins the exported wrapper's contract for internal/feedback's
+// answer-recognition grammar (ferret-j33): a benign-reassurance "no" reads
+// true, a genuine leading negative reads false — exactly matchRepair's own
+// guard, reused via the exported name rather than a second regex.
+func TestIsBenignNo(t *testing.T) {
+	tests := []struct {
+		name string
+		s    string
+		want bool
+	}{
+		{"no worries", "no worries, that's fine", true},
+		{"no problem", "no problem at all", true},
+		{"nope no rush", "nope, no rush", false}, // "nope" isn't followed directly by a reassurance word
+		{"genuine no", "no, use snipe instead", false},
+		{"bare no", "no", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsBenignNo(tt.s); got != tt.want {
+				t.Errorf("IsBenignNo(%q) = %v, want %v", tt.s, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTagMoveCue(t *testing.T) {
 	if _, cue := TagMove("no, try the other one"); cue == "" {
 		t.Error("repair turn returned empty cue; want the matched phrase for traceability")

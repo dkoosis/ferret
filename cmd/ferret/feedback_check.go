@@ -43,7 +43,7 @@ func cmdFeedbackCheck() error {
 		return err
 	}
 	res, err := runFeedbackCheck(feedback.Reserve, feedback.BudgetPath(data),
-		pendingBankPath(data, cmd.Session), cmd.Session, time.Now())
+		pendingBankPath(data, cmd.Session), armedBankPath(data, cmd.Session), cmd.Session, time.Now())
 	if err != nil {
 		return err
 	}
@@ -68,7 +68,15 @@ func cmdFeedbackCheck() error {
 // AFTER the file is already gone loses the candidate permanently, with the
 // budget never even recorded — strictly worse than a self-healing stale
 // file.
-func runFeedbackCheck(reserve reserveAsk, budgetPath, pendingPath, session string, now time.Time) (checkResult, error) {
+//
+// On a GRANT, the candidate is also armed (feedback.SaveArmed, ferret-j33):
+// the ask will render in Claude's reply this turn, and `answer` needs
+// TargetRef/SegmentID/Question to survive into the turn after that (§2, the
+// armed-ask hop). A SaveArmed failure is logged to stderr but does NOT
+// un-grant the ask — the question has already been reserved and will render
+// either way; the worst case is one un-joinable answer, strictly better than
+// silently never asking.
+func runFeedbackCheck(reserve reserveAsk, budgetPath, pendingPath, armedPath, session string, now time.Time) (checkResult, error) {
 	cand, ok, err := feedback.LoadPending(pendingPath)
 	if err != nil {
 		return checkResult{}, err
@@ -88,6 +96,9 @@ func runFeedbackCheck(reserve reserveAsk, budgetPath, pendingPath, session strin
 	}
 	if !granted {
 		return checkResult{}, nil
+	}
+	if err := feedback.SaveArmed(armedPath, cand); err != nil {
+		fmt.Fprintf(os.Stderr, "feedback check: %s: arming candidate: %v\n", armedPath, err)
 	}
 	return checkResult{Ask: true, Question: cand.Question}, nil
 }

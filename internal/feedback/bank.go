@@ -113,3 +113,43 @@ func ClearPending(path string) error {
 	}
 	return nil
 }
+
+// armedFilePrefix names the per-session ARMED-ask file — the second hop in
+// the relay, after `check` grants an ask (feedback_check.go). `judge` banks
+// to PendingPath; `check` consumes-and-clears that pending bank one-shot AND
+// arms this file, so the candidate survives the render turn; `answer`
+// (ferret-j33), one turn later, consumes-and-clears THIS file. Two separate
+// files, not one, because `judge` can overwrite the pending file with a NEW
+// candidate on a later turn before `answer` has consumed the OLD armed one —
+// conflating them would let a fresh candidate clobber an in-flight armed
+// target.
+const armedFilePrefix = "feedback-armed-"
+
+// ArmedPath returns the per-session armed-ask file path for a ferret data
+// dir. Mirrors PendingPath's naming/keying scheme.
+func ArmedPath(dataDir, session string) string {
+	return filepath.Join(dataDir, armedFilePrefix+session+".json")
+}
+
+// SaveArmed publishes the one armed AskCandidate for a session — the exact
+// atomic temp+fsync+rename write SavePending performs (see its doc comment
+// for the overlap-tolerance rationale, which applies identically here: the
+// worst case under a race is one benign lost candidate).
+func SaveArmed(path string, c AskCandidate) error {
+	return SavePending(path, c)
+}
+
+// LoadArmed reads the armed AskCandidate at path — the same absent-is-not-
+// an-error, corrupt-self-heals contract as LoadPending.
+func LoadArmed(path string) (AskCandidate, bool, error) {
+	return LoadPending(path)
+}
+
+// ClearArmed removes the armed file — the same idempotent-against-absent
+// contract as ClearPending. `answer` calls this unconditionally (defer): the
+// one-turn TTL is enforced entirely by "the very next UserPromptSubmit
+// invocation consumes and deletes the armed record" — nothing more elaborate
+// is needed.
+func ClearArmed(path string) error {
+	return ClearPending(path)
+}
