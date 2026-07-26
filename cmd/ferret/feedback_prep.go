@@ -175,6 +175,12 @@ func loadCursor(path string) cursorState {
 	return st
 }
 
+// syncDir fsyncs a directory so a just-published rename within it survives a
+// crash/power-loss (see durable.SyncDir). A package var so a test can inject a
+// sync failure and observe that saveCursor invokes it, matching the seam every
+// other durable caller in this tree keeps (budget.go, codec.go, gen-corpus).
+var syncDir = durable.SyncDir
+
 // saveCursor publishes the cursor atomically (temp+fsync+rename+dir-fsync,
 // mirrors internal/feedback/budget.go's writeState) — read-modify-write
 // scratch state, not a log. The atomic rename guards a reader against a torn
@@ -190,7 +196,7 @@ func saveCursor(path string, st cursorState) error {
 		return err
 	}
 	// fsync the parent dir so the rename itself is crash-durable.
-	return durable.SyncDir(filepath.Dir(path))
+	return syncDir(filepath.Dir(path))
 }
 
 // scanNewLines reads path from byte offset to EOF, decoding each complete
