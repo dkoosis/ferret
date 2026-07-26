@@ -15,7 +15,7 @@ func TestDisagree(t *testing.T) {
 	cases := []struct {
 		name string
 		v    score.Verdict
-		f    RecallFit
+		f    JudgeFit
 		want bool
 	}{
 		{"helped vs mismatch → ask", score.VerdictHelped, FitMismatch, true},
