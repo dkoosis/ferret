@@ -269,6 +269,15 @@ func matchRepair(target string) (cue string, ok bool) {
 	return "", false
 }
 
+// IsBenignNo reports whether s opens on a benign-reassurance "no" ("no
+// worries", "no problem", "no rush"...) rather than a genuine negative —
+// exactly the guard matchRepair applies internally, exported so a sibling
+// package (internal/feedback's answer-recognition grammar, ferret-j33) can
+// reuse the identical guard-word list instead of copying it. A future edit to
+// the list then can't silently drift out of sync between the two packages
+// (the same false-positive class: "no worries" is not a "no" vote either way).
+func IsBenignNo(s string) bool { return benignNoRe.MatchString(s) }
+
 // metaCues — Partner Communication Management (ISO 24617-2): feedback on HOW the
 // agent communicates, not the task. Narrowed (dk plan-review) to communication-
 // directed phrasing only: bare "shorter"/"smaller"/"speed up"/"more detail" false-

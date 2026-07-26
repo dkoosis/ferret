@@ -7,9 +7,13 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/dkoosis/ferret/internal/analyst"
+	"github.com/dkoosis/ferret/internal/dialogue"
+	"github.com/dkoosis/ferret/internal/label"
 	"github.com/dkoosis/ferret/internal/retrievalevent"
 	"github.com/dkoosis/ferret/internal/score"
 )
@@ -213,6 +217,101 @@ func TestRunFeedbackJudge_ShuffleIsDeterministicPerSeed(t *testing.T) {
 	}
 	if same {
 		t.Error("different seeds produced the same order — shuffle seam looks unwired")
+	}
+}
+
+// TestResolveFeedbackJudgeInputs_ExcludesSessionProbeAnswer is the P0-2
+// companion to TestSessionUserTurnsExcludesProbeAnswer, one layer up: an
+// earlier granted ask in THIS session, answered "no — it clearly wasn't
+// relevant", must not inject a false repair-adjacency signal into a LATER
+// search's live Disagree computation — resolveFeedbackJudgeInputs is where
+// judge's turns actually get built, from the session's own already-recorded
+// labels (by the time judge runs for a later search, an earlier ask's label
+// is already on the ledger — no ordering hazard).
+func TestResolveFeedbackJudgeInputs_ExcludesSessionProbeAnswer(t *testing.T) {
+	const question = "did this help? [y/n/s]"
+	root := t.TempDir()
+	sessDir := filepath.Join(root, "proj")
+	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lines := []string{
+		`{"type":"user","timestamp":"2026-07-25T15:00:00Z","sessionId":"sess-a","message":{"role":"user","content":"find the backend design notes"}}`,
+		`{"type":"assistant","timestamp":"2026-07-25T15:01:00Z","sessionId":"sess-a","message":{"role":"assistant","content":[` +
+			`{"type":"text","text":"` + question + `"}]}}`,
+		`{"type":"user","timestamp":"2026-07-25T15:02:00Z","sessionId":"sess-a","message":{"role":"user","content":"no — it clearly wasn't relevant"}}`,
+	}
+	var buf []byte
+	for _, ln := range lines {
+		buf = append(buf, ln...)
+		buf = append(buf, '\n')
+	}
+	if err := os.WriteFile(filepath.Join(sessDir, "sess-a.jsonl"), buf, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	eventsFile := filepath.Join(t.TempDir(), "events.jsonl")
+	if err := os.WriteFile(eventsFile, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	hasRepairMove := func(turns []userTurn) bool {
+		for _, tn := range turns {
+			if tn.move == dialogue.MoveRepair {
+				return true
+			}
+		}
+		return false
+	}
+	// The raw probe answer's own text, prefix and all. De-contamination must
+	// keep this exact string out of the segmentation the judge hands the live
+	// relevance API (feedback_judge.go OwningSegment→Segment.Prompt): a segment
+	// named by it would give a LATER search the wrong episode prompt.
+	const rawProbe = "no — it clearly wasn't relevant"
+	segmentNamedByProbe := func(res score.Result) bool {
+		for _, s := range res.Segments {
+			if strings.Contains(s.Prompt, rawProbe) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Baseline: an empty label ledger (no recorded answer yet) — the probe
+	// turn is indistinguishable from a genuine repair, exactly the bug §6
+	// documents. It taints BOTH read paths: tagged MoveRepair in the turns,
+	// AND opens a segment named by its raw text.
+	baselineData := t.TempDir()
+	baseline, err := resolveFeedbackJudgeInputs(root, "sess-a", eventsFile, baselineData)
+	if err != nil {
+		t.Fatalf("resolveFeedbackJudgeInputs (baseline): %v", err)
+	}
+	if !hasRepairMove(baseline.turns) {
+		t.Fatalf("contaminated baseline: want the probe answer tagged MoveRepair, got %+v", baseline.turns)
+	}
+	if !segmentNamedByProbe(baseline.res) {
+		t.Fatalf("contaminated baseline: want a segment named by the raw probe text, got %+v", baseline.res.Segments)
+	}
+
+	// Fixed: the ledger already carries this session's label for the ask
+	// (as it would by the time judge runs on a later search) — the probe
+	// turn must be excluded from the turns outright AND folded out of the
+	// segmentation, not merely present-but-relabeled on one path.
+	fixedData := t.TempDir()
+	if err := label.Append(label.Path(fixedData), label.Label{
+		Session: "sess-a", Recorded: time.Now(), TargetRef: "evt-1",
+		Question: question, Valence: label.ValenceNo, Text: "it clearly wasn't relevant",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fixed, err := resolveFeedbackJudgeInputs(root, "sess-a", eventsFile, fixedData)
+	if err != nil {
+		t.Fatalf("resolveFeedbackJudgeInputs (fixed): %v", err)
+	}
+	if hasRepairMove(fixed.turns) {
+		t.Errorf("the recorded probe answer must be excluded from judge's turns, got %+v", fixed.turns)
+	}
+	if segmentNamedByProbe(fixed.res) {
+		t.Errorf("the recorded probe answer must be folded out of judge's segmentation, got %+v", fixed.res.Segments)
 	}
 }
 

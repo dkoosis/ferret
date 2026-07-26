@@ -103,6 +103,81 @@ func TestClearPendingIdempotent(t *testing.T) {
 	}
 }
 
+// TestArmedRoundtrip: SaveArmed then LoadArmed returns the same candidate —
+// mirrors TestPendingRoundtrip for the second hop of the relay (ferret-j33).
+func TestArmedRoundtrip(t *testing.T) {
+	path := ArmedPath(t.TempDir(), "s1")
+	want := AskCandidate{
+		TargetRef: "evt-1",
+		SegmentID: "seg-1",
+		TS:        "2026-07-25T15:00:00Z",
+		Question:  "That get_nug \"x\" 3 turns back — did it help? [y/n]",
+		Reason:    "lattice=helped but returned nugs graded irrelevant",
+	}
+	if err := SaveArmed(path, want); err != nil {
+		t.Fatalf("SaveArmed: %v", err)
+	}
+	got, ok, err := LoadArmed(path)
+	if err != nil {
+		t.Fatalf("LoadArmed: %v", err)
+	}
+	if !ok {
+		t.Fatal("LoadArmed: want ok=true after a save")
+	}
+	if got != want {
+		t.Errorf("LoadArmed = %+v, want %+v", got, want)
+	}
+}
+
+// TestLoadArmedMissingFile: no armed file yet (the common case — no ask has
+// been granted this turn) reads as absent, not an error.
+func TestLoadArmedMissingFile(t *testing.T) {
+	path := ArmedPath(t.TempDir(), "s1")
+	got, ok, err := LoadArmed(path)
+	if err != nil {
+		t.Fatalf("LoadArmed on a missing file must not error, got %v", err)
+	}
+	if ok {
+		t.Error("LoadArmed on a missing file must report ok=false")
+	}
+	if got != (AskCandidate{}) {
+		t.Errorf("LoadArmed on a missing file must return the zero candidate, got %+v", got)
+	}
+}
+
+// TestClearArmedIdempotent: clearing an already-absent armed file is not an
+// error — answer's unconditional defer must tolerate a turn where nothing
+// was ever armed.
+func TestClearArmedIdempotent(t *testing.T) {
+	path := ArmedPath(t.TempDir(), "s1")
+	if err := ClearArmed(path); err != nil {
+		t.Errorf("ClearArmed on an absent file must not error, got %v", err)
+	}
+	if err := SaveArmed(path, AskCandidate{TargetRef: "evt-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ClearArmed(path); err != nil {
+		t.Fatalf("ClearArmed: %v", err)
+	}
+	if _, ok, _ := LoadArmed(path); ok {
+		t.Error("ClearArmed must remove the file")
+	}
+	if err := ClearArmed(path); err != nil {
+		t.Errorf("second ClearArmed must still be a no-op, got %v", err)
+	}
+}
+
+// TestPendingAndArmedPathsDoNotCollide: the two hops of the relay must live
+// at distinct paths under the same session/data dir — a naming collision
+// would let `check`'s clear of the pending bank race with `answer`'s read of
+// the armed file, or vice versa.
+func TestPendingAndArmedPathsDoNotCollide(t *testing.T) {
+	dir := t.TempDir()
+	if PendingPath(dir, "s1") == ArmedPath(dir, "s1") {
+		t.Error("pending and armed paths must not collide")
+	}
+}
+
 // fakeWriter is a minimal io.Writer capture, avoiding a bytes.Buffer import
 // just for a truthiness check.
 type fakeWriter struct{ s string }

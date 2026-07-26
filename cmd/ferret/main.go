@@ -276,6 +276,7 @@ var CLI struct {
 		Session string `help:"Session ID prefix (required): the transcript whose task segments the events join against." required:"" name:"session"`
 		Events  string `help:"Retrieval-event JSONL (trixi sidecar rows); '-' or empty = stdin." name:"events"`
 		Root    string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
+		Data    string `help:"Artifact directory (the label ledger this session's feedback-tap probe answers are excluded via)." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
 		Format  string `help:"Output format: text|json." default:"text" name:"format"`
 	} `cmd:"" help:"Adjudicate retrieval outcomes (helped|ignored|misled|conflict|no_signal): join each search event to its task segment by timestamp, then apply the deterministic lattice. Live ts→segment join (bbp.16)."`
 
@@ -319,7 +320,12 @@ var CLI struct {
 			Session string `help:"Session ID prefix (required)." required:"" name:"session"`
 			Data    string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
 		} `cmd:"" help:"UserPromptSubmit side: read the banked AskCandidate (if any), check feedback.Reserve's budget, print {\"ask\":bool,\"question\":string}. One-shot: clears the bank file either way."`
-	} `cmd:"" help:"In-session feedback tap live-wiring (ferret-wf9.1): prep (tail+settle) -> judge (RunRelevance+Select) -> check (budget+inject). See .claude/hooks/feedback-*.sh."`
+		Answer struct {
+			Session string `help:"Session ID prefix (required)." required:"" name:"session"`
+			Root    string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
+			Data    string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
+		} `cmd:"" help:"UserPromptSubmit side, one turn after a granted 'check': read dk's raw prompt from stdin, consume the armed candidate, confirm the ask actually rendered, classify the leading y/n/s token (ferret-j33), and write the gold label. No armed candidate = silent no-op."`
+	} `cmd:"" help:"In-session feedback tap live-wiring (ferret-wf9.1/j33): prep (tail+settle) -> judge (RunRelevance+Select) -> check (budget+inject) -> answer (recognize+label). See .claude/hooks/feedback-*.sh."`
 
 	Fixes struct {
 		Add struct {
@@ -419,6 +425,7 @@ func main() {
 				"  ferret feedback prep  --session PREFIX   (tail the live retrieval feed for a settled kind:search event)\n"+
 				"  ferret feedback judge --session PREFIX --search-event ID   ([{id,text}] candidates on stdin)\n"+
 				"  ferret feedback check --session PREFIX   (UserPromptSubmit side: budget-check + read the banked ask)\n"+
+				"  ferret feedback answer --session PREFIX   (one turn later: recognize y/n/s, classify valence, write the label; prompt on stdin)\n"+
 				"  ferret fixes add  --motif \"Edit!,Read\" --fix \"hookify read-before-edit\" [--note ...]\n"+
 				"  ferret fixes list [--format json]\n"+
 				"  ferret reach    [--since Y-M-D] [--until Y-M-D] [--project SUBSTR] [--format text|json|md]   (recall-opportunity reach-rate)\n"+
@@ -482,6 +489,8 @@ func main() {
 		err = cmdFeedbackJudge()
 	case "feedback check":
 		err = cmdFeedbackCheck()
+	case "feedback answer":
+		err = cmdFeedbackAnswer()
 	case "fixes add":
 		err = cmdFixesAdd()
 	case "fixes list":

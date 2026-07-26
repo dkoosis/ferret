@@ -46,11 +46,20 @@ func cmdHelped() error {
 			cmd.Session, distinct, src.Session)
 	}
 
-	res, err := score.SegmentSource(src)
+	data, err := resolveData(cmd.Data)
 	if err != nil {
 		return err
 	}
-	turns, err := sessionUserTurns(src.Path)
+	adjust, exclude, err := sessionProbeAdjustments(src, data)
+	if err != nil {
+		return err
+	}
+
+	res, err := score.SegmentSourceExcluding(src, adjust)
+	if err != nil {
+		return err
+	}
+	turns, err := sessionUserTurns(src.Path, exclude)
 	if err != nil {
 		return err
 	}
@@ -80,7 +89,14 @@ type userTurn struct {
 // only asks "is this a repair/reject", which is cue-based and needs no
 // prior-question context. A line with an unparseable timestamp is skipped — it
 // can't be placed after a read, so it can't carry adjacency.
-func sessionUserTurns(path string) ([]userTurn, error) {
+//
+// exclude (ferret-j33 §6, de-contamination) skips a line OUTRIGHT — before
+// TagMove ever sees it — when the line's own timestamp is a key: a confirmed
+// feedback-tap probe answer (buildProbeAdjustments) must never register as a
+// repair/accept move, not even a blanked one, since repairAdjacency reads
+// this list to attribute misled verdicts. nil (every caller but cmdHelped and
+// runFeedbackJudge) preserves the exact prior behavior.
+func sessionUserTurns(path string, exclude map[string]bool) ([]userTurn, error) {
 	var turns []userTurn
 	err := transcript.ReadLines(path, func(line []byte) error {
 		raw, ok := decodeRaw(line)
@@ -89,6 +105,9 @@ func sessionUserTurns(path string) ([]userTurn, error) {
 		}
 		if raw.Type != roleUser {
 			return nil
+		}
+		if exclude[raw.Timestamp] {
+			return nil // a confirmed probe-answer turn — never a genuine dialogue move
 		}
 		prompt := turn.PromptText(raw.Message.Content)
 		if prompt == "" {

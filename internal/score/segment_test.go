@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dkoosis/ferret/internal/transcript"
@@ -149,6 +150,117 @@ func TestSegmentSourcePreamble(t *testing.T) {
 	}
 	if res.Segments[1].Index != 1 || res.Segments[1].FirstCall != 1 {
 		t.Errorf("seg1 = %+v, want index 1 owning call 1", res.Segments[1])
+	}
+}
+
+// probeFixtureLines is a small session shaped like the ferret-j33 feedback-tap
+// hazard: a normal task, an armed ask (assistant reply — not scanned for
+// boundaries either way), then a probe ANSWER turn carrying the recognized
+// "y - now fix the tests" prefix at timestamp probeTS. Plain SegmentSource
+// (no adjustment) segments this exactly like any other user prompt — that IS
+// the contamination bug §6 documents: a spurious segment opens keyed on the
+// raw, prefixed probe text instead of attributing to the ongoing task.
+const probeTS = "2026-07-26T12:00:03Z"
+
+func probeFixtureLines(answerContent string) []string {
+	return []string{
+		`{"type":"user","timestamp":"2026-07-26T12:00:00Z","sessionId":"s","message":{"role":"user","content":"orient and assess the bead"}}`,
+		`{"type":"assistant","timestamp":"2026-07-26T12:00:01Z","sessionId":"s","message":{"role":"assistant","content":[` +
+			`{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"bead.md"}}]}}`,
+		`{"type":"user","timestamp":"` + probeTS + `","sessionId":"s","message":{"role":"user","content":"` + answerContent + `"}}`,
+		`{"type":"assistant","timestamp":"2026-07-26T12:00:04Z","sessionId":"s","message":{"role":"assistant","content":[` +
+			`{"type":"tool_use","id":"t2","name":"Edit","input":{"file_path":"a.go"}}]}}`,
+	}
+}
+
+// TestSegmentSourceProbeContaminationBaseline documents the bug plain
+// SegmentSource has (ferret-j33 §6): a probe answer's raw, token-prefixed text
+// opens its own spurious segment.
+func TestSegmentSourceProbeContaminationBaseline(t *testing.T) {
+	res, err := SegmentSource(writeSession(t, probeFixtureLines("y - now fix the tests")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Segments) != 2 {
+		t.Fatalf("want 2 segments (contaminated baseline), got %d: %+v", len(res.Segments), res.Segments)
+	}
+	if res.Segments[1].Prompt != "y - now fix the tests" {
+		t.Errorf("baseline seg2.Prompt = %q, want the raw contaminated probe text", res.Segments[1].Prompt)
+	}
+}
+
+// TestSegmentSourceExcludingCleansProbeAnswer is the fix: with the ledger-
+// derived adjustment (probeTS → the answer's already-stripped remainder), the
+// probe turn's segment carries the CLEAN remainder text, never the raw
+// "y - now fix the tests" prefix.
+func TestSegmentSourceExcludingCleansProbeAnswer(t *testing.T) {
+	src := writeSession(t, probeFixtureLines("y - now fix the tests"))
+	res, err := SegmentSourceExcluding(src, map[string]string{probeTS: "now fix the tests"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, seg := range res.Segments {
+		if strings.Contains(seg.Prompt, "y - now fix the tests") {
+			t.Errorf("segment %+v still carries the raw probe prefix, want it cleaned", seg)
+		}
+	}
+	if res.Segments[1].Prompt != "now fix the tests" {
+		t.Errorf("excluded seg2.Prompt = %q, want the clean remainder", res.Segments[1].Prompt)
+	}
+}
+
+// TestSegmentSourceExcludingIgnoredLabelUnaffected is the over-exclusion guard
+// (test plan §4 companion): a label the caller never adjusted (as buildProbeAdjustments
+// does for an Ignored valence) must segment exactly like the plain baseline —
+// proving the fix doesn't eat legitimate work turns it wasn't told to touch.
+func TestSegmentSourceExcludingIgnoredLabelUnaffected(t *testing.T) {
+	src := writeSession(t, probeFixtureLines("please also check the tests"))
+	plain, err := SegmentSource(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	excluded, err := SegmentSourceExcluding(src, map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plain.Segments) != len(excluded.Segments) || plain.Segments[1].Prompt != excluded.Segments[1].Prompt {
+		t.Errorf("an empty/non-matching adjustment map must not alter segmentation: plain=%+v excluded=%+v",
+			plain.Segments, excluded.Segments)
+	}
+}
+
+// TestSegmentSourceExcludingBareTokenNoEmptySegment is the AC's simplest,
+// most common case (plan-review P1-2): a bare-token answer ("n") folds to an
+// EMPTY replacement. That must route to the same no-boundary carrier path a
+// tool_result envelope takes — NOT open a spurious empty-Prompt segment.
+func TestSegmentSourceExcludingBareTokenNoEmptySegment(t *testing.T) {
+	src := writeSession(t, probeFixtureLines("n"))
+
+	baseline, err := SegmentSource(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(baseline.Segments) != 2 || baseline.Segments[1].Prompt != "n" {
+		t.Fatalf("contaminated baseline: want a spurious 'n' segment, got %+v", baseline.Segments)
+	}
+
+	res, err := SegmentSourceExcluding(src, map[string]string{probeTS: ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Segments) != 1 {
+		t.Fatalf("bare-token fold-to-empty must NOT open a new segment, got %d: %+v", len(res.Segments), res.Segments)
+	}
+	for _, seg := range res.Segments {
+		if seg.Prompt == "" && seg.Index != 0 {
+			t.Errorf("no non-preamble segment may carry an empty Prompt, got %+v", seg)
+		}
+	}
+	// t2 (the call after the folded probe turn) attributes to the ongoing task,
+	// not a new segment — the carrier path's normal behavior.
+	if res.Segments[0].FirstCall != 0 || res.Segments[0].LastCall != 1 {
+		t.Errorf("both calls must attribute to the single live task, got range %d..%d",
+			res.Segments[0].FirstCall, res.Segments[0].LastCall)
 	}
 }
 
