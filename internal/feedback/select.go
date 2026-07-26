@@ -74,17 +74,20 @@ func Disagree(v score.Verdict, f JudgeFit) (bool, string) {
 // job, not the join's). The caller sources it from the underlying retrieval
 // event; the opaque SearchRef on a HelpedRecord is not something dk can place.
 type Moment struct {
-	Tool      string // the retrieval tool, e.g. "get_nug", "recall"
-	Query     string // the query/target text, truncated for the one-liner
-	TurnsBack int    // how many user turns ago the retrieval happened
+	Tool  string // the retrieval tool, e.g. "get_nug", "recall"
+	Query string // the query/target text, truncated for the one-liner
 }
 
 // queryCap bounds the query text in the one-liner so a long query can't blow up
 // the ask into an unreadable wall.
 const queryCap = 48
 
-// phrase renders the moment as a human clause: `get_nug "backend design" 3 turns
-// back`. A missing tool or query degrades gracefully rather than emitting empty
+// phrase renders the moment as a human clause: `get_nug "backend design"
+// earlier`. The temporal cue stays vague on purpose: an exact turn count baked
+// here at judge time (the search's own Stop hook) under-counts by inject time,
+// when the ask actually surfaces — the Question string is a stable join key, so
+// it cannot be re-rendered later (ferret-162). The query text anchors WHICH
+// moment; a missing tool or query degrades gracefully rather than emitting empty
 // quotes — the ask must still point somewhere.
 func (m Moment) phrase() string {
 	tool := m.Tool
@@ -99,12 +102,7 @@ func (m Moment) phrase() string {
 		}
 		fmt.Fprintf(&b, " %q", q)
 	}
-	switch {
-	case m.TurnsBack == 1:
-		b.WriteString(" 1 turn back")
-	case m.TurnsBack > 1:
-		fmt.Fprintf(&b, " %d turns back", m.TurnsBack)
-	}
+	b.WriteString(" earlier")
 	return b.String()
 }
 

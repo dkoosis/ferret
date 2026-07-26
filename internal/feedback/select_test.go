@@ -86,7 +86,7 @@ func TestSelectBuildsCandidateOnDisagreement(t *testing.T) {
 		SegmentID: "seg-7",
 		TS:        "2026-07-25T15:00:00Z",
 	}
-	m := Moment{Tool: "get_nug", Query: "memory backend design", TurnsBack: 3}
+	m := Moment{Tool: "get_nug", Query: "memory backend design"}
 
 	c, ok := Select(rec, FitMismatch, m)
 	if !ok {
@@ -95,7 +95,7 @@ func TestSelectBuildsCandidateOnDisagreement(t *testing.T) {
 	if c.TargetRef != "evt-42" || c.SegmentID != "seg-7" || c.TS != rec.TS {
 		t.Errorf("candidate lost target identity: %+v", c)
 	}
-	for _, want := range []string{"get_nug", "memory backend design", "3 turns back", "[y/n]"} {
+	for _, want := range []string{"get_nug", "memory backend design", "earlier", "[y/n]"} {
 		if !strings.Contains(c.Question, want) {
 			t.Errorf("question %q must name the moment (missing %q)", c.Question, want)
 		}
@@ -116,16 +116,18 @@ func TestSelectSilentOnAgreement(t *testing.T) {
 
 // TestMomentPhraseDegradesGracefully: a missing tool or query must still point
 // somewhere — an empty tool becomes "that retrieval", a missing query drops the
-// quotes rather than emitting `""`, and turn count pluralizes.
+// quotes rather than emitting `""`. The temporal cue stays vague ("earlier") and
+// never carries a numeric turn count — an exact count would be stale by inject
+// time (ferret-162), so the phrase must never emit "turn(s) back".
 func TestMomentPhraseDegradesGracefully(t *testing.T) {
 	cases := []struct {
 		m    Moment
 		want []string // substrings that must appear
 		not  []string // substrings that must not
 	}{
-		{Moment{Tool: "", Query: "", TurnsBack: 0}, []string{"that retrieval"}, []string{`""`, "turns back", "turn back"}},
-		{Moment{Tool: "recall", Query: "", TurnsBack: 1}, []string{"recall", "1 turn back"}, []string{`""`, "turns back"}},
-		{Moment{Tool: "get_nug", Query: "x", TurnsBack: 5}, []string{"get_nug", `"x"`, "5 turns back"}, nil},
+		{Moment{Tool: "", Query: ""}, []string{"that retrieval", "earlier"}, []string{`""`, "turns back", "turn back"}},
+		{Moment{Tool: "recall", Query: ""}, []string{"recall", "earlier"}, []string{`""`, "turns back", "turn back"}},
+		{Moment{Tool: "get_nug", Query: "x"}, []string{"get_nug", `"x"`, "earlier"}, []string{"turns back", "turn back"}},
 	}
 	for _, c := range cases {
 		got := c.m.phrase()

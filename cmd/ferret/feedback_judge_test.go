@@ -315,28 +315,6 @@ func TestResolveFeedbackJudgeInputs_ExcludesSessionProbeAnswer(t *testing.T) {
 	}
 }
 
-// TestTurnsBack: turnsBack counts turns relative to the session's LAST
-// segment; the owning segment itself is 0 turns back only when it IS the last
-// one, and an out-of-range index degrades to 0 rather than negative.
-func TestTurnsBack(t *testing.T) {
-	segs := make([]score.Segment, 4) // indices 0..3
-	cases := []struct {
-		owner int
-		want  int
-	}{
-		{3, 0}, // the latest segment: 0 turns back
-		{2, 1},
-		{0, 3},
-		{-1, 0}, // no owning segment
-		{99, 0}, // out of range
-	}
-	for _, c := range cases {
-		if got := turnsBack(segs, c.owner); got != c.want {
-			t.Errorf("turnsBack(segs, %d) = %d, want %d", c.owner, got, c.want)
-		}
-	}
-}
-
 // TestReadEventsTolerantSkipsSchemaMismatch: a line with a schema_version
 // that doesn't match retrievalevent.SchemaVersion (a future producer bump, or
 // a corrupt row), and an unparseable line, are both skipped — not fatal, the
