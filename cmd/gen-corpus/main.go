@@ -10,7 +10,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"math/rand"
@@ -18,6 +17,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/dkoosis/ferret/internal/durable"
 )
 
 func main() {
@@ -200,18 +201,10 @@ func writeAtomic(path string, data []byte) error {
 // unexercised (ferret-e3q).
 var renameFile = os.Rename
 
-// syncDir fsyncs a directory so a just-published rename within it is durable.
-// A package var so a test can observe that writeAtomic invokes it after rename.
-var syncDir = func(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	if err := d.Sync(); err != nil {
-		return errors.Join(err, d.Close())
-	}
-	return d.Close()
-}
+// syncDir fsyncs a directory so a just-published rename within it is durable
+// (see durable.SyncDir). A package var so a test can observe that writeAtomic
+// invokes it after rename.
+var syncDir = durable.SyncDir
 
 // ---- archetypes ----
 

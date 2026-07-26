@@ -27,6 +27,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/dkoosis/ferret/internal/durable"
 )
 
 // stderr is the diagnostic-log seam (mirrors internal/fixes and the events
@@ -34,21 +36,10 @@ import (
 // capture it with a plain buffer instead of hijacking process-global os.Stderr.
 var stderr io.Writer = os.Stderr
 
-// syncDir fsyncs a directory so a first-create within it survives a crash. A new
-// file's directory entry only mutates the parent dir; the dir inode itself must
-// be fsync'd or the change can be lost in the dirty-inode window (mirrors
-// internal/fixes' syncDir). Package var so a test can observe the publish path
-// invokes it.
-var syncDir = func(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	if err := d.Sync(); err != nil {
-		return errors.Join(err, d.Close())
-	}
-	return d.Close()
-}
+// syncDir fsyncs a directory so a first-create within it survives a crash (see
+// durable.SyncDir). Package var so a test can observe the publish path invokes
+// it.
+var syncDir = durable.SyncDir
 
 // FileName is the ledger's basename under the ferret data dir.
 const FileName = "labels.jsonl"

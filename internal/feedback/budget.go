@@ -1,15 +1,15 @@
 package feedback
 
 import (
-	"bufio"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"time"
+
+	"github.com/dkoosis/ferret/internal/durable"
 )
 
 // The feedback tap must never nag. Two caps and a latch bound how often it
@@ -32,19 +32,9 @@ const dateLayout = "2006-01-02"
 // forever — the budget is transient rate-limit scratch, not durable data.
 var stderr io.Writer = os.Stderr
 
-// syncDir fsyncs a directory so a publish rename is crash-durable (mirrors
-// internal/fixes' syncDir). Package var so a test can observe the write path
-// invokes it.
-var syncDir = func(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	if err := d.Sync(); err != nil {
-		return errors.Join(err, d.Close())
-	}
-	return d.Close()
-}
+// syncDir fsyncs a directory so a publish rename is crash-durable (see
+// durable.SyncDir). Package var so a test can observe the write path invokes it.
+var syncDir = durable.SyncDir
 
 // BudgetFileName is the shared budget state's basename under the ferret data dir.
 const BudgetFileName = "feedback-budget.json"
@@ -124,47 +114,16 @@ func loadState(path string) budgetState {
 	return st
 }
 
-// writeState publishes the budget atomically: write a temp file, fsync it,
-// rename over the target, then fsync the parent dir so the rename is
-// crash-durable (mirrors internal/fixes' writeSubs). An atomic rewrite, not an
-// append, because the budget is read-modify-write state, not a log.
+// writeState publishes the budget atomically: durable.WriteTempRename writes a
+// unique temp, fsyncs it, and renames it over the target; syncDir then fsyncs the
+// parent dir so the rename is crash-durable. An atomic rewrite, not an append,
+// because the budget is read-modify-write state, not a log.
 func writeState(path string, st budgetState) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	b, err := json.Marshal(st)
 	if err != nil {
 		return err
 	}
-	tmpName := tmp.Name()
-	bw := bufio.NewWriter(tmp)
-	b, merr := json.Marshal(st)
-	if merr != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return merr
-	}
-	if _, werr := bw.Write(b); werr != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return werr
-	}
-	if err := bw.Flush(); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(tmpName)
+	if err := durable.WriteTempRename(path, b); err != nil {
 		return err
 	}
 	return syncDir(filepath.Dir(path))

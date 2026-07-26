@@ -1,7 +1,6 @@
 package fixes
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/dkoosis/ferret/internal/durable"
 )
 
 // SubFileName is the substitution ledger's basename under the ferret data dir.
@@ -159,45 +160,16 @@ func RecordSub(path string, in Substitution, now time.Time) (Substitution, bool,
 // file in the same dir, fsync, then rename over the target. A rewrite (not an
 // append) is required because a dedup bump mutates an existing row.
 func writeSubs(path string, subs []Substitution) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	bw := bufio.NewWriter(tmp)
+	var buf []byte
 	for i := range subs {
-		b, merr := json.Marshal(subs[i])
-		if merr != nil {
-			_ = tmp.Close()
-			_ = os.Remove(tmpName)
-			return merr
+		b, err := json.Marshal(subs[i])
+		if err != nil {
+			return err
 		}
-		b = append(b, '\n')
-		if _, werr := bw.Write(b); werr != nil {
-			_ = tmp.Close()
-			_ = os.Remove(tmpName)
-			return werr
-		}
+		buf = append(buf, b...)
+		buf = append(buf, '\n')
 	}
-	if err := bw.Flush(); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(tmpName)
+	if err := durable.WriteTempRename(path, buf); err != nil {
 		return err
 	}
 	// fsync the parent dir so the publish rename is crash-durable — os.Rename

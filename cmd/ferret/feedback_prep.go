@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/dkoosis/ferret/internal/durable"
 	"github.com/dkoosis/ferret/internal/feedback"
 	"github.com/dkoosis/ferret/internal/retrievalevent"
 )
@@ -181,42 +182,15 @@ func loadCursor(path string) cursorState {
 // Stop hooks CAN overlap) is the caller's job — cmdFeedbackPrep holds a
 // per-session flock across the whole load→scan→save cycle.
 func saveCursor(path string, st cursorState) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	b, err := json.Marshal(st)
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
-	if err != nil {
+	if err := durable.WriteTempRename(path, b); err != nil {
 		return err
 	}
-	tmpName := tmp.Name()
-	if _, werr := tmp.Write(b); werr != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return werr
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(tmpName)
-		return err
-	}
-	d, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	return d.Sync()
+	// fsync the parent dir so the rename itself is crash-durable.
+	return durable.SyncDir(filepath.Dir(path))
 }
 
 // scanNewLines reads path from byte offset to EOF, decoding each complete
