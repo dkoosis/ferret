@@ -114,11 +114,11 @@ func (m Moment) phrase() string {
 // the stable key the pending-ask state carries so the answer joins back to the
 // right moment.
 type AskCandidate struct {
-	TargetRef string
-	SegmentID string
-	TS        string
-	Question  string
-	Reason    string
+	TargetRef string `json:"target_ref"`
+	SegmentID string `json:"segment_id"`
+	TS        string `json:"ts"`
+	Question  string `json:"question"`
+	Reason    string `json:"reason"`
 }
 
 // Select decides whether a single (helped record, recalltrace fit) pair is worth

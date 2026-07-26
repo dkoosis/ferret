@@ -51,6 +51,22 @@ func TestSearchFit(t *testing.T) {
 			grades:   map[string]int{"n2": 2}, // n1 ungraded, n2 relevant
 			wantFit:  FitServed, wantOK: true,
 		},
+		{
+			// ferret-3v7: a below-threshold subset with a returned nug still
+			// ungraded (404'd on fetch) can't soundly claim mismatch — the missing
+			// one may have been the relevant hit. Must be unknown, not a false
+			// disagreement that spends the ask budget.
+			name:     "below-threshold subset with an ungraded returned nug → unknown, not mismatch",
+			returned: []string{"n1", "n2"},
+			grades:   map[string]int{"n1": 1}, // n2 ungraded, n1 marginal
+			wantFit:  FitUnknown, wantOK: false,
+		},
+		{
+			name:     "all returned graded and all below threshold → mismatch (nothing missing)",
+			returned: []string{"n1", "n2"},
+			grades:   map[string]int{"n1": 1, "n2": 0},
+			wantFit:  FitMismatch, wantOK: true,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

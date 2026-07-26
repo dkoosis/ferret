@@ -300,6 +300,27 @@ var CLI struct {
 		Timeout    time.Duration `help:"Operator deadline for the analyst call across all retries (0 = SDK defaults)." default:"5m" name:"timeout"`
 	} `cmd:"" name:"over-initiative" help:"LLM judge of the NO-PUSHBACK over-initiative case: episodes where the agent took a mutating action beyond an advice/review-scoped prompt and the human let it stand (the case the deterministic floor can't read). Precision layer; dk validates. (bbp.18)"`
 
+	Feedback struct {
+		Prep struct {
+			Session string `help:"Session ID prefix (required)." required:"" name:"session"`
+			Data    string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
+			Events  string `help:"Retrieval-live events directory (default ~/.trixi/telemetry; the newest retrieval-live-YYYY-MM.jsonl in it is tailed)." name:"events"`
+		} `cmd:"" help:"Pure, network-free: tail the live retrieval-event feed for the oldest settled kind:search row this session hasn't judged yet. Prints {\"pending\":bool,\"search_event_id\":...,\"nug_ids\":[...]}."`
+		Judge struct {
+			Session     string        `help:"Session ID prefix (required)." required:"" name:"session"`
+			Root        string        `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
+			Data        string        `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
+			Events      string        `help:"Retrieval-live events directory (default ~/.trixi/telemetry)." name:"events"`
+			SearchEvent string        `help:"The kind:search event id to judge (from 'feedback prep')." required:"" name:"search-event"`
+			Model       string        `help:"Claude model ID (default: claude-sonnet-4-6)." name:"model"`
+			Timeout     time.Duration `help:"Operator deadline for the analyst call across all retries (0 = SDK defaults)." default:"2m" name:"timeout"`
+		} `cmd:"" help:"Re-derive the deterministic helped verdict for one search event, run analyst.RunRelevance over its returned nugs' bodies ([{id,text}] on stdin), and bank an AskCandidate on disagreement (feedback.Select). No-ops silently when the lattice has no record or SearchFit can't classify."`
+		Check struct {
+			Session string `help:"Session ID prefix (required)." required:"" name:"session"`
+			Data    string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
+		} `cmd:"" help:"UserPromptSubmit side: read the banked AskCandidate (if any), check feedback.Reserve's budget, print {\"ask\":bool,\"question\":string}. One-shot: clears the bank file either way."`
+	} `cmd:"" help:"In-session feedback tap live-wiring (ferret-wf9.1): prep (tail+settle) -> judge (RunRelevance+Select) -> check (budget+inject). See .claude/hooks/feedback-*.sh."`
+
 	Fixes struct {
 		Add struct {
 			Data        string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
@@ -395,6 +416,9 @@ func main() {
 				"  ferret retrieval  [--session PREFIX] [--format text|json]   (get_nug search quality: RU + Q/R/C)\n"+
 				"  ferret quality    [--session PREFIX] [--format text|json]   (per-task axes; corpus pass^k consistency)\n"+
 				"  ferret adjudicate  --session PREFIX [--model ID] [--emit-prompt] [--propose] [--top 10] [--format text|json]\n"+
+				"  ferret feedback prep  --session PREFIX   (tail the live retrieval feed for a settled kind:search event)\n"+
+				"  ferret feedback judge --session PREFIX --search-event ID   ([{id,text}] candidates on stdin)\n"+
+				"  ferret feedback check --session PREFIX   (UserPromptSubmit side: budget-check + read the banked ask)\n"+
 				"  ferret fixes add  --motif \"Edit!,Read\" --fix \"hookify read-before-edit\" [--note ...]\n"+
 				"  ferret fixes list [--format json]\n"+
 				"  ferret reach    [--since Y-M-D] [--until Y-M-D] [--project SUBSTR] [--format text|json|md]   (recall-opportunity reach-rate)\n"+
@@ -452,6 +476,12 @@ func main() {
 		err = cmdAdjudicate()
 	case "over-initiative":
 		err = cmdOverInitiative()
+	case "feedback prep":
+		err = cmdFeedbackPrep()
+	case "feedback judge":
+		err = cmdFeedbackJudge()
+	case "feedback check":
+		err = cmdFeedbackCheck()
 	case "fixes add":
 		err = cmdFixesAdd()
 	case "fixes list":

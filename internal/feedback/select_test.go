@@ -1,11 +1,42 @@
 package feedback
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/dkoosis/ferret/internal/score"
 )
+
+// TestAskCandidateJSONTags: the bank persists AskCandidate as JSON (bank.go) —
+// a marshal/unmarshal roundtrip must preserve every field, which requires each
+// one to carry a json tag (they were untagged before this bead's first
+// serializing caller).
+func TestAskCandidateJSONTags(t *testing.T) {
+	want := AskCandidate{
+		TargetRef: "evt-1",
+		SegmentID: "seg-1",
+		TS:        "2026-07-25T15:00:00Z",
+		Question:  "did it help? [y/n]",
+		Reason:    "lattice=helped but returned nugs graded irrelevant",
+	}
+	b, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var got AskCandidate
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got != want {
+		t.Errorf("roundtrip = %+v, want %+v", got, want)
+	}
+	for _, field := range []string{"target_ref", "segment_id", "ts", "question", "reason"} {
+		if !strings.Contains(string(b), `"`+field+`"`) {
+			t.Errorf("marshaled JSON missing tagged field %q: %s", field, b)
+		}
+	}
+}
 
 // TestDisagree pins the ratified trigger table: an ask fires ONLY when the
 // behavioral lattice and the content judge make opposite helpfulness claims.
