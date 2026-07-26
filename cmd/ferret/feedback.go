@@ -84,16 +84,6 @@ func resolveFeedbackEventsPath(dir string) (string, error) {
 	return resolveRetrievalEventsPath(d)
 }
 
-// resolveFeedbackDataDir mirrors fromCommonFlags' ~/.ferret default handling
-// for the feedback subcommands, which take a bare --data string flag rather
-// than embedding CommonFlags (they share none of its --format/--limit surface).
-func resolveFeedbackDataDir(data string) (string, error) {
-	if data == "" || data == "~/.ferret" {
-		return defaultData()
-	}
-	return data, nil
-}
-
 // cursorPath returns the per-session retrieval-tail cursor file path under a
 // ferret data dir. Session-scoped like pendingBankPath (unlike the shared
 // BudgetPath): each session tails the live feed independently.

@@ -12,6 +12,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -79,7 +80,7 @@ func cmdFeedbackPrep() error {
 	if strings.TrimSpace(cmd.Session) == "" {
 		return errFeedbackSessionRequired
 	}
-	data, err := resolveFeedbackDataDir(cmd.Data)
+	data, err := resolveData(cmd.Data)
 	if err != nil {
 		return err
 	}
@@ -202,25 +203,44 @@ func scanNewLines(path string, offset int64) (found []scannedEvent, newOffset in
 		if rerr != nil && rerr != io.EOF {
 			return found, pos, rerr
 		}
-		if rerr == io.EOF && len(line) > 0 && line[len(line)-1] != '\n' {
-			break // torn line: producer hasn't finished this append yet
+		if isTornLine(line, rerr) {
+			break // producer hasn't finished this append yet
 		}
 		lineStart := pos
 		pos += int64(len(line))
-		trimmed := bytes.TrimSpace(line)
-		if len(trimmed) > 0 {
-			var e retrievalevent.Event
-			if uerr := json.Unmarshal(trimmed, &e); uerr != nil || e.SchemaVersion != retrievalevent.SchemaVersion {
-				fmt.Fprintf(os.Stderr, "feedback: %s: skipping unparseable/mismatched-schema line at offset %d\n", path, lineStart)
-			} else {
-				found = append(found, scannedEvent{event: e, offset: lineStart})
-			}
+		if se, ok := decodeScanLine(path, line, lineStart); ok {
+			found = append(found, se)
 		}
 		if rerr == io.EOF {
 			break
 		}
 	}
 	return found, pos, nil
+}
+
+// isTornLine reports whether a ReadBytes('\n') result is an incomplete final
+// read: EOF reached with bytes present but no trailing newline — the producer
+// is still mid-append. scanNewLines leaves it unconsumed rather than risking
+// a torn decode.
+func isTornLine(line []byte, rerr error) bool {
+	return errors.Is(rerr, io.EOF) && len(line) > 0 && line[len(line)-1] != '\n'
+}
+
+// decodeScanLine trims and decodes one raw line into a scannedEvent. ok=false
+// for a blank line, or a decode/schema-version failure (logged to stderr) —
+// both cases are simply omitted from scanNewLines' result, never fatal (see
+// its doc comment: a live tail must not wedge on one bad row).
+func decodeScanLine(path string, line []byte, lineStart int64) (scannedEvent, bool) {
+	trimmed := bytes.TrimSpace(line)
+	if len(trimmed) == 0 {
+		return scannedEvent{}, false
+	}
+	var e retrievalevent.Event
+	if err := json.Unmarshal(trimmed, &e); err != nil || e.SchemaVersion != retrievalevent.SchemaVersion {
+		fmt.Fprintf(os.Stderr, "feedback: %s: skipping unparseable/mismatched-schema line at offset %d\n", path, lineStart)
+		return scannedEvent{}, false
+	}
+	return scannedEvent{event: e, offset: lineStart}, true
 }
 
 // prepScan is feedback prep's pure core: given loaded cursor state and the
@@ -233,8 +253,9 @@ func scanNewLines(path string, offset int64) (found []scannedEvent, newOffset in
 func prepScan(session string, cur cursorState, found []scannedEvent, waitThreshold int) (prepResult, cursorState) {
 	next := cursorState{File: cur.File, Pending: copyPending(cur.Pending)}
 
-	for _, se := range found {
-		e := se.event
+	for i := range found {
+		se := &found[i]
+		e := &se.event
 		if e.Kind != retrievalevent.KindSearch || e.SessionID != session || len(e.Returned) == 0 {
 			continue
 		}
@@ -245,8 +266,8 @@ func prepScan(session string, cur cursorState, found []scannedEvent, waitThresho
 			next.Pending = map[string]*pendingSearch{}
 		}
 		ids := make([]string, len(e.Returned))
-		for i, r := range e.Returned {
-			ids[i] = r.NugID
+		for j, r := range e.Returned {
+			ids[j] = r.NugID
 		}
 		next.Pending[e.EventID] = &pendingSearch{
 			NugIDs:          ids,

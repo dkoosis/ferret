@@ -37,7 +37,7 @@ func cmdFeedbackCheck() error {
 	if strings.TrimSpace(cmd.Session) == "" {
 		return errFeedbackSessionRequired
 	}
-	data, err := resolveFeedbackDataDir(cmd.Data)
+	data, err := resolveData(cmd.Data)
 	if err != nil {
 		return err
 	}

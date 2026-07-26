@@ -48,6 +48,53 @@ type judgeResult struct {
 	Ask   feedback.AskCandidate
 }
 
+// judgeSessionInputs bundles cmdFeedbackJudge's resolved session-side inputs
+// (everything runFeedbackJudge needs except the candidates and the seams) —
+// split out so cmdFeedbackJudge itself stays a short flag→call wire-up.
+type judgeSessionInputs struct {
+	res    score.Result
+	events []retrievalevent.Event
+	turns  []userTurn
+}
+
+// resolveFeedbackJudgeInputs segments the session transcript and loads the
+// retrieval-event feed — the same segment+events resolution cmdHelped does,
+// scoped to one judge invocation.
+func resolveFeedbackJudgeInputs(root, session, eventsFile string) (judgeSessionInputs, error) {
+	src, _, err := resolveSpineSource(root, session)
+	if err != nil {
+		return judgeSessionInputs{}, err
+	}
+	res, err := score.SegmentSource(src)
+	if err != nil {
+		return judgeSessionInputs{}, err
+	}
+	turns, err := sessionUserTurns(src.Path)
+	if err != nil {
+		return judgeSessionInputs{}, err
+	}
+	events, err := retrievalevent.ReadEvents(eventsFile)
+	if err != nil {
+		return judgeSessionInputs{}, err
+	}
+	return judgeSessionInputs{res: res, events: events, turns: turns}, nil
+}
+
+// readStdinCandidates decodes the [{"id":"...","text":"..."}] candidate
+// bodies the Stop-hook bash script assembled (via `trixi get`) and piped on
+// stdin.
+func readStdinCandidates() ([]analyst.NugCandidate, error) {
+	var raw []nugCandidateInput
+	if err := json.NewDecoder(os.Stdin).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("feedback judge: decoding stdin candidates: %w", err)
+	}
+	cands := make([]analyst.NugCandidate, len(raw))
+	for i, c := range raw {
+		cands[i] = analyst.NugCandidate{ID: c.ID, Text: c.Text}
+	}
+	return cands, nil
+}
+
 // cmdFeedbackJudge wires the kong CLI flags to runFeedbackJudge: segments the
 // session, reads the retrieval-event feed and the stdin candidate bodies, and
 // — on a disagreement — writes the pending bank file.
@@ -63,7 +110,7 @@ func cmdFeedbackJudge() error {
 	if err != nil {
 		return err
 	}
-	data, err := resolveFeedbackDataDir(cmd.Data)
+	data, err := resolveData(cmd.Data)
 	if err != nil {
 		return err
 	}
@@ -71,31 +118,13 @@ func cmdFeedbackJudge() error {
 	if err != nil {
 		return err
 	}
-
-	src, _, err := resolveSpineSource(root, cmd.Session)
+	in, err := resolveFeedbackJudgeInputs(root, cmd.Session, eventsFile)
 	if err != nil {
 		return err
 	}
-	res, err := score.SegmentSource(src)
+	cands, err := readStdinCandidates()
 	if err != nil {
 		return err
-	}
-	turns, err := sessionUserTurns(src.Path)
-	if err != nil {
-		return err
-	}
-	events, err := retrievalevent.ReadEvents(eventsFile)
-	if err != nil {
-		return err
-	}
-
-	var raw []nugCandidateInput
-	if err := json.NewDecoder(os.Stdin).Decode(&raw); err != nil {
-		return fmt.Errorf("feedback judge: decoding stdin candidates: %w", err)
-	}
-	cands := make([]analyst.NugCandidate, len(raw))
-	for i, c := range raw {
-		cands[i] = analyst.NugCandidate{ID: c.ID, Text: c.Text}
 	}
 
 	cfg := analyst.Config{Model: cmd.Model, Timeout: cmd.Timeout}
@@ -103,7 +132,7 @@ func cmdFeedbackJudge() error {
 	defer stop()
 	rng := rand.New(rand.NewSource(time.Now().UnixNano())) //nolint:gosec // shuffle blinding, not security
 
-	result, err := runFeedbackJudge(ctx, cfg, analystRunRelevance, rng, cmd.SearchEvent, res, events, turns, cands)
+	result, err := runFeedbackJudge(ctx, cfg, analystRunRelevance, rng, cmd.SearchEvent, in.res, in.events, in.turns, cands)
 	if err != nil {
 		return err
 	}

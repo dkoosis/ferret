@@ -11,6 +11,10 @@ import (
 	"github.com/dkoosis/ferret/internal/score"
 )
 
+// errJudgeBoom is a static sentinel for the faked judge failure (err113: no
+// dynamic errors), mirrors retrieval_hop1_test.go's errTestJudge.
+var errJudgeBoom = errors.New("boom")
+
 // judgeFixture builds a minimal, self-consistent scenario for
 // runFeedbackJudge: one segment spanning the search event's ts, the search
 // event itself (2 returned nugs), and a linked kind:read row (so the
@@ -48,7 +52,7 @@ func judgeFixture() (score.Result, []retrievalevent.Event) {
 	return res, []retrievalevent.Event{search, read}
 }
 
-func fixedRNG() *rand.Rand { return rand.New(rand.NewSource(42)) } //nolint:gosec // test determinism, not security
+func fixedRNG() *rand.Rand { return rand.New(rand.NewSource(42)) }
 
 // TestRunFeedbackJudge_DisagreementFires: lattice=helped (linked, no
 // repair-adjacency) but every returned nug grades below relevantThreshold
@@ -122,9 +126,8 @@ func TestRunFeedbackJudge_UnclassifiableNoOp(t *testing.T) {
 // surface as an error, write nothing, and not crash.
 func TestRunFeedbackJudge_JudgeErrorSurfaces(t *testing.T) {
 	res, events := judgeFixture()
-	boom := errors.New("boom")
 	fake := func(ctx context.Context, cfg analyst.Config, episode, prompt, query string, candidates []analyst.NugCandidate) (analyst.RelevanceResult, error) {
-		return analyst.RelevanceResult{}, boom
+		return analyst.RelevanceResult{}, errJudgeBoom
 	}
 	got, err := runFeedbackJudge(context.Background(), analyst.Config{}, fake, fixedRNG(),
 		"evt-1", res, events, nil, []analyst.NugCandidate{{ID: "n1", Text: "t1"}})
@@ -177,7 +180,7 @@ func TestRunFeedbackJudge_ShuffleIsDeterministicPerSeed(t *testing.T) {
 			return analyst.RelevanceResult{}, nil
 		}
 		_, err := runFeedbackJudge(context.Background(), analyst.Config{}, fake,
-			rand.New(rand.NewSource(seed)), "evt-1", res, events, nil, cands) //nolint:gosec
+			rand.New(rand.NewSource(seed)), "evt-1", res, events, nil, cands)
 		if err != nil {
 			t.Fatalf("runFeedbackJudge: %v", err)
 		}

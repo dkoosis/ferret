@@ -18,8 +18,8 @@ func writeJSONL(t *testing.T, path string, events ...retrievalevent.Event) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	for _, e := range events {
-		b, err := json.Marshal(e)
+	for i := range events {
+		b, err := json.Marshal(&events[i])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -122,7 +122,10 @@ func TestScanNewLinesSkipsUnparseableLine(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "events.jsonl")
 	good := searchEvent("evt-good", "s1", "n1")
-	goodB, _ := json.Marshal(good)
+	goodB, err := json.Marshal(good)
+	if err != nil {
+		t.Fatal(err)
+	}
 	content := "not json at all\n" + string(goodB) + "\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
