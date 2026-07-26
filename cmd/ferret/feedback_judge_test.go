@@ -278,15 +278,25 @@ func TestReadEventsTolerantSkipsSchemaMismatch(t *testing.T) {
 }
 
 // TestReadEventsTolerantSharesTornLineHandlingWithScanNewLines: a trailing
-// line with no newline (the producer still mid-write — a realistic race,
-// since the retrieval-live file is shared and actively appended across every
-// concurrent session) must be silently withheld, exactly like scanNewLines'
-// live-tail contract — NOT parsed-and-rejected as if it were bad data. This
-// pins the S1 self-review finding: readEventsTolerant now reuses scanNewLines
-// directly rather than a parallel bufio.Scanner reimplementation, which
-// treated a torn final line as a complete (and then unparseable) token —
-// a silent divergence that would have logged an ordinary write race as if it
-// were corrupt/mismatched-schema data.
+// line that is otherwise COMPLETE, VALID JSON but has no terminating
+// newline — the producer flushed the bytes but hasn't written the newline
+// yet, a realistic race since the retrieval-live file is shared and actively
+// appended across every concurrent session — must be silently withheld,
+// exactly like scanNewLines' live-tail contract, NOT parsed (successfully!)
+// and counted.
+//
+// The line must be independently well-formed JSON for this test to mean
+// anything: a torn line that's ALSO malformed JSON (e.g. missing its closing
+// brace) would be dropped by both the old buggy bufio.Scanner
+// implementation (parsed, failed to unmarshal, logged+skipped) and the fixed
+// scanNewLines-sharing one (withheld before ever attempting to parse) —
+// giving the same event count either way and proving nothing (caught by
+// convergence-check review: the first version of this test used exactly
+// such a line and passed against both implementations). With a
+// torn-but-well-formed line, the two genuinely diverge: the old Scanner
+// version would successfully unmarshal it and COUNT it (2 events); the fixed
+// version withholds it unconditionally because it has no trailing newline,
+// regardless of validity (1 event). That divergence is what this test pins.
 func TestReadEventsTolerantSharesTornLineHandlingWithScanNewLines(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "events.jsonl")
@@ -295,7 +305,13 @@ func TestReadEventsTolerantSharesTornLineHandlingWithScanNewLines(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	content := string(good) + "\n" + `{"schema_version":1,"kind":"search","event_id":"evt-torn","session_id":"s1"` // no closing brace, no trailing newline
+	torn, err := json.Marshal(searchEvent("evt-torn", "s1", "n2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// good+newline, then torn WITHOUT a trailing newline — torn is complete,
+	// parseable JSON on its own; only the missing newline marks it as torn.
+	content := string(good) + "\n" + string(torn)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -305,6 +321,6 @@ func TestReadEventsTolerantSharesTornLineHandlingWithScanNewLines(t *testing.T) 
 		t.Fatalf("readEventsTolerant: %v", err)
 	}
 	if len(events) != 1 || events[0].EventID != "evt-good" {
-		t.Fatalf("readEventsTolerant = %+v, want exactly evt-good (the torn trailing line withheld, not parsed-and-rejected)", events)
+		t.Fatalf("readEventsTolerant = %+v, want exactly evt-good (evt-torn is valid JSON but has no trailing newline, so it must be withheld as still-mid-write, not parsed-and-counted)", events)
 	}
 }
