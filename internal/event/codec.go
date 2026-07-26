@@ -231,7 +231,7 @@ func readLine(r *bufio.Reader) (line []byte, ok, delimited bool, err error) {
 	if readErr != nil && !errors.Is(readErr, io.EOF) {
 		return nil, false, false, readErr
 	}
-	if bytes.HasSuffix(b, []byte("\n")) {
+	if len(b) > 0 && b[len(b)-1] == '\n' {
 		return b[:len(b)-1], true, true, nil
 	}
 	// readErr == io.EOF with no trailing '\n': the file ended mid-line.
