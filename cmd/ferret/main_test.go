@@ -3,8 +3,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,64 +10,7 @@ import (
 	"time"
 
 	"github.com/dkoosis/ferret/internal/event"
-	"github.com/dkoosis/ferret/internal/fixes"
-	"github.com/dkoosis/ferret/internal/mine"
 )
-
-// fixtureScores builds n lo→hi sorted StreamScores with distinct stream keys,
-// mimicking ScoreSurprise's output so splitSurprise can be tested without a
-// disk corpus.
-func fixtureScores(n int) []mine.StreamScore {
-	out := make([]mine.StreamScore, n)
-	for i := range out {
-		out[i] = mine.StreamScore{
-			Stream: fmt.Sprintf("sess-%02d", i),
-			Toks:   10 + i,
-			Bits:   float64(i), // already sorted low→high
-		}
-	}
-	return out
-}
-
-// TestSplitSurpriseNoOverlap guards ferret-045: cmdSurprise split the lo→hi
-// score stream into "most routine" (front) and "most surprising" (back)
-// sections with two independent slices that overlapped on small corpora —
-// when len(scores) <= limit the same streams rendered in BOTH sections. The
-// partition must keep the sections disjoint at every corpus size, and both the
-// text and JSON output paths consume the same split so they stay in parity.
-func TestSplitSurpriseNoOverlap(t *testing.T) {
-	const limit = 20 // cmdSurprise's default; half = 10
-	for _, n := range []int{0, 1, 2, 3, 5, 9, 10, 11, 15, 19, 20, 21, 40} {
-		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
-			scores := fixtureScores(n)
-			routine, thrash := splitSurprise(scores, limit)
-
-			// No stream may appear in both sections (the bug).
-			seen := map[string]bool{}
-			for _, s := range routine {
-				seen[s.Stream] = true
-			}
-			for _, s := range thrash {
-				if seen[s.Stream] {
-					t.Errorf("n=%d: stream %q listed in both routine and thrash", n, s.Stream)
-				}
-			}
-
-			// Each section is capped at limit/2.
-			if half := limit / 2; len(routine) > half || len(thrash) > half {
-				t.Errorf("n=%d: section over cap: routine=%d thrash=%d half=%d",
-					n, len(routine), len(thrash), half)
-			}
-
-			// routine holds the lowest-bits streams, thrash the highest.
-			if len(routine) > 0 && len(thrash) > 0 {
-				if routine[0].Bits > thrash[0].Bits {
-					t.Errorf("n=%d: routine should hold lower bits than thrash", n)
-				}
-			}
-		})
-	}
-}
 
 // TestManifestComplete guards the ensureData completeness gate: a bare
 // os.Stat is not enough. A 0-byte manifest (interrupted ingest) or a
@@ -207,74 +148,6 @@ func TestCorpusStale(t *testing.T) {
 	}
 }
 
-func TestMermaidLabelEscaping(t *testing.T) {
-	for in, want := range map[string]string{
-		`Grep:"foo"`:    "Grep:#quot;foo#quot;",
-		"Read:a[0].go":  "Read:a#91;0#93;.go",
-		"sh:awk {p}":    "sh:awk #123;p#125;",
-		"sh:git_status": "sh:git_status",
-	} {
-		if got := mermaidLabel(in); got != want {
-			t.Errorf("mermaidLabel(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-// TestWriteGraphSankey guards ferret-567.1: the sankey emitter must render
-// mermaid sankey-beta syntax (a "sankey-beta" header, blank line, then
-// "source,target,count" rows in edge order) with weights carrying the raw
-// transition counts, and fields containing a comma CSV-quoted so a labeled
-// token (e.g. an exact-lens target) can't corrupt the column count.
-func TestWriteGraphSankey(t *testing.T) {
-	corpus := &mine.Corpus{Vocab: []string{"Read", "Edit", "Bash(git status, diff)"}}
-	edges := []mine.Edge{
-		{From: 0, To: 1, Count: 5},
-		{From: 1, To: 2, Count: 3},
-		{From: 0, To: 2, Count: 1},
-	}
-
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := writeGraph(w, "sankey", corpus, edges); err != nil {
-		t.Fatalf("writeGraph(sankey): %v", err)
-	}
-	_ = w.Close()
-	gotBytes, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = r.Close()
-
-	want := "sankey-beta\n\n" +
-		"Read,Edit,5\n" +
-		`Edit,"Bash(git status, diff)",3` + "\n" +
-		`Read,"Bash(git status, diff)",1` + "\n"
-	if got := string(gotBytes); got != want {
-		t.Errorf("writeGraph(sankey) =\n%q\nwant\n%q", got, want)
-	}
-}
-
-// TestSankeyFieldEscaping guards the CSV-quoting rule sankeyField applies:
-// a value containing a comma or a double quote must be wrapped in quotes
-// with embedded quotes doubled, matching RFC 4180 — otherwise a comma in a
-// token label would silently add a phantom sankey column.
-func TestSankeyFieldEscaping(t *testing.T) {
-	for in, want := range map[string]string{
-		"Read":                  "Read",
-		"Bash(a, b)":            `"Bash(a, b)"`,
-		`Grep:"foo"`:            `"Grep:""foo"""`,
-		"sh:git status && diff": "sh:git status && diff",
-		"echo a\rb":             "\"echo a\rb\"", // bare CR is a CSV record boundary — must quote
-		"line\nbreak":           "\"line\nbreak\"",
-	} {
-		if got := sankeyField(in); got != want {
-			t.Errorf("sankeyField(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestValidateFormat(t *testing.T) {
 	c := &common{format: "josn"}
 	if err := c.validate("text", "json"); err == nil {
@@ -311,60 +184,6 @@ func TestDefaultPathsSurfaceHomeError(t *testing.T) {
 	}
 	if got, err := defaultRoot(); err == nil {
 		t.Errorf("defaultRoot must surface UserHomeDir error, got path %q, nil err", got)
-	}
-}
-
-// TestSinceFixAnnotation guards the report --since-fixes join: a finding whose
-// motif is in the ledger gets a "[fixed DATE burn BASE→NOW ↓]" suffix, the
-// arrow reflects the burn direction, an unmatched motif gets nothing, and a nil
-// index (flag off) is a safe no-op. The join is keyed on the comma-joined motif
-// — the stable sort key — so it survives across ingests.
-func TestSinceFixAnnotation(t *testing.T) {
-	at := time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC)
-	idx := fixes.Index([]fixes.Entry{
-		{Motif: "Edit!,Read", Fix: "hookify read-before-edit", AddedAt: at, BaselineBurn: 253000},
-	})
-
-	// Matched motif, burn fell → ↓ with compacted before→after figures.
-	got, ok := sinceFixAnnotation(idx, []string{"Edit!", "Read"}, 11000)
-	if !ok {
-		t.Fatal("expected a match for a ledgered motif")
-	}
-	for _, want := range []string{"fixed 2026-06-12", "253k", "11k", "↓"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("annotation %q missing %q", got, want)
-		}
-	}
-
-	// Matched motif, burn rose → ↑ (regression).
-	if up, _ := sinceFixAnnotation(idx, []string{"Edit!", "Read"}, 300000); !strings.Contains(up, "↑") {
-		t.Errorf("rising burn must read ↑, got %q", up)
-	}
-
-	// Unmatched motif → no annotation.
-	if _, ok := sinceFixAnnotation(idx, []string{"Grep", "Read"}, 9000); ok {
-		t.Error("unledgered motif must not annotate")
-	}
-
-	// Nil index (flag off) → safe no-op.
-	if _, ok := sinceFixAnnotation(nil, []string{"Edit!", "Read"}, 11000); ok {
-		t.Error("nil index must not annotate")
-	}
-}
-
-// TestCompactBurn: inline annotations show a glance-readable magnitude — sub-1k
-// verbatim, ≥1k as a k-suffixed integer.
-func TestCompactBurn(t *testing.T) {
-	for in, want := range map[int]string{
-		0:      "0",
-		999:    "999",
-		1000:   "1k",
-		11500:  "11k",
-		253000: "253k",
-	} {
-		if got := compactBurn(in); got != want {
-			t.Errorf("compactBurn(%d) = %q, want %q", in, got, want)
-		}
 	}
 }
 

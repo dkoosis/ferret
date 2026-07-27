@@ -181,14 +181,21 @@ linters:
       - linters:
           - unparam
         path: _test\.go
-      # cmd main.go: relax complexity
+      # cmd main.go + its extracted per-command files (ferret-3yt split): relax complexity
       - linters:
           - cyclop
           - funlen
           - gocognit
           - gocyclo
           - nestif
-        path: cmd/.*/main\.go
+        path: cmd/ferret/(main|ingest|summary|ngrams|seqs|rank|report|fixes_add|fixes_list|fixes_sub|fixes_subs|surprise|graph|tokens)\.go
+      - linters:
+          - cyclop
+          - funlen
+          - gocognit
+          - gocyclo
+          - nestif
+        path: cmd/gen-corpus/main\.go
       - linters:
           - gocritic
         path: cmd/.*/main\.go
