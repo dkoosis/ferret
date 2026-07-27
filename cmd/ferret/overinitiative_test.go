@@ -1,10 +1,72 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/dkoosis/ferret/internal/analyst"
 )
+
+// errOverInitTestJudge is the static sentinel for the faked judge failure
+// (err113: no dynamic errors).
+var errOverInitTestJudge = errors.New("judge boom")
+
+// TestJudgeOverInitiativeFanOutPreservesOrder: the ferret-fk8 fan-out reports
+// Flagged findings in candidate order and takes Model from the first candidate,
+// regardless of judge completion order.
+func TestJudgeOverInitiativeFanOutPreservesOrder(t *testing.T) {
+	orig := runOverInitJudge
+	defer func() { runOverInitJudge = orig }()
+
+	cands := make([]overInitCandidate, 12)
+	for i := range cands {
+		cands[i] = overInitCandidate{Prompt: fmt.Sprintf("prompt-%02d", i)}
+	}
+	runOverInitJudge = func(_ context.Context, _ analyst.Config, prompt string, _ []analyst.AgentAction) (analyst.OverInitiativeVerdict, string, error) {
+		return analyst.OverInitiativeVerdict{OverInitiative: true, Why: prompt}, "test-model", nil
+	}
+
+	res, err := judgeOverInitiative(context.Background(), analyst.Config{}, "s", cands, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Model != "test-model" {
+		t.Errorf("Model = %q, want test-model", res.Model)
+	}
+	if len(res.Flagged) != len(cands) {
+		t.Fatalf("want %d flagged, got %d", len(cands), len(res.Flagged))
+	}
+	for i, f := range res.Flagged {
+		if want := fmt.Sprintf("prompt-%02d", i); !strings.HasPrefix(f.Why, want) {
+			t.Fatalf("Flagged[%d].Why = %q, want prefix %q (order must be preserved)", i, f.Why, want)
+		}
+	}
+}
+
+// TestJudgeOverInitiativeFailFast: one judge error fails the whole pass — a
+// half-scored batch would read as a false baseline.
+func TestJudgeOverInitiativeFailFast(t *testing.T) {
+	orig := runOverInitJudge
+	defer func() { runOverInitJudge = orig }()
+
+	cands := []overInitCandidate{{Prompt: "a"}, {Prompt: "b"}, {Prompt: "c"}}
+	runOverInitJudge = func(_ context.Context, _ analyst.Config, prompt string, _ []analyst.AgentAction) (analyst.OverInitiativeVerdict, string, error) {
+		if prompt == "b" {
+			return analyst.OverInitiativeVerdict{}, "", errOverInitTestJudge
+		}
+		return analyst.OverInitiativeVerdict{}, "m", nil
+	}
+
+	_, err := judgeOverInitiative(context.Background(), analyst.Config{}, "s", cands, 0)
+	if !errors.Is(err, errOverInitTestJudge) {
+		t.Fatalf("err = %v, want wrapped errOverInitTestJudge", err)
+	}
+}
 
 func TestIsMutatingTool(t *testing.T) {
 	for _, name := range []string{"Write", "Edit", "MultiEdit", "NotebookEdit"} {
