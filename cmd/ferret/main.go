@@ -249,6 +249,10 @@ var CLI struct {
 		CommonFlags
 	} `cmd:"" help:"Mine review gates (code-review/plan-review/precommit/QA): per-gate rejection sets + overlap ratio ω (high ω = redundant gate) + confirmed friction loops."`
 
+	Burn BurnCmd `cmd:"" help:"Ranked corpus-wide output-byte burn per normalized command (the tune-up list)."`
+
+	Misfires MisfiresCmd `cmd:"" help:"Rank repeated command misfires + repair pairs corpus-wide."`
+
 	Retrieval struct {
 		CommonFlags
 		Session    string        `help:"Only episodes from sessions matching this prefix/substring (omit for whole corpus)." name:"session"`
@@ -411,6 +415,8 @@ func main() {
 				"  ferret conformance [--spec FILE] [--format text|json]   (reads stdin if no --spec)\n"+
 				"  ferret landmark  [--spec FILE | --session PREFIX [--root DIR]] [--data DIR] [--format text|json]   (milestone progress; spec reads stdin if no --spec)\n"+
 				"  ferret gates    [--data DIR] [--format text|json]   (overlap ratio ω over review-gate rejections)\n"+
+				"  ferret burn     [--data DIR] [--format text|json]   (ranked output-byte burn per normalized command)\n"+
+				"  ferret misfires [--data DIR] [--format text|json]   (repeated command failures + repair pairs)\n"+
 				"  ferret retrieval  [--session PREFIX] [--format text|json]   (get_nug search quality: RU + Q/R/C)\n"+
 				"  ferret quality    [--session PREFIX] [--format text|json]   (per-task axes; corpus pass^k consistency)\n"+
 				"  ferret adjudicate  --session PREFIX [--model ID] [--emit-prompt] [--propose] [--top 10] [--format text|json]\n"+
@@ -465,6 +471,10 @@ func main() {
 		err = cmdLandmark()
 	case "gates":
 		err = cmdGates()
+	case "burn":
+		err = cmdBurn(&CLI.Burn)
+	case "misfires":
+		err = cmdMisfires(CLI.Misfires)
 	case "retrieval":
 		err = cmdRetrieval()
 	case "quality":
