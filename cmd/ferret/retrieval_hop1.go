@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/dkoosis/ferret/internal/analyst"
 	"github.com/dkoosis/ferret/internal/out"
@@ -93,24 +94,63 @@ type hop1Judge func(ctx context.Context, cfg analyst.Config, episodeID string, e
 // runHop1Episodes judges every episode, continuing past a per-episode failure: a
 // transient single-episode error never discards the run's other judgments. anyErr
 // reports whether at least one episode failed (the caller's non-zero-exit signal).
+//
+// Judge calls fan out across an 8-wide semaphore (ferret-fk8, mirroring
+// judgeRecallRuns): each episode's row lands in its own slot of an index-aligned
+// slice, so concurrency cannot scramble output order. Unlike judgeRecallRuns
+// there is no fail-fast — a per-episode error fills that slot and the rest keep
+// judging, same as the prior sequential loop. Cancellation stops launching new
+// calls; episodes never launched produce no row.
 func runHop1Episodes(ctx context.Context, cfg analyst.Config, eps []score.Episode, judge hop1Judge) (rows []hop1Row, anyErr bool) {
-	rows = make([]hop1Row, 0, len(eps))
+	const maxConcurrency = 8
+
+	slots := make([]hop1Row, len(eps))
+	launched := make([]bool, len(eps))
+	failed := make([]bool, len(eps))
+
+	sem := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
 	for i := range eps {
 		if ctx.Err() != nil {
 			anyErr = true
 			break
 		}
-		ep := eps[i]
-		id := hop1EpisodeID(ep)
-		res, err := judge(ctx, cfg, id, ep)
-		if err != nil {
-			res.Episode = id
-			res.LLMCalled = true
-			rows = append(rows, hop1Row{Result: res, Err: err.Error()})
+		sem <- struct{}{}
+		// The semaphore send can block until after ctx is canceled — re-check so
+		// that race doesn't launch one extra paid call (same guard as
+		// judgeRecallRuns, from the Codex adversarial review of #95).
+		if ctx.Err() != nil {
+			<-sem
 			anyErr = true
+			break
+		}
+		launched[i] = true
+		ep := eps[i]
+		wg.Go(func() {
+			defer func() { <-sem }()
+			id := hop1EpisodeID(ep)
+			res, err := judge(ctx, cfg, id, ep)
+			if err != nil {
+				res.Episode = id
+				res.LLMCalled = true
+				slots[i] = hop1Row{Result: res, Err: err.Error()}
+				failed[i] = true
+				return
+			}
+			slots[i] = hop1Row{Result: res}
+		})
+	}
+	wg.Wait()
+
+	rows = make([]hop1Row, 0, len(eps))
+	for i := range slots {
+		if !launched[i] {
 			continue
 		}
-		rows = append(rows, hop1Row{Result: res})
+		if failed[i] {
+			anyErr = true
+		}
+		rows = append(rows, slots[i])
 	}
 	return rows, anyErr
 }

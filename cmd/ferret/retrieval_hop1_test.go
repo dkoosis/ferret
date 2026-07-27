@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/dkoosis/ferret/internal/analyst"
 	"github.com/dkoosis/ferret/internal/out"
@@ -16,6 +19,11 @@ import (
 // errTestJudge is a static sentinel for the faked per-episode judge failure
 // (err113: no dynamic errors).
 var errTestJudge = errors.New("boom")
+
+// errTestNoOverlap is a static sentinel for the concurrency-proof barrier
+// timing out — signals a serial regression instead of hanging to the
+// package-wide test timeout.
+var errTestNoOverlap = errors.New("fan-out did not overlap within deadline")
 
 // TestHop1EmitPromptAssemblesPerEpisode: the --emit-prompt path renders an
 // escalated episode's assembled judge prompt and a floored episode's one-line
@@ -169,5 +177,58 @@ func TestHop1LoopContinuesPastPerEpisodeError(t *testing.T) {
 	}
 	if rows[0].Result.Grade != analyst.Hop1High || rows[2].Result.Grade != analyst.Hop1High {
 		t.Errorf("surrounding episodes should be judged normally: %+v %+v", rows[0], rows[2])
+	}
+}
+
+// TestHop1FanOutPreservesOrderAndBoundsConcurrency: the ferret-fk8 fan-out judges
+// episodes concurrently (two judges rendezvous — a serial loop would deadlock the
+// barrier and time the test out), never exceeds the 8-wide semaphore, and emits
+// rows in episode order regardless of completion order.
+func TestHop1FanOutPreservesOrderAndBoundsConcurrency(t *testing.T) {
+	const n = 20
+	eps := make([]score.Episode, n)
+	for i := range eps {
+		eps[i] = score.Episode{Session: "s", RootSeq: i + 1, Prompt: "p", Query: "q"}
+	}
+
+	var inFlight, maxInFlight atomic.Int32
+	barrier := make(chan struct{})
+	var barrierOnce sync.Once
+	judge := func(_ context.Context, _ analyst.Config, id string, _ score.Episode) (analyst.Hop1Result, error) {
+		cur := inFlight.Add(1)
+		defer inFlight.Add(-1)
+		for {
+			old := maxInFlight.Load()
+			if cur <= old || maxInFlight.CompareAndSwap(old, cur) {
+				break
+			}
+		}
+		if cur >= 2 {
+			barrierOnce.Do(func() { close(barrier) })
+		}
+		// Wait for proof of overlap — times out fast (not a package-wide test
+		// timeout) if calls run serially.
+		select {
+		case <-barrier:
+		case <-time.After(10 * time.Second):
+			return analyst.Hop1Result{}, errTestNoOverlap
+		}
+		return analyst.Hop1Result{Episode: id, Grade: analyst.Hop1High, LLMCalled: true}, nil
+	}
+
+	rows, anyErr := runHop1Episodes(context.Background(), analyst.Config{}, eps, judge)
+	if anyErr {
+		t.Fatal("anyErr = true, want false")
+	}
+	if len(rows) != n {
+		t.Fatalf("want %d rows, got %d", n, len(rows))
+	}
+	for i, r := range rows {
+		if want := hop1EpisodeID(eps[i]); r.Result.Episode != want {
+			t.Fatalf("rows[%d].Episode = %q, want %q (order must be preserved)", i, r.Result.Episode, want)
+		}
+	}
+	if got := maxInFlight.Load(); got > 8 {
+		t.Errorf("max in-flight judges = %d, want <= 8", got)
 	}
 }

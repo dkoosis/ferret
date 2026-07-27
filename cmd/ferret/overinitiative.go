@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 
 	"github.com/dkoosis/ferret/internal/analyst"
 	"github.com/dkoosis/ferret/internal/dialogue"
@@ -310,26 +311,86 @@ func cmdOverInitiative() error {
 	return writeOverInitText(os.Stdout, res)
 }
 
+// runOverInitJudge is the per-candidate judge seam — analyst.RunOverInitiative in
+// production, a fake in tests so fan-out order/fail-fast are exercisable without
+// a live API (same shape as hop1Judge).
+var runOverInitJudge = analyst.RunOverInitiative
+
 // judgeOverInitiative runs the analyst over each no-pushback candidate and collects
 // the flagged verdicts (the actionable subset dk validates). A single episode error
 // fails the pass — a half-scored batch would read as a false baseline.
+//
+// Judge calls fan out across an 8-wide semaphore (ferret-fk8, mirroring
+// judgeRecallRuns): verdicts land in index-aligned slots and are collected in
+// candidate order, so concurrency changes neither Flagged order nor which
+// episode's model is reported. The first error cancels the shared context
+// (fail-fast, same as the sequential loop's abort) and is returned once every
+// in-flight call has drained.
 func judgeOverInitiative(ctx context.Context, cfg analyst.Config, session string, cands []overInitCandidate, decodeErrs int) (oiResult, error) {
+	const maxConcurrency = 8
+
+	type oiOutcome struct {
+		verdict analyst.OverInitiativeVerdict
+		model   string
+	}
+	outcomes := make([]oiOutcome, len(cands))
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	sem := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
+	var errOnce sync.Once
+	var firstErr error
+
+	for i, c := range cands {
+		if ctx.Err() != nil {
+			break
+		}
+		sem <- struct{}{}
+		// The semaphore send can block until after ctx is canceled — re-check so
+		// that race doesn't launch one extra paid call (same guard as
+		// judgeRecallRuns, from the Codex adversarial review of #95).
+		if ctx.Err() != nil {
+			<-sem
+			break
+		}
+		wg.Go(func() {
+			defer func() { <-sem }()
+			v, model, err := runOverInitJudge(ctx, cfg, truncateRunes(c.Prompt, overInitPromptCap), c.Actions)
+			if err != nil {
+				errOnce.Do(func() {
+					firstErr = fmt.Errorf("over-initiative episode: %w", err)
+					cancel()
+				})
+				return
+			}
+			outcomes[i] = oiOutcome{verdict: v, model: model}
+		})
+	}
+	wg.Wait()
+
+	if firstErr != nil {
+		return oiResult{}, firstErr
+	}
+	// A parent-context cancel (SIGINT) with no judge error must still fail the
+	// pass — the sequential loop surfaced it as the next call's error.
+	if err := ctx.Err(); err != nil {
+		return oiResult{}, fmt.Errorf("over-initiative episode: %w", err)
+	}
+
 	res := oiResult{Session: session, Episodes: len(cands), DecodeErrs: decodeErrs}
-	for _, c := range cands {
-		v, model, err := analyst.RunOverInitiative(ctx, cfg, truncateRunes(c.Prompt, overInitPromptCap), c.Actions)
-		if err != nil {
-			return oiResult{}, fmt.Errorf("over-initiative episode: %w", err)
-		}
+	for i, o := range outcomes {
 		if res.Model == "" {
-			res.Model = model
+			res.Model = o.model
 		}
-		if v.OverInitiative {
+		if o.verdict.OverInitiative {
 			res.Flagged = append(res.Flagged, oiFinding{
-				Prompt:     truncateRunes(c.Prompt, dialogueCap),
-				Actions:    actionLabels(c.Actions),
-				Scope:      v.Scope,
-				Why:        v.Why,
-				Confidence: v.Confidence,
+				Prompt:     truncateRunes(cands[i].Prompt, dialogueCap),
+				Actions:    actionLabels(cands[i].Actions),
+				Scope:      o.verdict.Scope,
+				Why:        o.verdict.Why,
+				Confidence: o.verdict.Confidence,
 			})
 		}
 	}
