@@ -20,7 +20,8 @@ type MDFinding struct {
 	Count    int      // total occurrences across the corpus
 	Sessions int      // distinct streams containing the motif
 	FailRate float64  // share of fail-marked member tokens (0..1)
-	Burn     int      // measured tokens of context the motif's occurrences cost
+	Burn     int      // measured tokens the motif's member calls cost (input + own result, all streams)
+	SideBurn int      // slice of Burn from subagent sidechain streams (≤ Burn)
 	Evidence string   // exemplar location, "sess@pos"
 
 	// Dialogue + hop signals (ferret-bbp.6), resolved to strings by main.go from
@@ -115,7 +116,7 @@ func Markdown(w io.Writer, lens string, total int, findings []MDFinding) error {
 // evidence block.
 func writeMDFinding(bw *bufio.Writer, f MDFinding) {
 	motif := strings.Join(f.Motif, " ⇝ ")
-	fmt.Fprintf(bw, "- **%s** — %s; fix: %s\n", motif, mdCostPhrase(f.Burn, f.Sessions), f.Action)
+	fmt.Fprintf(bw, "- **%s** — %s%s; fix: %s\n", motif, mdCostPhrase(f.Burn, f.Sessions), mdSideNote(f), f.Action)
 	fmt.Fprintln(bw, "  <details><summary>evidence</summary>")
 	fmt.Fprintln(bw)
 	fmt.Fprintf(bw, "  %d occurrences · %.0f%% fail · ex: %s\n", f.Count, f.FailRate*100, f.Evidence)
@@ -145,6 +146,18 @@ func mdDialogueNote(f MDFinding) string {
 		parts = append(parts, fmt.Sprintf("odds-ratio %.2f (n=%d)", *f.OddsRatio, f.OddsRatioN))
 	}
 	return strings.Join(parts, " · ")
+}
+
+// mdSideNote labels the burn's pool: the share drawn from subagent sidechain
+// streams, appended only when nonzero so main-only findings stay unchanged.
+// Without it an all-streams burn reads as main-session cost and misdirects the
+// fix (ferret-9j3: a 98%-sidechain motif sent an optimization at the main
+// session's reads).
+func mdSideNote(f MDFinding) string {
+	if f.Burn == 0 || f.SideBurn == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (%.0f%% subagent)", float64(f.SideBurn)/float64(f.Burn)*100)
 }
 
 // mdCostPhrase renders "~Nk tokens / ~$X across M sessions" — the
