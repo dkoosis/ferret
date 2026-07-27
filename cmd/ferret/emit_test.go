@@ -12,7 +12,45 @@ import (
 	candrec "github.com/dkoosis/ferret/internal/candidate"
 	"github.com/dkoosis/ferret/internal/event"
 	"github.com/dkoosis/ferret/internal/spool"
+	"github.com/dkoosis/ferret/internal/transcript"
 )
+
+// TestEmitCursor_MidRunGrowthNotSkipped is the regression for the cursor TOCTOU:
+// a transcript that grows AFTER changed() decides it is active but before the run
+// finishes must stay visibly changed for the next run. The cursor persists the
+// modtime OBSERVED at decision time (not a post-work re-stat), so a later growth
+// is still After() the stored value and re-activates the source. The pre-fix code
+// re-stat'd in mark() and stored the grown modtime, silently skipping the growth.
+func TestEmitCursor_MidRunGrowthNotSkipped(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sess1.jsonl")
+	if err := os.WriteFile(path, []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m0 := time.Date(2026, 7, 28, 4, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(path, m0, m0); err != nil {
+		t.Fatal(err)
+	}
+	sources := map[string]transcript.Source{"k": {Path: path, Session: "sess1"}}
+
+	cur := &emitCursor{Sources: map[string]string{}}
+	active, observed := cur.changed(sources)
+	if len(active) != 1 {
+		t.Fatalf("fresh cursor should mark the source active, got %d", len(active))
+	}
+
+	// Simulate the transcript growing DURING the run (after the changed() stat).
+	m1 := m0.Add(time.Hour)
+	if err := os.Chtimes(path, m1, m1); err != nil {
+		t.Fatal(err)
+	}
+	cur.mark(observed) // must store m0 (observed), not re-stat to m1
+
+	active2, _ := cur.changed(sources)
+	if len(active2) != 1 {
+		t.Errorf("mid-run growth was skipped: source not re-activated next run (stored=%q)", cur.Sources[path])
+	}
+}
 
 // emitFixture writes a small events.jsonl under data and a matching transcript
 // file under root, so transcript.Walk's source key aligns with the corpus stream

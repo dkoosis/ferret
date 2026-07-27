@@ -92,6 +92,31 @@ func TestAppend_Idempotent(t *testing.T) {
 	}
 }
 
+// TestAppend_ConcurrentDedup asserts the under-lock on-disk re-check: two writers
+// that both snapshotted the spool empty (the concurrent-process case) must not
+// both append the same id. The stale-snapshot writer's Append has to catch the
+// row the other wrote and skip — the in-memory seen-set alone would miss it.
+func TestAppend_ConcurrentDedup(t *testing.T) {
+	dir := t.TempDir()
+	at := time.Date(2026, 7, 28, 4, 0, 0, 0, time.UTC)
+	c := cand(t, "sess", 10, at)
+
+	w1 := mustWriter(t, dir) // both snapshot the (empty) spool before either writes
+	w2 := mustWriter(t, dir)
+
+	if wrote, err := w1.Append(c); err != nil || !wrote {
+		t.Fatalf("w1.Append: wrote=%v err=%v", wrote, err)
+	}
+	// w2's seen set is stale (empty); only the under-lock disk re-check can catch
+	// the duplicate.
+	if wrote, err := w2.Append(c); err != nil || wrote {
+		t.Errorf("stale-snapshot writer wrote a duplicate: wrote=%v err=%v", wrote, err)
+	}
+	if n := countRows(t, Path(dir, at)); n != 1 {
+		t.Errorf("row count = %d, want 1 (no concurrent duplicate)", n)
+	}
+}
+
 // TestAppend_RotationBoundary asserts candidates emitted in different months land
 // in different files, named by their own emitted_at month.
 func TestAppend_RotationBoundary(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -181,7 +182,7 @@ func runEmit(opts emitOpts) (emitResult, []candrec.Candidate, error) {
 	// (incremental). Dedup by candidate id is the correctness backstop; the cursor
 	// is the cost saver.
 	cur := loadEmitCursor(emitCursorPath(opts.data))
-	active := cur.changed(in.sources)
+	active, observed := cur.changed(in.sources)
 
 	cands := buildCandidates(in, active, opts.window, emitNow())
 	res := emitResult{Derived: len(cands), Sources: len(active), DryRun: opts.dryRun}
@@ -189,7 +190,7 @@ func runEmit(opts emitOpts) (emitResult, []candrec.Candidate, error) {
 	if opts.dryRun {
 		return dryRunResult(opts, cands, res)
 	}
-	if err := writeEmit(opts, in, cur, cands, &res); err != nil {
+	if err := writeEmit(opts, in, cur, observed, cands, &res); err != nil {
 		return emitResult{}, nil, err
 	}
 	return res, cands, nil
@@ -212,7 +213,7 @@ func dryRunResult(opts emitOpts, cands []candrec.Candidate, res emitResult) (emi
 
 // writeEmit appends the deduped candidate rows to the spool, persists the learned
 // friction registry, and advances the source cursor.
-func writeEmit(opts emitOpts, in *emitInputs, cur *emitCursor, cands []candrec.Candidate, res *emitResult) error {
+func writeEmit(opts emitOpts, in *emitInputs, cur *emitCursor, observed map[string]string, cands []candrec.Candidate, res *emitResult) error {
 	w, err := spool.NewWriter(spool.Dir(opts.data))
 	if err != nil {
 		return err
@@ -232,7 +233,7 @@ func writeEmit(opts emitOpts, in *emitInputs, cur *emitCursor, cands []candrec.C
 	}
 	res.Learned = learned
 
-	cur.mark(in.sources)
+	cur.mark(observed)
 	return saveEmitCursor(emitCursorPath(opts.data), cur)
 }
 
@@ -377,33 +378,38 @@ func loadEmitCursor(path string) *emitCursor {
 }
 
 // changed returns the subset of sources whose transcript is new or modified since
-// the cursor last saw it (or all of them on a fresh cursor).
-func (cur *emitCursor) changed(sources map[string]transcript.Source) map[string]transcript.Source {
-	out := make(map[string]transcript.Source, len(sources))
+// the cursor last saw it (or all of them on a fresh cursor), plus the modtime
+// OBSERVED for each active source at decision time. The caller persists that
+// observed value (see mark), NOT a fresh re-stat after the work — a transcript
+// that grows mid-run would otherwise get stamped with the newer modtime it was
+// never processed at, and the next run would skip the appended span. Stamping the
+// pre-processing modtime keeps that growth visible next run.
+func (cur *emitCursor) changed(sources map[string]transcript.Source) (active map[string]transcript.Source, observed map[string]string) {
+	active = make(map[string]transcript.Source, len(sources))
+	observed = make(map[string]string, len(sources))
 	for key, s := range sources {
 		fi, err := os.Stat(s.Path)
 		if err != nil {
 			continue // unreadable transcript — skip, don't emit a dangling pointer
 		}
+		mtime := fi.ModTime()
 		prev, ok := cur.Sources[s.Path]
 		if ok {
-			if t, perr := time.Parse(time.RFC3339Nano, prev); perr == nil && !fi.ModTime().After(t) {
+			if t, perr := time.Parse(time.RFC3339Nano, prev); perr == nil && !mtime.After(t) {
 				continue // unchanged since last run
 			}
 		}
-		out[key] = s
+		active[key] = s
+		observed[s.Path] = mtime.UTC().Format(time.RFC3339Nano)
 	}
-	return out
+	return active, observed
 }
 
-// mark records the current modtime for every source considered, so the next run
-// treats them as unchanged unless they grow again.
-func (cur *emitCursor) mark(sources map[string]transcript.Source) {
-	for _, s := range sources {
-		if fi, err := os.Stat(s.Path); err == nil {
-			cur.Sources[s.Path] = fi.ModTime().UTC().Format(time.RFC3339Nano)
-		}
-	}
+// mark advances the cursor to the modtimes OBSERVED at decision time (from
+// changed), so a transcript that grew while this run was working stays visibly
+// changed for the next run rather than being masked by a post-work re-stat.
+func (cur *emitCursor) mark(observed map[string]string) {
+	maps.Copy(cur.Sources, observed)
 }
 
 func saveEmitCursor(path string, cur *emitCursor) error {

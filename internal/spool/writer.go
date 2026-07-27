@@ -190,6 +190,20 @@ func (w *Writer) Append(c candidate.Candidate) (bool, error) {
 	_, statErr := os.Stat(path)
 	firstCreate := errors.Is(statErr, os.ErrNotExist)
 
+	// Re-check the target file on disk UNDER the lock: the w.seen check above is
+	// only the fast path — NewWriter snapshots ids once, so a concurrent emit
+	// process may have appended this id since. Two same-instant runs target the
+	// same month file (the month comes from emitted_at ≈ now), so re-scanning it
+	// closes the cross-process duplicate window the in-memory set alone cannot.
+	dup, err := w.dupOnDisk(path, firstCreate, c.ID)
+	if err != nil {
+		return false, err
+	}
+	if dup {
+		w.seen[c.ID] = struct{}{}
+		return false, nil
+	}
+
 	b, err := json.Marshal(c)
 	if err != nil {
 		return false, err
@@ -218,4 +232,18 @@ func (w *Writer) Append(c candidate.Candidate) (bool, error) {
 	}
 	w.seen[c.ID] = struct{}{}
 	return true, nil
+}
+
+// dupOnDisk reports whether id already sits in the target month file. It is the
+// under-lock arm of the dedup decision; a not-yet-created file holds nothing.
+func (w *Writer) dupOnDisk(path string, firstCreate bool, id string) (bool, error) {
+	if firstCreate {
+		return false, nil
+	}
+	onDisk := map[string]struct{}{}
+	if err := collectIDs(path, onDisk); err != nil {
+		return false, err
+	}
+	_, dup := onDisk[id]
+	return dup, nil
 }
