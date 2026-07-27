@@ -1,0 +1,157 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/dkoosis/ferret/internal/event"
+	"github.com/dkoosis/ferret/internal/transcript"
+)
+
+// ---- ingest ----
+
+func cmdIngest() error {
+	cmd := &CLI.Ingest
+	data := cmd.Data
+	if data == "~/.ferret" {
+		d, err := defaultData()
+		if err != nil {
+			return err
+		}
+		data = d
+	}
+	root := cmd.Root
+	if root == "" {
+		r, err := defaultRoot()
+		if err != nil {
+			return err
+		}
+		root = r
+	}
+	return ingest(data, root, cmd.Project, cmd.DryRun)
+}
+
+// eventSink is the persistence seam for ingest: the real implementation is
+// *event.Writer, but tests inject a writer that fails after K records to prove
+// a mid-ingest write error aborts the run and suppresses the manifest.
+// Abort discards the in-progress temp file without sealing the artifact.
+type eventSink interface {
+	Write(ev *event.Event) error
+	Close() error
+	Abort()
+}
+
+// newEventWriter is indirected through a var so a test can substitute a failing
+// writer without touching the event package.
+var newEventWriter = func(path string) (eventSink, error) { return event.NewWriter(path) }
+
+// errWriteAbort wraps the first per-record write error so ingest can abort the
+// loop and refuse to seal a manifest over a partially-written artifact.
+var errWriteAbort = errors.New("ingest aborted: record write failed")
+
+func ingest(dataDir, root, project string, dryRun bool) error {
+	if root == "" {
+		r, err := defaultRoot()
+		if err != nil {
+			return err
+		}
+		root = r
+	}
+	sources, err := transcript.Walk(root)
+	if err != nil {
+		return err
+	}
+	if project != "" {
+		var keep []transcript.Source
+		for _, s := range sources {
+			if strings.Contains(s.Project, project) {
+				keep = append(keep, s)
+			}
+		}
+		sources = keep
+	}
+
+	b := event.NewBuilder()
+	// Builder.File takes a non-fallible emit; capture the first write error in a
+	// closure-scoped var instead. Once set, the outer loop stops and the run is
+	// treated as partial — no manifest gets sealed over a truncated artifact.
+	var emitErr error
+	emit := func(*event.Event) {}
+	var w eventSink
+	if !dryRun {
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			return err
+		}
+		// Serialize concurrent ingests on the same data dir (ferret-0vz): without
+		// this, two ferret processes both triggered by ensureData would write the
+		// artifact at once.
+		release, lerr := lockData(dataDir)
+		if lerr != nil {
+			return lerr
+		}
+		defer release()
+		w, err = newEventWriter(filepath.Join(dataDir, "events.jsonl"))
+		if err != nil {
+			return err
+		}
+		emit = func(ev *event.Event) {
+			if emitErr != nil {
+				return // already failed; drain remaining emits cheaply
+			}
+			if werr := w.Write(ev); werr != nil {
+				emitErr = fmt.Errorf("%w: %w", errWriteAbort, werr)
+			}
+		}
+	}
+	start := time.Now()
+	for _, src := range sources {
+		if err := b.File(src, emit); err != nil {
+			fmt.Fprintf(os.Stderr, "ferret: %s: %v (skipped)\n", src.Path, err)
+		}
+		if emitErr != nil {
+			break
+		}
+	}
+	if w != nil {
+		if emitErr != nil {
+			// Mid-write failure: ABORT (close-without-rename) rather than Close.
+			// Close would flush the bytes written so far, fsync, and rename the
+			// TRUNCATED tmp onto events.jsonl — publishing a partial corpus whose
+			// only safety net is the suppressed manifest (ferret-0m7). Abort drops
+			// the tmp so no partial artifact ever lands.
+			w.Abort()
+			return emitErr
+		}
+		if cerr := w.Close(); cerr != nil {
+			// Close failed: the atomic Writer never sealed events.jsonl, so no
+			// later mine runs on silently-truncated data.
+			return cerr
+		}
+		m := &event.Manifest{CreatedAt: time.Now(), Root: root, Stats: b.Stats}
+		if err := event.WriteManifest(filepath.Join(dataDir, "manifest.json"), m); err != nil {
+			return err
+		}
+	}
+
+	st := b.Stats
+	fmt.Printf("ingest files=%d lines=%d events=%d prompts=%d in %s\n",
+		st.Files, st.Lines, st.Events, st.Prompts, time.Since(start).Round(time.Millisecond))
+	fmt.Printf("health unpaired=%.1f%% shell-fallback=%d deduped=%d decode-errs=%d\n",
+		pct(st.Unpaired, st.Events), st.Fallback, st.Deduped, st.DecodeErrs)
+	types := make([]string, 0, len(st.ByType))
+	for t := range st.ByType {
+		types = append(types, t)
+	}
+	sort.Slice(types, func(i, j int) bool { return st.ByType[types[i]] > st.ByType[types[j]] })
+	parts := make([]string, 0, len(types))
+	for _, t := range types {
+		parts = append(parts, fmt.Sprintf("%s:%d", t, st.ByType[t]))
+	}
+	fmt.Println("types", strings.Join(parts, " "))
+	return nil
+}
