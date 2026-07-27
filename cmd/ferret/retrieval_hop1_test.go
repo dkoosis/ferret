@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/dkoosis/ferret/internal/analyst"
 	"github.com/dkoosis/ferret/internal/out"
@@ -18,6 +19,11 @@ import (
 // errTestJudge is a static sentinel for the faked per-episode judge failure
 // (err113: no dynamic errors).
 var errTestJudge = errors.New("boom")
+
+// errTestNoOverlap is a static sentinel for the concurrency-proof barrier
+// timing out — signals a serial regression instead of hanging to the
+// package-wide test timeout.
+var errTestNoOverlap = errors.New("fan-out did not overlap within deadline")
 
 // TestHop1EmitPromptAssemblesPerEpisode: the --emit-prompt path renders an
 // escalated episode's assembled judge prompt and a floored episode's one-line
@@ -200,8 +206,13 @@ func TestHop1FanOutPreservesOrderAndBoundsConcurrency(t *testing.T) {
 		if cur >= 2 {
 			barrierOnce.Do(func() { close(barrier) })
 		}
-		// Wait for proof of overlap — deadlocks (test timeout) if calls run serially.
-		<-barrier
+		// Wait for proof of overlap — times out fast (not a package-wide test
+		// timeout) if calls run serially.
+		select {
+		case <-barrier:
+		case <-time.After(10 * time.Second):
+			return analyst.Hop1Result{}, errTestNoOverlap
+		}
 		return analyst.Hop1Result{Episode: id, Grade: analyst.Hop1High, LLMCalled: true}, nil
 	}
 
