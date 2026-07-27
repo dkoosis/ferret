@@ -15,3 +15,4 @@ This file is rewritten, not appended.
 1. ferret-bbp — user-turn repair/acceptance tagger reads intent from the human's words
 2. ferret-kuv — intent-grounded tool-improvement harness
 3. ferret-wf9 — in-session feedback tap: solicit t=0 human labels inline to calibrate the scorers
+4. ferret-097 — ferret closes its own loop: rank burners/misfires, tune, verify the delta

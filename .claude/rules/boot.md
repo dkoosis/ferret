@@ -1,20 +1,19 @@
 # Boot
-updated: 2026-07-25
+updated: 2026-07-27
 
 *Project working-memory. Maintained for future-me: current state + live frontier + traps that still bite. Resolved lanes pruned — history lives in beads/PRs.*
 
-## lane: ferret-wf9 — in-session feedback tap (NEW, phase 3)
-bbp + kuv **both CLOSED** (kuv.9 dropped — subsumed by bbp's correction-language signal; grounding source PULSE rejected). Charted a phase-3 epic: **ferret-wf9** — solicit t=0 human labels inline to calibrate the scorers. Plan reviewed by dk (in flight).
-→ **The design (settled):** ferret is label-starved — every scorer proxies "did this help the human?". Ask a one-char valence pulse *in-band* (Claude asks; dk one-chars the reply — plugins CANNOT collect a keystroke, verified: no "userprompt widget", CC's 👍/👎 unexposed), join it to the friction moment (ts→segment), record a gold label. Inline-first; idle-timing (idle-minder pattern) is a v2 non-goal.
-→ 5 children, DAG wired. Ready: **oz4** (label ledger, clean start — mirrors internal/fixes), **un4** (state+budget latch), **1jg** (target selector). Gated: b2b (ask hook), j33 (capture+join). Spec: `~/Projects/dk/Project/ferret/plans/in-session-feedback.md`.
-⚠ **Placement:** new selector/scorer code → `internal/score/` (ratified D2, not `internal/mine/`); the label ledger → persistence pkg mirroring `internal/fixes` (fsync+flock). Spec leaves exact pkg open — pin at build.
-~ *Vocabulary (agent behavior axes):* "initiative" = how readily it acts (dial 1); "autonomy" = how far without approval (dial 2) — two axes, don't collapse. bbp.11 scores *calibration*, orthogonal to both.
+## lane: ferret-097 — close the loop (NEW, phase 4, ratified 2026-07-27)
+Phases 1–3 (bbp/kuv/wf9) ALL CLOSED. Route fork resolved as EXTEND (decision nug `0d350b228b92`): ★ line unchanged, roadmap gains rung 4. **ferret-097** — ferret moves observation→actuation: rank what burns, tune, verify the delta.
+→ Children: **nrr** (per-shellnorm-command output-byte burn ranking, `report --kind burn` or `ferret burn` — pin door at build) · **ct1** (repeated-misfire ranking + repair pairs, feeds the kuv.15 substitution-ledger loop) · **kt5** (burn-delta in report, undeferred, blocked by nrr). Ready: nrr, ct1.
+→ Trigger: RTK review (rtk-ai/rtk — Rust output-filter proxy). RTK adoption NOT decided — revisit after nrr's ranking says what actually burns.
 ~ dk drives forks himself — hand them crisply, ✗ pre-decide ratified semantics.
 
 ## State
-- main @ `3092176`, origin synced. PR queue EMPTY. Local branches pruned to `main` only (6 stale loto/team branches deleted this session — content merged via #95 squash). `.fo/` now gitignored.
+- main @ `4cf29d5` (#104: 917 omitempty + fk8 judge fan-out), origin synced. PR queue EMPTY.
 - Scorers live in **`internal/score/`** (landmark/quality/conform/qpp all there — ratified, design-doc D2). New scorers go here.
 - `/team` = one shared tree + loto (worktrees retired). No concurrent `make check`; primary verifies once at wave end.
+- 7hr (param-clump refactor) stays DEFERRED — revisit only if phase 4 leaves cmd/ferret's surface intact.
 
 ## Frontier — where the work is
 
@@ -22,7 +21,9 @@ bbp + kuv **both CLOSED** (kuv.9 dropped — subsumed by bbp's correction-langua
 
 **ferret-kuv — CLOSED.** Intent-grounded tool-improvement harness. All children shipped or dropped (kuv.3/.14/.15/.16/567 done; **kuv.9 dropped** — its correction-language signal was subsumed by bbp, grounding source PULSE rejected). **567** (metrics-engine for a Claude analyst) shipped its children (567.1/.2). Substitution-ledger loop CLOSED: adjudicate flags → dk validates → `ferret fixes sub` records → hook/CLAUDE.md nudge consumes.
 
-**ferret-wf9 — OPEN (phase 3, the live lane).** In-session feedback tap: solicit t=0 human labels inline (Claude asks in-band, dk one-chars, ferret joins to the friction moment + records a gold label) to calibrate the label-starved scorers. 5 children, DAG wired; oz4/un4/1jg ready. Detail in the top lane block + the vault spec.
+**ferret-wf9 — CLOSED (phase 3).** In-session feedback tap shipped end-to-end (#96–99): ask-side selector + label ledger + live join orchestration + answer-side recognition/valence/probe-exclusion. Gold labels now accumulate in-band.
+
+**ferret-097 — OPEN (phase 4, the live lane).** Close the loop: burn ranking (nrr) + misfire ranking (ct1) → tune → burn-delta verify (kt5). Detail in the top lane block.
 
 **Retrieval-outcome contract (trixi⇄ferret)** — ferret's consumer side = the bbp epic, now SHIPPED. Spec: `~/Projects/dk/Project/trixi/specs/retrieval-outcome-contract-design.md`. Seam: `trixi/observe.2.1` emits retrieval-event JSONL (producer) → `ferret/bbp` joins to segments + adjudicates (consumer, done) → `search-loop.4` reads back via interrupted-time-series (reader, upstream). Golden fixture is the contract test (ferret vendors it). Producer conformance = `tx-dii8m`.
 
