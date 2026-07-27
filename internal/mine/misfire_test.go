@@ -105,7 +105,7 @@ func TestMineMisfires_AggregatesRepeatedRepairs_When_SameFormPairRecurs(t *testi
 		o.Retry = true
 		return f, o
 	}
-	var events []event.Event
+	events := make([]event.Event, 0, 6)
 	for _, s := range []string{"s1", "s2", "s3"} {
 		f, o := mk(s)
 		events = append(events, f, o)
@@ -177,8 +177,8 @@ func TestMineMisfires_IgnoresRetryWithoutOpenFailure_When_NoPendingMatch(t *test
 // bd_show fails, 0 jq fails remained — the fix worked), so it no longer
 // reproduces the motif; this fixture stands in as the AC's required coverage.
 func TestMineMisfires_SurfacesKnownJQBdShowMotif_When_CorpusReproducesFerret67o(t *testing.T) {
-	var events []event.Event
-	for i := 0; i < 130; i++ {
+	events := make([]event.Event, 0, 132)
+	for i := range 130 {
 		session := "sess-" + string(rune('a'+i%26)) + string(rune('0'+i/26))
 		events = append(events, ev(session, event.KindShell, "bd_show", "", event.StatusFail, "bd show x | jq '.[0]'"))
 	}

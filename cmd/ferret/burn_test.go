@@ -39,7 +39,11 @@ func TestWriteBurnText_RendersRankedRows_When_ResultHasRows(t *testing.T) {
 	}
 	// The about() preamble mentions "sh:git_commit" as an example, so scope the
 	// order check to the rows printed after the "burn events=" header line.
-	rowsOut := out[strings.Index(out, "burn events="):]
+	hdrIdx := strings.Index(out, "burn events=")
+	if hdrIdx < 0 {
+		t.Fatalf("missing burn events= header\n---\n%s", out)
+	}
+	rowsOut := out[hdrIdx:]
 	readIdx := strings.Index(rowsOut, "Read")
 	gitIdx := strings.Index(rowsOut, "sh:git_commit")
 	if readIdx < 0 || gitIdx < 0 || readIdx > gitIdx {
@@ -57,7 +61,11 @@ func TestWriteBurnText_RespectsLimit_When_LimitBelowRowCount(t *testing.T) {
 	out := buf.String()
 	// The about() preamble mentions "sh:git_commit" as an example; scope the
 	// suppression check to the rows printed after the "burn events=" header.
-	rowsOut := out[strings.Index(out, "burn events="):]
+	hdrIdx := strings.Index(out, "burn events=")
+	if hdrIdx < 0 {
+		t.Fatalf("missing burn events= header\n---\n%s", out)
+	}
+	rowsOut := out[hdrIdx:]
 	if strings.Contains(rowsOut, "sh:git_commit") {
 		t.Errorf("expected sh:git_commit row suppressed by --limit=1\n---\n%s", rowsOut)
 	}

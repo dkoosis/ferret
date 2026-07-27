@@ -96,32 +96,38 @@ func MineMisfires(events []event.Event) MisfireReport {
 		}
 		a.calls++
 
-		fk := failKey{session: ev.Session, action: ev.Action, target: ev.Target}
-		switch ev.Status {
-		case event.StatusFail, event.StatusCFail:
-			a.fails++
-			a.failSess[ev.Session] = struct{}{}
-			if ev.Status == event.StatusFail {
-				// cfail's failing segment is unknown (compound chain), so it is
-				// not a safe repair-pair anchor — mirrors finish()'s own rule
-				// that cfail neither opens nor closes the retry window.
-				pending[fk] = ev.Detail
-			}
-		case event.StatusOK:
-			if ev.Retry {
-				if failedRaw, ok := pending[fk]; ok {
-					recordRepair(pairCounts, ev.Action, failedRaw, ev.Detail)
-					delete(pending, fk)
-				}
-			} else {
-				delete(pending, fk)
-			}
-		}
+		observeStatus(a, pending, pairCounts, ev)
 	}
 
 	return MisfireReport{
 		Rows:    rankMisfires(aggs),
 		Repairs: rankRepairs(pairCounts),
+	}
+}
+
+// observeStatus folds one event's outcome into its command aggregate and the
+// pending-fail → repair-pair state machine. cfail's failing segment is unknown
+// (compound chain), so it counts as a failure but is not a safe repair-pair
+// anchor — mirrors finish()'s own rule that cfail neither opens nor closes the
+// retry window.
+func observeStatus(a *misfireAgg, pending map[failKey]string, pairCounts map[string]*RepairPair, ev *event.Event) {
+	fk := failKey{session: ev.Session, action: ev.Action, target: ev.Target}
+	switch ev.Status {
+	case event.StatusFail, event.StatusCFail:
+		a.fails++
+		a.failSess[ev.Session] = struct{}{}
+		if ev.Status == event.StatusFail {
+			pending[fk] = ev.Detail
+		}
+	case event.StatusOK:
+		if ev.Retry {
+			if failedRaw, ok := pending[fk]; ok {
+				recordRepair(pairCounts, ev.Action, failedRaw, ev.Detail)
+				delete(pending, fk)
+			}
+		} else {
+			delete(pending, fk)
+		}
 	}
 }
 

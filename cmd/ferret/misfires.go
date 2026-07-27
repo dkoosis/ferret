@@ -89,17 +89,19 @@ func writeMisfiresText(w io.Writer, rep mine.MisfireReport, limit, maxBytes int)
 	if len(rep.Repairs) > 0 {
 		sink.Head("repair pairs (failed → fixed):")
 		for _, p := range rep.Repairs {
-			failed, fixed := p.FailedRaw, p.FixedRaw
-			if failed == "" && fixed == "" {
-				if !sink.Row("%-24s  count=%d  (key-level — no raw command text captured for this key)", p.Key, p.Count) {
-					break
-				}
-				continue
-			}
-			if !sink.Row("%-24s  count=%d  %q → %q", p.Key, p.Count, failed, fixed) {
+			if !repairRow(sink, p) {
 				break
 			}
 		}
 	}
 	return nil
+}
+
+// repairRow renders one repair pair, falling back to the key-level form when
+// neither side captured raw command text. Returns the sink's keep-going signal.
+func repairRow(sink *out.Sink, p mine.RepairPair) bool {
+	if p.FailedRaw == "" && p.FixedRaw == "" {
+		return sink.Row("%-24s  count=%d  (key-level — no raw command text captured for this key)", p.Key, p.Count)
+	}
+	return sink.Row("%-24s  count=%d  %q → %q", p.Key, p.Count, p.FailedRaw, p.FixedRaw)
 }
