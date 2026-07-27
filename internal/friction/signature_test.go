@@ -1,8 +1,10 @@
 package friction
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/dkoosis/ferret/internal/event"
@@ -147,6 +149,43 @@ func TestPersistLearnedRepairsMissingTrailingNewline(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Errorf("loaded %d signatures, want 2 (seed + added): %+v", len(got), got)
+	}
+}
+
+// TestPersistLearnedConcurrentNoLostUpdate is the flock guard (ferret-c46,
+// mirroring fixes_test.go's TestConcurrentAppend): N goroutines each persist a
+// DISTINCT new fingerprint against the same file concurrently. Every one must
+// survive to the final on-disk set — an unlocked load-merge-rewrite lets a
+// later writer's rewrite clobber an earlier writer's addition (last writer
+// wins), silently losing an update rather than corrupting the file.
+func TestPersistLearnedConcurrentNoLostUpdate(t *testing.T) {
+	p := filepath.Join(t.TempDir(), SigFileName)
+	const n = 16
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := range n {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			fp := fmt.Sprintf("fp-%d", i)
+			_, err := PersistLearned(p, []Signature{{Fingerprint: fp}})
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent PersistLearned: %v", err)
+		}
+	}
+
+	got, err := LoadSignatures(p)
+	if err != nil {
+		t.Fatalf("LoadSignatures after concurrent persists: %v", err)
+	}
+	if len(got) != n {
+		t.Errorf("persisted %d signatures, want %d (lost update under concurrency)", len(got), n)
 	}
 }
 

@@ -78,7 +78,20 @@ func LoadSignatures(path string) ([]Signature, error) {
 // trailing newline, which a blind append would have fused into an unparseable
 // line. Existing labels win over learned ones (curated text is never clobbered).
 // Returns the count of fingerprints newly added to the file.
+//
+// The whole load-merge-rewrite runs under lockSignatures so two concurrent
+// callers (e.g. two `ferret recurrence` runs) cannot each load the same
+// on-disk set, merge their own learned signature, and rewrite: without the
+// lock, the second writer's rewrite silently drops the first writer's
+// addition (a lost update, not corruption — but the dropped signature never
+// becomes durable).
 func PersistLearned(path string, learned []Signature) (int, error) {
+	release, err := lockSignatures(path)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
+
 	onDisk, err := LoadSignatures(path)
 	if err != nil {
 		return 0, err
@@ -161,3 +174,16 @@ func writeSignaturesAtomic(path string, sigs []Signature) error {
 // syncDir fsyncs a directory so a just-published rename within it is durable
 // (see durable.SyncDir). A package var so a test can observe/override it.
 var syncDir = durable.SyncDir
+
+// lockSignatures takes an advisory exclusive lock on the signatures file's
+// data dir so two concurrent PersistLearned calls serialize instead of
+// interleaving their load-merge-rewrite. Mirrors the flock-around-RMW pattern
+// already used by internal/fixes/lock.go (lockLedger, for RecordSub) and
+// internal/feedback/budget.go (lockBudget, for Reserve) — built by ferret-isz
+// (merged #63) for the analogous fixes-ledger race.
+//
+// The sentinel (.friction_signatures.lock) is dir-scoped to the signatures
+// file; durable.Lock owns the blocking, crash-safe flock mechanism.
+func lockSignatures(path string) (release func(), err error) {
+	return durable.Lock(filepath.Join(filepath.Dir(path), ".friction_signatures.lock"))
+}
