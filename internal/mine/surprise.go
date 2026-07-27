@@ -65,6 +65,32 @@ func ScoreSurprise(c *Corpus, opts SurpriseOpts) []StreamScore {
 	return out
 }
 
+// TokenSurprise returns the per-token surprisal (bits) for every stream, aligned
+// to c.Streams by index. It trains the same corpus backoff model ScoreSurprise
+// uses, but keeps the per-token granularity a span-level consumer needs: the
+// stream-mean ScoreSurprise reports collapses a whole session to one number,
+// whereas `ferret emit` windows a Seq range and needs the surprisal of the tokens
+// inside that window (gg-eqn.1, per-span surprisal). No MinToks filter — a
+// candidate span can live in a short stream, and the caller decides which windows
+// clear its threshold.
+func TokenSurprise(c *Corpus, order int) [][]float64 {
+	grams, total := trainGrams(c, order)
+	out := make([][]float64, len(c.Streams))
+	var ids []uint32
+	for si, st := range c.Streams {
+		ids = ids[:0]
+		for _, t := range st {
+			ids = append(ids, t.ID)
+		}
+		bits := make([]float64, len(ids))
+		for i := range ids {
+			bits[i] = -math.Log2(scoreIDs(ids, i, grams, total, order))
+		}
+		out[si] = bits
+	}
+	return out
+}
+
 // SurpriseIndex maps each scored stream's key to its mean surprise (bits/tok),
 // so a finding can look up how predictable the sessions it recurs in were.
 // Streams too short to score are simply absent (the report treats a miss as "no

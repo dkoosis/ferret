@@ -370,6 +370,18 @@ var CLI struct {
 		CommonFlags
 		Signatures string `help:"Known-signatures JSONL file (default: <data>/friction_signatures.jsonl; absent = learn signatures from the corpus)." name:"signatures"`
 	} `cmd:"" help:"Friction-recurrence detector: flag the 2nd+ occurrence of a known friction signature (normalized command/error fingerprint). Emits match records for the /wrap trap-graduation prompt."`
+
+	Emit struct {
+		Data       string  `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
+		Root       string  `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
+		Project    string  `help:"Only projects whose slug contains this substring." name:"project"`
+		Order      int     `help:"Surprisal model order: score each token from up to N prior tokens." default:"3" name:"order"`
+		Window     int     `help:"Candidate span width in tokens." default:"8" name:"window"`
+		MinBits    float64 `help:"Min per-span mean surprisal to emit a candidate (<0 = auto: corpus mean)." default:"-1" name:"min-bits"`
+		DryRun     bool    `help:"Derive + print candidates; write no spool rows, cursor, or signatures." name:"dry-run"`
+		Format     string  `help:"Output format: text|json." default:"text" name:"format"`
+		Signatures string  `help:"Known friction-signatures JSONL (default: <data>/friction_signatures.jsonl)." name:"signatures"`
+	} `cmd:"" help:"Emit candidate spool rows (schema_version 1) from salient transcript spans: per-span surprisal + friction recurrence + Drain fingerprint, appended to ~/.ferret/spool/candidates-YYYY-MM.jsonl. Deterministic, LLM-free — no claim text. The producer side of the sensor→kg pipeline (epic gg-eqn)."`
 }
 
 func main() {
@@ -427,7 +439,8 @@ func main() {
 				"  ferret fixes add  --motif \"Edit!,Read\" --fix \"hookify read-before-edit\" [--note ...]\n"+
 				"  ferret fixes list [--format json]\n"+
 				"  ferret reach    [--since Y-M-D] [--until Y-M-D] [--project SUBSTR] [--format text|json|md]   (recall-opportunity reach-rate)\n"+
-				"  ferret recurrence [--signatures FILE] [--format text|json]   (flag 2nd+ occurrence of a known friction signature)\n\n"+
+				"  ferret recurrence [--signatures FILE] [--format text|json]   (flag 2nd+ occurrence of a known friction signature)\n"+
+				"  ferret emit     [--root DIR] [--window 8] [--order 3] [--min-bits N] [--dry-run] [--format text|json]   (candidate spool rows → ~/.ferret/spool)\n\n"+
 				"common: --data DIR (default ~/.ferret)  --format text|json  --limit N  --max-bytes N\n"+
 				"lenses: coarse | tool | target | exact",
 		),
@@ -507,6 +520,8 @@ func main() {
 		err = cmdReach()
 	case "recurrence":
 		err = cmdRecurrence()
+	case "emit":
+		err = cmdEmit()
 	default:
 		k.Fatalf("unknown command %q", k.Command())
 	}
