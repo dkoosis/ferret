@@ -67,8 +67,10 @@ type Friction struct {
 	// signal (a commit/push/PR — the same "shipped" tell outcome.go reads). When
 	// GoalReached is false the goal was never met in the session and TurnsToGoal
 	// holds the total turn count (a lower bound on the real cost).
-	TurnsToGoal int  `json:"turnsToGoal,omitempty"`
-	GoalReached bool `json:"goalReached,omitempty"`
+	// No omitempty on either: goalReached=false is a real finding (the goal was
+	// never met, not "unevaluated"), and turnsToGoal=0 travels with it (ferret-917).
+	TurnsToGoal int  `json:"turnsToGoal"`
+	GoalReached bool `json:"goalReached"`
 
 	FailedActions      int `json:"failedActions,omitempty"`      // tool/shell events with a fail | cfail status
 	LatePreconditions  int `json:"latePreconditions,omitempty"`  // retries after a failure — a precondition surfaced mid-act

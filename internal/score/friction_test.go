@@ -1,10 +1,31 @@
 package score
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/dkoosis/ferret/internal/event"
 )
+
+// TestFrictionGoalFieldsSerializeAtZero pins ferret-917: goalReached=false and
+// turnsToGoal=0 must serialize, not vanish under omitempty — a consumer must be
+// able to tell "goal never met" from "field absent".
+func TestFrictionGoalFieldsSerializeAtZero(t *testing.T) {
+	b, err := json.Marshal(Friction{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := got["goalReached"]; !ok || v != false {
+		t.Errorf("goalReached = %v (present=%v), want explicit false", v, ok)
+	}
+	if v, ok := got["turnsToGoal"]; !ok || v != float64(0) {
+		t.Errorf("turnsToGoal = %v (present=%v), want explicit 0", v, ok)
+	}
+}
 
 // --- friction event builders (unique names; prompt/tool/shell live in retrieval_test) ---
 
