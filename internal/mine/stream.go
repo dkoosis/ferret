@@ -38,6 +38,7 @@ func spansMultipleCalls(toks []Tok) bool {
 type Corpus struct {
 	Streams    [][]Tok
 	StreamKeys []string // "project/session@agent" per stream
+	Sidechain  []bool   // per stream: true = subagent sidechain transcript
 	Vocab      []string // id → token
 }
 
@@ -88,6 +89,7 @@ func Build(eventsPath string, l lens.Lens, opts Options) (*Corpus, error) {
 			streamIdx[key] = si
 			c.Streams = append(c.Streams, nil)
 			c.StreamKeys = append(c.StreamKeys, key)
+			c.Sidechain = append(c.Sidechain, ev.Sidechain)
 		}
 		c.Streams[si] = append(c.Streams[si], Tok{ID: c.intern(intern, tok), Seq: ev.Seq, Bytes: ev.Bytes})
 		return nil

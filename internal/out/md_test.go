@@ -54,6 +54,27 @@ func TestMarkdownReport(t *testing.T) {
 	}
 }
 
+// TestMarkdownLabelsSidechainBurn guards ferret-9j3: a finding whose burn is
+// partly subagent-sidechain must say so beside the cost phrase, and a
+// main-only finding must not grow an empty label.
+func TestMarkdownLabelsSidechainBurn(t *testing.T) {
+	findings := []MDFinding{
+		{Motif: []string{"Read+", "Read+"}, Kind: "loop", Action: "trim", Count: 32, Sessions: 32, Burn: 550000, SideBurn: 539000, Evidence: "5eae9371@1"},
+		{Motif: []string{"go_build", "go_test"}, Kind: "routine", Action: "script", Count: 5, Sessions: 3, Burn: 12000, Evidence: "feedface@7"},
+	}
+	var b strings.Builder
+	if err := Markdown(&b, "tool", len(findings), findings); err != nil {
+		t.Fatalf("Markdown: %v", err)
+	}
+	got := b.String()
+	if !strings.Contains(got, "(98% subagent)") {
+		t.Errorf("sidechain-heavy finding must carry the subagent share label, got:\n%s", got)
+	}
+	if strings.Contains(got, "(0% subagent)") {
+		t.Errorf("main-only finding must not render an empty subagent label")
+	}
+}
+
 // TestMarkdownSurfacesDialogue guards ferret-bbp.6: when a finding carries the
 // de-islanded dialogue + Hop2 signals, the human report surfaces them in the
 // evidence block (outcome + retrieval grade), and a finding with no signal renders

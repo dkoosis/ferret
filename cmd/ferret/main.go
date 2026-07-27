@@ -1246,6 +1246,7 @@ func cmdReport() error {
 			Sessions int      `json:"sessions"`
 			FailRate float64  `json:"failRate"`
 			Burn     int      `json:"burn"`
+			SideBurn int      `json:"sideBurn"` // slice of burn from subagent sidechain streams
 			Surprise float64  `json:"surprise"`
 			Outcome  string   `json:"outcome,omitempty"`
 			Hop2     string   `json:"hop2,omitempty"`
@@ -1274,7 +1275,7 @@ func cmdReport() error {
 			row := jf{
 				Motif: corpus.Tokens(f.IDs), Kind: string(f.Kind), Action: string(f.Action),
 				Count: f.Count, Sessions: f.Sessions, FailRate: f.FailRate,
-				Burn: f.Burn, Surprise: f.Surprise,
+				Burn: f.Burn, SideBurn: f.SideBurn, Surprise: f.Surprise,
 				Outcome: f.Outcome, Hop2: f.Hop2, Hop1: f.Hop1, Repairs: f.Repairs, Accepts: f.Accepts,
 				OddsRatio: f.OutcomeOddsRatio, OddsRatioN: f.OddsRatioSupport,
 				Evidence: exemplar(corpus, f.ExStream, f.ExSeq),
@@ -1307,7 +1308,7 @@ func cmdReport() error {
 			rows = append(rows, out.MDFinding{
 				Motif: corpus.Tokens(f.IDs), Kind: string(f.Kind), Action: string(f.Action),
 				Count: f.Count, Sessions: f.Sessions, FailRate: f.FailRate,
-				Burn:    f.Burn,
+				Burn: f.Burn, SideBurn: f.SideBurn,
 				Outcome: f.Outcome, Hop2: f.Hop2, Repairs: f.Repairs, Accepts: f.Accepts,
 				OddsRatio: f.OutcomeOddsRatio, OddsRatioN: f.OddsRatioSupport,
 				Evidence: exemplar(corpus, f.ExStream, f.ExSeq),
@@ -1319,8 +1320,9 @@ func cmdReport() error {
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
 	defer sink.Close()
 	about(sink,
-		"≡ report: motifs classified into an action verb, ranked by burn — measured tokens of",
-		"≡ context the motif's occurrences cost across the corpus. burn×nothing else; it's the leak size.",
+		"≡ report: motifs classified into an action verb, ranked by burn — measured tokens the",
+		"≡ motif's member calls cost: each call's tool input + its own tool_result, never the whole turn.",
+		"≡ burn spans ALL streams incl. subagent sidechains; side = share of burn from subagent streams (--no-sidechain excludes them).",
 		"≡ surp = mean bits/tok of the sessions a motif recurs in: a high-surp routine is friction (fix it), low-surp is routine (script it).",
 		legendMarks)
 	if fixIdx != nil {
@@ -1332,8 +1334,8 @@ func cmdReport() error {
 		sink.Head("‡ seqs hit the 10000-pattern cap — raise --min-support")
 	}
 	for _, f := range findings {
-		row := fmt.Sprintf("%-8s %-8s burn=%-8d n=%-5d sess=%-4d fail=%2.0f%% surp=%4.1f  %s  ex: %s",
-			f.Kind, f.Action, f.Burn, f.Count, f.Sessions, f.FailRate*100, f.Surprise,
+		row := fmt.Sprintf("%-8s %-8s burn=%-8d side=%3.0f%% n=%-5d sess=%-4d fail=%2.0f%% surp=%4.1f  %s  ex: %s",
+			f.Kind, f.Action, f.Burn, sideShare(f)*100, f.Count, f.Sessions, f.FailRate*100, f.Surprise,
 			strings.Join(corpus.Tokens(f.IDs), " ⇝ "), exemplar(corpus, f.ExStream, f.ExSeq))
 		if ann, ok := sinceFixAnnotation(fixIdx, corpus.Tokens(f.IDs), f.Burn); ok {
 			row += ann
@@ -1644,6 +1646,16 @@ func sinceFixAnnotation(idx map[string]fixes.Entry, motif []string, currentBurn 
 	a := fixes.Annotation{Entry: e, Current: currentBurn}
 	return fmt.Sprintf("  [fixed %s burn %s→%s %s]",
 		e.AddedAt.Format("2006-01-02"), compactBurn(e.BaselineBurn), compactBurn(currentBurn), a.Arrow()), true
+}
+
+// sideShare is the fraction of a finding's burn drawn from subagent sidechain
+// streams — the pool label that keeps an all-streams burn from being read as
+// main-session cost (ferret-9j3). Zero-burn findings read as 0.
+func sideShare(f *mine.Finding) float64 {
+	if f.Burn == 0 {
+		return 0
+	}
+	return float64(f.SideBurn) / float64(f.Burn)
 }
 
 // compactBurn renders a token count compactly for inline annotations: 253000 →

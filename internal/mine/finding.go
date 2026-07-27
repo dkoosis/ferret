@@ -8,9 +8,17 @@ import "sort"
 //
 // burn is REAL context cost, not an estimate: every occurrence of the motif is
 // re-matched against the corpus and its member events' measured byte sizes are
-// summed, then converted to tokens. burn is the sort key — a rare motif that
-// drags megabytes of file contents back into context outranks a frequent but
-// cheap one.
+// summed, then converted to tokens. Each member event's size is per-CALL — the
+// tool_use input plus that call's own tool_result payload (joined by
+// tool_use_id at ingest) — never the whole turn the call sat in. burn is the
+// sort key — a rare motif that drags megabytes of file contents back into
+// context outranks a frequent but cheap one.
+//
+// burn draws on ALL streams, subagent sidechain transcripts included (unless
+// the corpus was built NoSidechain). SideBurn labels the pool: the slice of
+// Burn that came from sidechain streams, so a reader never mistakes an
+// all-streams number for main-session cost (ferret-9j3 — a 551k motif burn was
+// read against a 229k main-only pool and misdirected an optimization).
 type Finding struct {
 	IDs      []uint32    // motif token ids (render via Corpus.Tokens)
 	Kind     FindingKind // routine | friction | loop | noise
@@ -18,7 +26,8 @@ type Finding struct {
 	Count    int         // total occurrences across the corpus
 	Sessions int         // distinct streams containing the motif
 	FailRate float64     // share of member tokens that are fail-marked
-	Burn     int         // measured tokens of context the motif's occurrences consumed
+	Burn     int         // measured tokens the motif's member calls consumed (input + own result, all streams)
+	SideBurn int         // slice of Burn from subagent sidechain streams (≤ Burn)
 	Surprise float64     // mean bits/tok of the sessions the motif recurs in (0 = no signal)
 
 	// Dialogue + hop signals (ferret-bbp.6) — the human-side OUTCOME and the
@@ -199,7 +208,7 @@ func Findings(c *Corpus, cards []*Card, maxGap int, surprise map[string]float64,
 	out := make([]*Finding, 0, len(cards))
 	for _, card := range cards {
 		kind, action := bucketKind(card.Bucket)
-		count, sessions, burnBytes := measure(c, card.IDs, maxGap)
+		count, sessions, burnBytes, sideBytes := measure(c, card.IDs, maxGap)
 		if count == 0 {
 			continue // motif no longer matches (shouldn't happen, but never emit a phantom)
 		}
@@ -217,6 +226,7 @@ func Findings(c *Corpus, cards []*Card, maxGap int, surprise map[string]float64,
 			Count: count, Sessions: sessions,
 			FailRate: failRate(c, card.IDs),
 			Burn:     burnBytes / bytesPerToken,
+			SideBurn: sideBytes / bytesPerToken,
 			Surprise: surp,
 			ExStream: card.ExStream, ExSeq: card.ExSeq,
 		})
@@ -408,12 +418,14 @@ func hopSeverity(g string) int {
 }
 
 // measure re-matches the motif across every stream and returns total
-// occurrences, distinct streams, and summed member-byte cost. Matching is
-// greedy and non-overlapping: once a motif completes, the scan resumes past
-// its end, so a stream of N back-to-back routines counts as N, not N-choose-k.
-func measure(c *Corpus, ids []uint32, maxGap int) (count, sessions, burnBytes int) {
-	for _, st := range c.Streams {
+// occurrences, distinct streams, summed member-byte cost, and the slice of
+// that cost from sidechain streams. Matching is greedy and non-overlapping:
+// once a motif completes, the scan resumes past its end, so a stream of N
+// back-to-back routines counts as N, not N-choose-k.
+func measure(c *Corpus, ids []uint32, maxGap int) (count, sessions, burnBytes, sideBytes int) {
+	for si, st := range c.Streams {
 		hits := 0
+		streamBytes := 0
 		i := 0
 		for i < len(st) {
 			end, bytes, ok := matchAt(st, i, ids, maxGap)
@@ -422,15 +434,19 @@ func measure(c *Corpus, ids []uint32, maxGap int) (count, sessions, burnBytes in
 				continue
 			}
 			hits++
-			burnBytes += bytes
+			streamBytes += bytes
 			i = end + 1
 		}
 		if hits > 0 {
 			count += hits
 			sessions++
+			burnBytes += streamBytes
+			if si < len(c.Sidechain) && c.Sidechain[si] {
+				sideBytes += streamBytes
+			}
 		}
 	}
-	return count, sessions, burnBytes
+	return count, sessions, burnBytes, sideBytes
 }
 
 // matchAt greedily matches ids[0] at st[start], then each subsequent id within

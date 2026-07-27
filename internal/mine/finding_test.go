@@ -71,7 +71,7 @@ func TestMeasureCountsNonOverlappingOccurrences(t *testing.T) {
 		{{"a", 10}, {"b", 20}, {"a", 10}, {"b", 20}},
 		{{"a", 10}, {"x", 5}, {"b", 20}},
 	})
-	count, sessions, burn := measure(c, idsFor(c, "a", "b"), 3)
+	count, sessions, burn, side := measure(c, idsFor(c, "a", "b"), 3)
 	if count != 3 {
 		t.Errorf("count = %d, want 3 (2 + 1 occurrences)", count)
 	}
@@ -81,6 +81,43 @@ func TestMeasureCountsNonOverlappingOccurrences(t *testing.T) {
 	// 3 occurrences × (10 + 20) member bytes = 90; the gap token x is not a member.
 	if burn != 90 {
 		t.Errorf("burn = %d, want 90 (member bytes only, gaps excluded)", burn)
+	}
+	if side != 0 {
+		t.Errorf("side = %d, want 0 (no sidechain streams marked)", side)
+	}
+}
+
+// TestMeasureSplitsSidechainBurn pins the ferret-9j3 pool label: burn from a
+// subagent sidechain stream lands in sideBytes so the report can say which
+// pool an all-streams number draws from. Total burn is unchanged — sideBytes
+// is a slice of it, not an addition.
+func TestMeasureSplitsSidechainBurn(t *testing.T) {
+	c := bytesCorpus([][]tb{
+		{{"a", 10}, {"b", 20}},                           // main stream: 30 bytes
+		{{"a", 100}, {"b", 200}, {"a", 100}, {"b", 200}}, // sidechain: 600 bytes
+	})
+	c.Sidechain = []bool{false, true}
+	count, sessions, burn, side := measure(c, idsFor(c, "a", "b"), 3)
+	if count != 3 || sessions != 2 {
+		t.Errorf("count, sessions = %d, %d, want 3, 2", count, sessions)
+	}
+	if burn != 630 {
+		t.Errorf("burn = %d, want 630 (main 30 + sidechain 600)", burn)
+	}
+	if side != 600 {
+		t.Errorf("side = %d, want 600 (sidechain stream's bytes only)", side)
+	}
+}
+
+// TestMeasureNilSidechainIndex covers corpora built without per-stream
+// sidechain flags (older artifacts, hand-built tests): every stream counts as
+// main, no panic.
+func TestMeasureNilSidechainIndex(t *testing.T) {
+	c := bytesCorpus([][]tb{{{"a", 10}, {"b", 20}}})
+	c.Sidechain = nil
+	_, _, burn, side := measure(c, idsFor(c, "a", "b"), 3)
+	if burn != 30 || side != 0 {
+		t.Errorf("burn, side = %d, %d, want 30, 0", burn, side)
 	}
 }
 
