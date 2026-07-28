@@ -89,14 +89,15 @@ func MineMisfires(events []event.Event) MisfireReport {
 		if ev.Kind != event.KindTool && ev.Kind != event.KindShell {
 			continue
 		}
-		a := aggs[ev.Action]
+		key := misfireKey(ev)
+		a := aggs[key]
 		if a == nil {
 			a = &misfireAgg{failSess: map[string]struct{}{}}
-			aggs[ev.Action] = a
+			aggs[key] = a
 		}
 		a.calls++
 
-		observeStatus(a, pending, pairCounts, ev)
+		observeStatus(a, pending, pairCounts, key, ev)
 	}
 
 	return MisfireReport{
@@ -110,7 +111,7 @@ func MineMisfires(events []event.Event) MisfireReport {
 // (compound chain), so it counts as a failure but is not a safe repair-pair
 // anchor — mirrors finish()'s own rule that cfail neither opens nor closes the
 // retry window.
-func observeStatus(a *misfireAgg, pending map[failKey]string, pairCounts map[string]*RepairPair, ev *event.Event) {
+func observeStatus(a *misfireAgg, pending map[failKey]string, pairCounts map[string]*RepairPair, key string, ev *event.Event) {
 	fk := failKey{session: ev.Session, action: ev.Action, target: ev.Target}
 	switch ev.Status {
 	case event.StatusFail, event.StatusCFail:
@@ -122,13 +123,23 @@ func observeStatus(a *misfireAgg, pending map[failKey]string, pairCounts map[str
 	case event.StatusOK:
 		if ev.Retry {
 			if failedRaw, ok := pending[fk]; ok {
-				recordRepair(pairCounts, ev.Action, failedRaw, ev.Detail)
+				recordRepair(pairCounts, key, failedRaw, ev.Detail)
 				delete(pending, fk)
 			}
 		} else {
 			delete(pending, fk)
 		}
 	}
+}
+
+// misfireKey mirrors burn.go's burnKey — shell events get an "sh:" prefix on
+// their normalized command so a shell command never collides with a
+// same-named tool in the misfire aggregation.
+func misfireKey(ev *event.Event) string {
+	if ev.Kind == event.KindShell {
+		return "sh:" + ev.Action
+	}
+	return ev.Action
 }
 
 // recordRepair folds one observed (failed → fixed) instance into the
