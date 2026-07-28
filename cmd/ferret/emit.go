@@ -349,10 +349,17 @@ func (r recIndex) max(session, agent string, lo, hi int) int {
 
 // ---- emit cursor (incremental over transcripts) ----
 
+// emitCursorSchemaVersion is the cursor file's own format version — independent
+// of candrec.SchemaVersion (the candidate row schema). A cursor format change
+// and a candidate schema bump are unrelated events; conflating them would make
+// loadEmitCursor unable to detect either one.
+const emitCursorSchemaVersion = 1
+
 // emitCursor records the last-seen modtime of each transcript source so a re-run
-// re-emits only for changed transcripts. It self-heals: a missing or corrupt
-// cursor reads as empty (full scan), never a hard error — a lost cursor costs a
-// redundant scan, and the candidate-id dedup keeps the spool duplicate-free.
+// re-emits only for changed transcripts. It self-heals: a missing, corrupt, or
+// version-mismatched cursor reads as empty (full scan), never a hard error — a
+// lost cursor costs a redundant scan, and the candidate-id dedup keeps the spool
+// duplicate-free.
 type emitCursor struct {
 	SchemaVersion int               `json:"schema_version"`
 	Sources       map[string]string `json:"sources"` // transcript path → RFC3339Nano modtime
@@ -363,7 +370,7 @@ func emitCursorPath(dataDir string) string {
 }
 
 func loadEmitCursor(path string) *emitCursor {
-	cur := &emitCursor{SchemaVersion: candrec.SchemaVersion, Sources: map[string]string{}}
+	cur := &emitCursor{SchemaVersion: emitCursorSchemaVersion, Sources: map[string]string{}}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return cur // missing = empty cursor
@@ -373,7 +380,10 @@ func loadEmitCursor(path string) *emitCursor {
 		fmt.Fprintf(os.Stderr, "ferret: emit cursor %s unreadable — re-scanning all transcripts\n", path)
 		return cur // corrupt = self-heal to empty
 	}
-	loaded.SchemaVersion = candrec.SchemaVersion
+	if loaded.SchemaVersion != emitCursorSchemaVersion {
+		fmt.Fprintf(os.Stderr, "ferret: emit cursor %s is schema_version %d, want %d — re-scanning all transcripts\n", path, loaded.SchemaVersion, emitCursorSchemaVersion)
+		return cur // incompatible cursor format = self-heal to empty
+	}
 	return &loaded
 }
 
