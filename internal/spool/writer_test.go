@@ -215,5 +215,8 @@ func countRows(t *testing.T, path string) int {
 			n++
 		}
 	}
+	if err := s.Err(); err != nil {
+		t.Fatalf("scan %s: %v", path, err)
+	}
 	return n
 }
