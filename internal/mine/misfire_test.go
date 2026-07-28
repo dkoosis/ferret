@@ -27,14 +27,32 @@ func TestMineMisfires_RanksByFailCountTimesSessionSpread_When_MultipleKeysFail(t
 	if len(rep.Rows) != 2 {
 		t.Fatalf("rows = %d, want 2; got %+v", len(rep.Rows), rep.Rows)
 	}
-	if rep.Rows[0].Key != "jq" {
-		t.Errorf("top row = %q, want jq (score should rank fails×sessions)", rep.Rows[0].Key)
+	if rep.Rows[0].Key != "sh:jq" {
+		t.Errorf("top row = %q, want sh:jq (score should rank fails×sessions)", rep.Rows[0].Key)
 	}
 	if rep.Rows[0].Score != 9 {
 		t.Errorf("jq score = %v, want 9", rep.Rows[0].Score)
 	}
-	if rep.Rows[1].Key != "rg" || rep.Rows[1].Score != 2 {
+	if rep.Rows[1].Key != "sh:rg" || rep.Rows[1].Score != 2 {
 		t.Errorf("second row = %+v, want rg score=2", rep.Rows[1])
+	}
+}
+
+// TestMineMisfires_KeepsShellAndToolSeparate_When_SameActionName guards
+// against the collision burn.go's burnKey already avoids: a shell command
+// and a tool sharing an action name must not merge into one misfire row.
+func TestMineMisfires_KeepsShellAndToolSeparate_When_SameActionName(t *testing.T) {
+	events := []event.Event{
+		ev("s1", event.KindShell, "Read", "", event.StatusFail, "cat Read"),
+		ev("s2", event.KindTool, "Read", "", event.StatusFail, ""),
+	}
+	rep := MineMisfires(events)
+	if len(rep.Rows) != 2 {
+		t.Fatalf("rows = %d, want 2 (shell vs tool kept separate); got %+v", len(rep.Rows), rep.Rows)
+	}
+	keys := map[string]bool{rep.Rows[0].Key: true, rep.Rows[1].Key: true}
+	if !keys["sh:Read"] || !keys["Read"] {
+		t.Errorf("keys = %+v, want sh:Read and Read", keys)
 	}
 }
 
@@ -90,7 +108,7 @@ func TestMineMisfires_EmitsRepairPair_When_RetryFollowsFailureWithSameKey(t *tes
 		t.Fatalf("repairs = %+v, want exactly one pair", rep.Repairs)
 	}
 	p := rep.Repairs[0]
-	if p.Key != "jq" || p.FailedRaw != "jq '.[0]' out.json" || p.FixedRaw != "jq '.result[0]' out.json" {
+	if p.Key != "sh:jq" || p.FailedRaw != "jq '.[0]' out.json" || p.FixedRaw != "jq '.result[0]' out.json" {
 		t.Errorf("pair = %+v, want the failed→fixed jq forms", p)
 	}
 	if p.Count != 1 {
@@ -194,8 +212,8 @@ func TestMineMisfires_SurfacesKnownJQBdShowMotif_When_CorpusReproducesFerret67o(
 		t.Fatalf("no rows — motif did not surface")
 	}
 	top := rep.Rows[0]
-	if top.Key != "bd_show" {
-		t.Fatalf("top row = %q, want bd_show (the known motif) to lead the ranking", top.Key)
+	if top.Key != "sh:bd_show" {
+		t.Fatalf("top row = %q, want sh:bd_show (the known motif) to lead the ranking", top.Key)
 	}
 	if top.Fails != 130 {
 		t.Errorf("fails = %d, want 130", top.Fails)

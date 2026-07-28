@@ -65,7 +65,7 @@ func TestWriteMisfiresJSON_RoundTrips_When_ReportHasRowsAndRepairs(t *testing.T)
 
 	rep := mine.MineMisfires([]event.Event{failedEv, fixedEv})
 	var buf bytes.Buffer
-	if err := writeMisfiresJSON(&buf, rep); err != nil {
+	if err := writeMisfiresJSON(&buf, rep, 0); err != nil {
 		t.Fatalf("writeMisfiresJSON: %v", err)
 	}
 	var got map[string]any
@@ -82,6 +82,43 @@ func TestWriteMisfiresJSON_RoundTrips_When_ReportHasRowsAndRepairs(t *testing.T)
 	}
 	if rt, ok := got["repairsTotal"].(float64); !ok || rt != 1 {
 		t.Errorf("repairsTotal=%v; want 1", got["repairsTotal"])
+	}
+}
+
+// TestWriteMisfiresJSON_CapsRowsAndRepairs_When_LimitSet guards the
+// pre-capping writeBurnJSON mirrors — the out.JSON contract itself ignores
+// row limits, so the cap must happen in writeMisfiresJSON.
+func TestWriteMisfiresJSON_CapsRowsAndRepairs_When_LimitSet(t *testing.T) {
+	events := []event.Event{
+		misfireEv("s1", "jq", event.StatusFail, "jq '.[0]'"),
+		misfireEv("s1", "jq", event.StatusOK, "jq '.result[0]'"),
+		misfireEv("s2", "grep", event.StatusFail, "grep -r x"),
+		misfireEv("s2", "grep", event.StatusOK, "grep -rn x"),
+	}
+	events[1].Retry = true
+	events[3].Retry = true
+
+	rep := mine.MineMisfires(events)
+	if len(rep.Rows) < 2 || len(rep.Repairs) < 2 {
+		t.Fatalf("fixture too small: rows=%d repairs=%d", len(rep.Rows), len(rep.Repairs))
+	}
+
+	var buf bytes.Buffer
+	if err := writeMisfiresJSON(&buf, rep, 1); err != nil {
+		t.Fatalf("writeMisfiresJSON: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())
+	}
+	if rows, ok := got["rows"].([]any); !ok || len(rows) != 1 {
+		t.Errorf("rows len=%v; want 1 (capped)", got["rows"])
+	}
+	if repairs, ok := got["repairs"].([]any); !ok || len(repairs) != 1 {
+		t.Errorf("repairs len=%v; want 1 (capped)", got["repairs"])
+	}
+	if total, ok := got["total"].(float64); !ok || int(total) != len(rep.Rows) {
+		t.Errorf("total=%v; want uncapped %d", got["total"], len(rep.Rows))
 	}
 }
 
@@ -113,7 +150,7 @@ func TestCmdMisfires_LoadsRealArtifact_When_EventsFileExists(t *testing.T) {
 		t.Fatalf("loadEvents: %v", err)
 	}
 	rep := mine.MineMisfires(got)
-	if len(rep.Rows) != 1 || rep.Rows[0].Key != "jq" || rep.Rows[0].Fails != 2 {
-		t.Errorf("mine over loaded events = %+v; want one jq row with 2 fails", rep.Rows)
+	if len(rep.Rows) != 1 || rep.Rows[0].Key != "sh:jq" || rep.Rows[0].Fails != 2 {
+		t.Errorf("mine over loaded events = %+v; want one sh:jq row with 2 fails", rep.Rows)
 	}
 }
