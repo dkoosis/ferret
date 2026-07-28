@@ -10,7 +10,6 @@
 package fixes
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +20,7 @@ import (
 	"time"
 
 	"github.com/dkoosis/ferret/internal/durable"
+	"github.com/dkoosis/ferret/internal/ledger"
 )
 
 // stderr is the diagnostic-log seam (mirrors the events codec): the salvaged
@@ -171,34 +171,11 @@ func Load(path string) ([]Entry, error) {
 	}
 	defer f.Close()
 
-	lines, err := readLedgerLines(f)
+	lines, err := ledger.ReadLines(f)
 	if err != nil {
 		return nil, err
 	}
 	return parseLedger(path, lines)
-}
-
-// readLedgerLines returns every non-blank line of the ledger. It uses an uncapped
-// bufio.Reader rather than a bufio.Scanner: a user --note can push one JSON line
-// past any fixed token cap, and Scanner surfaces bufio.ErrTooLong before the
-// trailing-salvage loop in parseLedger runs, so a single over-cap line would
-// hard-error the whole ledger and defeat the salvage guarantee. ReadString has no
-// token limit, matching the events codec's uncapped json.Decoder (codec.go).
-func readLedgerLines(f *os.File) ([]string, error) {
-	var lines []string
-	r := bufio.NewReader(f)
-	for {
-		line, rerr := r.ReadString('\n')
-		if s := strings.TrimSpace(line); s != "" {
-			lines = append(lines, s)
-		}
-		if rerr != nil {
-			if errors.Is(rerr, io.EOF) {
-				return lines, nil // ReadString returned the final unterminated line above
-			}
-			return nil, rerr
-		}
-	}
 }
 
 // parseLedger unmarshals each line into an Entry. A corrupt TRAILING line is
@@ -240,22 +217,7 @@ func Append(path string, e Entry) error {
 	_, statErr := os.Stat(path)
 	firstCreate := errors.Is(statErr, os.ErrNotExist)
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
-	}
-	b, err := json.Marshal(e)
-	if err != nil {
-		return errors.Join(err, f.Close())
-	}
-	b = append(b, '\n')
-	if _, err := f.Write(b); err != nil {
-		return errors.Join(err, f.Close())
-	}
-	if err := f.Sync(); err != nil {
-		return errors.Join(err, f.Close())
-	}
-	if err := f.Close(); err != nil {
+	if err := ledger.AppendJSON(path, e); err != nil {
 		return err
 	}
 	if firstCreate {

@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
+	"github.com/dkoosis/ferret/internal/analyst"
 	"github.com/dkoosis/ferret/internal/event"
 	"github.com/dkoosis/ferret/internal/lens"
 	"github.com/dkoosis/ferret/internal/mine"
@@ -108,6 +110,41 @@ func validateFormat(format string) error {
 		return fmt.Errorf("%w: %q (want text|json)", errBadFormat, format)
 	}
 	return nil
+}
+
+// newAnalystRun assembles an analyst.Config from --model/--timeout, checks the
+// API key is present, and derives the SIGINT-cancellable context every analyst
+// call runs under (analystContext, cmd/ferret/adjudicate.go) — the preamble
+// adjudicate/over-initiative/helped's LLM legs all repeated by hand
+// (ferret-9l1). A non-nil error means neither ctx nor stop is usable; ctx is
+// nil and stop is nil in that case, so a caller must check err before deferring
+// stop.
+func newAnalystRun(model string, timeout time.Duration) (ctx context.Context, cfg analyst.Config, stop func(), err error) {
+	cfg = analyst.Config{Model: model, Timeout: timeout}
+	ok, err := cfg.HasAPIKey()
+	if err != nil {
+		return nil, analyst.Config{}, nil, err
+	}
+	if !ok {
+		return nil, analyst.Config{}, nil, analyst.ErrNoAPIKey
+	}
+	ctx, stop = analystContext()
+	return ctx, cfg, stop, nil
+}
+
+// warnAmbiguousSession prints ferret's standard disambiguation notice when a
+// --session prefix (session) matches more than one session (distinct > 1):
+// which one was picked (chosen), so dk can supply a longer prefix instead of
+// silently trusting the pick. verb names what the command does with the
+// session ("scoring", "emitting") so the message reads naturally per caller.
+// distinct ≤ 1 is a no-op — the common case, unambiguous, prints nothing.
+func warnAmbiguousSession(session string, distinct int, chosen, verb string) {
+	if distinct <= 1 {
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"ferret: --session %q matched %d sessions; %s %q (use a longer prefix to disambiguate)\n",
+		session, distinct, verb, chosen)
 }
 
 // CommonFlags are shared across all analysis subcommands.

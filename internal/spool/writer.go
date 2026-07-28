@@ -12,7 +12,6 @@
 package spool
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,11 +19,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/dkoosis/ferret/internal/candidate"
 	"github.com/dkoosis/ferret/internal/durable"
+	"github.com/dkoosis/ferret/internal/ledger"
 )
 
 // stderr is the diagnostic seam (mirrors internal/fixes): a salvaged
@@ -95,30 +94,11 @@ func collectIDs(path string, ids map[string]struct{}) error {
 	}
 	defer f.Close()
 
-	lines, err := readNonBlankLines(f)
+	lines, err := ledger.ReadLines(f)
 	if err != nil {
 		return err
 	}
 	return parseIDs(path, lines, ids)
-}
-
-// readNonBlankLines returns every non-blank line of a spool file via an uncapped
-// reader (a transcript_path can push a row past any fixed token cap).
-func readNonBlankLines(f *os.File) ([]string, error) {
-	var lines []string
-	r := bufio.NewReader(f)
-	for {
-		line, rerr := r.ReadString('\n')
-		if s := strings.TrimSpace(line); s != "" {
-			lines = append(lines, s)
-		}
-		if rerr != nil {
-			if errors.Is(rerr, io.EOF) {
-				return lines, nil
-			}
-			return nil, rerr
-		}
-	}
 }
 
 // parseIDs collects the id of each row into ids. A corrupt TRAILING line is
@@ -204,23 +184,7 @@ func (w *Writer) Append(c candidate.Candidate) (bool, error) {
 		return false, nil
 	}
 
-	b, err := json.Marshal(c)
-	if err != nil {
-		return false, err
-	}
-	b = append(b, '\n')
-
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return false, err
-	}
-	if _, err := f.Write(b); err != nil {
-		return false, errors.Join(err, f.Close())
-	}
-	if err := f.Sync(); err != nil {
-		return false, errors.Join(err, f.Close())
-	}
-	if err := f.Close(); err != nil {
+	if err := ledger.AppendJSON(path, c); err != nil {
 		return false, err
 	}
 	if firstCreate {

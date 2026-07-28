@@ -18,17 +18,16 @@
 package label
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/dkoosis/ferret/internal/durable"
+	"github.com/dkoosis/ferret/internal/ledger"
 )
 
 // stderr is the diagnostic-log seam (mirrors internal/fixes and the events
@@ -120,33 +119,11 @@ func Load(path string) ([]Label, error) {
 	}
 	defer f.Close()
 
-	lines, err := readLines(f)
+	lines, err := ledger.ReadLines(f)
 	if err != nil {
 		return nil, err
 	}
 	return parse(path, lines)
-}
-
-// readLines returns every non-blank line of the ledger. It uses an uncapped
-// bufio.Reader rather than a Scanner: a "say-more" Text can push one JSON line
-// past any fixed token cap, and Scanner would surface bufio.ErrTooLong before the
-// trailing-salvage loop runs, hard-erroring the whole ledger and defeating the
-// salvage guarantee. Mirrors internal/fixes.readLedgerLines.
-func readLines(f *os.File) ([]string, error) {
-	var lines []string
-	r := bufio.NewReader(f)
-	for {
-		line, rerr := r.ReadString('\n')
-		if s := strings.TrimSpace(line); s != "" {
-			lines = append(lines, s)
-		}
-		if rerr != nil {
-			if errors.Is(rerr, io.EOF) {
-				return lines, nil // the final unterminated line was captured above
-			}
-			return nil, rerr
-		}
-	}
 }
 
 // parse unmarshals each line into a Label. A corrupt TRAILING line is salvaged
@@ -195,22 +172,7 @@ func Append(path string, l Label) error {
 	_, statErr := os.Stat(path)
 	firstCreate := errors.Is(statErr, os.ErrNotExist)
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
-	}
-	b, err := json.Marshal(l)
-	if err != nil {
-		return errors.Join(err, f.Close())
-	}
-	b = append(b, '\n')
-	if _, err := f.Write(b); err != nil {
-		return errors.Join(err, f.Close())
-	}
-	if err := f.Sync(); err != nil {
-		return errors.Join(err, f.Close())
-	}
-	if err := f.Close(); err != nil {
+	if err := ledger.AppendJSON(path, l); err != nil {
 		return err
 	}
 	if firstCreate {

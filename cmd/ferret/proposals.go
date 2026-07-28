@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -42,11 +41,7 @@ func runFixesProposals(w io.Writer, root, session, format string) error {
 	if err != nil {
 		return err
 	}
-	if distinct > 1 {
-		fmt.Fprintf(os.Stderr,
-			"ferret: --session %q matched %d sessions; emitting %q (use a longer prefix to disambiguate)\n",
-			session, distinct, src.Session)
-	}
+	warnAmbiguousSession(session, distinct, src.Session, "emitting")
 
 	proposals, err := scanProposals(src)
 	if err != nil {
