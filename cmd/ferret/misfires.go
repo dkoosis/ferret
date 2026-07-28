@@ -47,20 +47,28 @@ func cmdMisfires(cmd MisfiresCmd) error {
 	}
 	rep := mine.MineMisfires(events)
 	if c.format == fmtJSON {
-		return writeMisfiresJSON(os.Stdout, rep)
+		return writeMisfiresJSON(os.Stdout, rep, c.limit)
 	}
 	return writeMisfiresText(os.Stdout, rep, c.limit, c.maxBytes)
 }
 
-// writeMisfiresJSON emits the ranked bundle as a single JSON document — the
-// analyst / ledger-loop ingestable contract (out.JSON, like every other JSON
-// command in this package).
-func writeMisfiresJSON(w io.Writer, rep mine.MisfireReport) error {
+// writeMisfiresJSON emits the ranked bundle as a single JSON document, pre-
+// capping rows and repairs to limit (0 = unlimited) — mirrors writeBurnJSON;
+// the out.JSON contract ignores row limits itself, so the cap happens here.
+func writeMisfiresJSON(w io.Writer, rep mine.MisfireReport, limit int) error {
+	rowsTotal, repairsTotal := len(rep.Rows), len(rep.Repairs)
+	rows, repairs := rep.Rows, rep.Repairs
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	if limit > 0 && len(repairs) > limit {
+		repairs = repairs[:limit]
+	}
 	return out.JSON(w, map[string]any{
-		"rows":         rep.Rows,
-		"repairs":      rep.Repairs,
-		keyTotal:       len(rep.Rows),
-		"repairsTotal": len(rep.Repairs),
+		"rows":         rows,
+		"repairs":      repairs,
+		keyTotal:       rowsTotal,
+		"repairsTotal": repairsTotal,
 	})
 }
 
