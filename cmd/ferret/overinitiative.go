@@ -219,6 +219,7 @@ func (st *overInitState) applyLine(line []byte, decodeErrs *int, emit func()) {
 // and the human turn that closed the window did NOT push back (or the transcript
 // ended, so the human let it stand).
 func collectOverInitiativeCandidates(path string) (cands []overInitCandidate, decodeErrs int, err error) {
+	cands = []overInitCandidate{}
 	var st overInitState
 	emit := func() {
 		if !st.open {
