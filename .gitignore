@@ -23,20 +23,12 @@
 
 # /team run ephemera (heartbeat logs)
 .team/
-# bd worktree
 ferret-kuv.5/
-# bd worktree
 ferret-bbp.5/
-# bd worktree
 ferret-bbp.7/
-# bd worktree
 ferret-bbp.8/
-# bd worktree
 ferret-7c8/
-# bd worktree
 ferret-bbp.14/
 .fo/
-# bd worktree
 ferret-wf9.1/
-# bd worktree
 ferret-j33/
