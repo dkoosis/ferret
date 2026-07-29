@@ -374,18 +374,23 @@ func leadingLower(s string, n int) string {
 }
 
 // result finalizes the accumulated segmentation into a renderable value, summing
-// the per-task input/output byte totals.
+// the per-task input/output byte totals. Segments is copied out of s.segs
+// (ferret-00n) — s.segs is the segmenter's own backing array, and handing it
+// out by reference would let a caller's in-place mutation (sort, append,
+// field write) corrupt state a later result() call on the same segmenter
+// still reads.
 func (s *segmenter) result(src transcript.Source) Result {
 	var totalIn, totalOut int
 	for i := range s.segs {
 		totalIn += s.segs[i].InBytes
 		totalOut += s.segs[i].OutBytes
 	}
+	segs := append([]Segment(nil), s.segs...)
 	return Result{
 		Session:    src.Session,
 		Project:    src.Project,
 		Agent:      src.Agent,
-		Segments:   s.segs,
+		Segments:   segs,
 		TotalCalls: s.callIndex,
 		TotalIn:    totalIn,
 		TotalOut:   totalOut,

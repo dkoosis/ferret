@@ -95,6 +95,43 @@ func TestSegmentSource(t *testing.T) {
 	}
 }
 
+// TestSegmenterResultDoesNotExposeInternalBackingArray is the ferret-00n
+// regression: result() must hand out a copy of s.segs, not the segmenter's
+// own backing array. Calls result() twice on the same segmenter (mirroring
+// any future caller that re-derives a Result mid-stream) and mutates the
+// first Result's Segments in place — a caller-visible, entirely ordinary
+// thing to do (sort, filter, edit a field). Pre-fix, that mutation is
+// visible through the second Result too, because both share one backing
+// array; post-fix each Result owns its own copy.
+func TestSegmenterResultDoesNotExposeInternalBackingArray(t *testing.T) {
+	src := writeSession(t, segFixtureLines())
+	sm := segmenter{}
+	if err := transcript.ReadLines(src.Path, func(line []byte) error {
+		sm.feed(line)
+		return nil
+	}); err != nil {
+		t.Fatalf("ReadLines: %v", err)
+	}
+
+	res1 := sm.result(src)
+	if len(res1.Segments) == 0 {
+		t.Fatal("fixture produced no segments — test setup is broken")
+	}
+	origPrompt := res1.Segments[0].Prompt
+
+	// Caller mutates the slice it was handed.
+	res1.Segments[0].Prompt = "MUTATED"
+
+	res2 := sm.result(src)
+	if res2.Segments[0].Prompt != origPrompt {
+		t.Errorf("mutating res1.Segments leaked into segmenter internal state: "+
+			"res2.Segments[0].Prompt = %q, want unmutated %q", res2.Segments[0].Prompt, origPrompt)
+	}
+	if res1.Segments[0].Prompt == res2.Segments[0].Prompt {
+		t.Errorf("res1 and res2 Segments still alias the same backing array")
+	}
+}
+
 // TestSegmentSourceDeterministic is the acceptance gate: the engine is byte-stable
 // across repeated runs on identical input (no time, map-order, or randomness).
 func TestSegmentSourceDeterministic(t *testing.T) {
