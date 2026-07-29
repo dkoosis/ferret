@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dkoosis/ferret/internal/durable"
+	"github.com/dkoosis/ferret/internal/ledger"
 )
 
 // SubFileName is the substitution ledger's basename under the ferret data dir.
@@ -78,7 +79,7 @@ func LoadSubs(path string) ([]Substitution, error) {
 	}
 	defer f.Close()
 
-	lines, err := readLedgerLines(f)
+	lines, err := ledger.ReadLines(f)
 	if err != nil {
 		return nil, err
 	}

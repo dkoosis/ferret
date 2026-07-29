@@ -277,11 +277,7 @@ func cmdOverInitiative() error {
 	if err != nil {
 		return err
 	}
-	if distinct > 1 {
-		fmt.Fprintf(os.Stderr,
-			"ferret: --session %q matched %d sessions; scoring %q (use a longer prefix to disambiguate)\n",
-			cmd.Session, distinct, src.Session)
-	}
+	warnAmbiguousSession(cmd.Session, distinct, src.Session, "scoring")
 	cands, decodeErrs, err := collectOverInitiativeCandidates(src.Path)
 	if err != nil {
 		return err
@@ -291,15 +287,10 @@ func cmdOverInitiative() error {
 		return emitOverInitPrompts(os.Stdout, cands)
 	}
 
-	cfg := analyst.Config{Model: cmd.Model, Timeout: cmd.Timeout}
-	ok, err := cfg.HasAPIKey()
+	ctx, cfg, stop, err := newAnalystRun(cmd.Model, cmd.Timeout)
 	if err != nil {
 		return err
 	}
-	if !ok {
-		return analyst.ErrNoAPIKey
-	}
-	ctx, stop := analystContext()
 	defer stop()
 
 	res, err := judgeOverInitiative(ctx, cfg, src.Session, cands, decodeErrs)

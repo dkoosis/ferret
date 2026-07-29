@@ -40,11 +40,7 @@ func cmdHelped() error {
 	if err != nil {
 		return err
 	}
-	if distinct > 1 {
-		fmt.Fprintf(os.Stderr,
-			"ferret: --session %q matched %d sessions; emitting %q (use a longer prefix to disambiguate)\n",
-			cmd.Session, distinct, src.Session)
-	}
+	warnAmbiguousSession(cmd.Session, distinct, src.Session, "emitting")
 
 	data, err := resolveData(cmd.Data)
 	if err != nil {

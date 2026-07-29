@@ -68,10 +68,11 @@ func cmdAdjudicate() error {
 	// a human would see, except every tool-arg value is placeholder-mapped
 	// (ferret-5c0): a repeated volatile value (an absolute path, a URL) costs its
 	// full string once and a short token on every repeat within this prompt.
-	src, _, err := resolveSpineSource(root, cmd.Session)
+	src, distinct, err := resolveSpineSource(root, cmd.Session)
 	if err != nil {
 		return err
 	}
+	warnAmbiguousSession(cmd.Session, distinct, src.Session, "judging")
 	ph := newPlaceholderTable()
 	var buf bytes.Buffer
 	if err := spine(&buf, root, cmd.Session, ph); err != nil {
@@ -103,15 +104,10 @@ func cmdAdjudicate() error {
 // token it echoes back — split out of cmdAdjudicate to keep it under the
 // statement-count lint ceiling.
 func runAdjudicateAnalyst(model string, timeout time.Duration, session, spineText string, ph *placeholderTable) (analyst.Result, error) {
-	cfg := analyst.Config{Model: model, Timeout: timeout}
-	ok, err := cfg.HasAPIKey()
+	ctx, cfg, stop, err := newAnalystRun(model, timeout)
 	if err != nil {
 		return analyst.Result{}, err
 	}
-	if !ok {
-		return analyst.Result{}, analyst.ErrNoAPIKey
-	}
-	ctx, stop := analystContext()
 	defer stop()
 	res, err := analyst.Run(ctx, cfg, session, spineText)
 	if err != nil {
@@ -182,10 +178,11 @@ func expandProposals(proposals []analyst.Proposal, ph *placeholderTable) {
 // detail; --emit-prompt assembles both without a network call.
 func runPropose(root string) error {
 	cmd := &CLI.Adjudicate
-	src, _, err := resolveSpineSource(root, cmd.Session)
+	src, distinct, err := resolveSpineSource(root, cmd.Session)
 	if err != nil {
 		return err
 	}
+	warnAmbiguousSession(cmd.Session, distinct, src.Session, "proposing for")
 	var bundle bytes.Buffer
 	if err := candidates(&bundle, root, cmd.Session, fmtJSON, cmd.Top, ""); err != nil {
 		return err
@@ -208,15 +205,10 @@ func runPropose(root string) error {
 		return nil
 	}
 
-	cfg := analyst.Config{Model: cmd.Model, Timeout: cmd.Timeout}
-	ok, err := cfg.HasAPIKey()
+	ctx, cfg, stop, err := newAnalystRun(cmd.Model, cmd.Timeout)
 	if err != nil {
 		return err
 	}
-	if !ok {
-		return analyst.ErrNoAPIKey
-	}
-	ctx, stop := analystContext()
 	defer stop()
 	res, err := analyst.RunPropose(ctx, cfg, src.Session, bundle.String(), spineBuf.String())
 	if err != nil {
@@ -315,15 +307,10 @@ func runRecallTrace() error {
 		return nil
 	}
 
-	cfg := analyst.Config{Model: cmd.Model, Timeout: cmd.Timeout}
-	ok, err := cfg.HasAPIKey()
+	ctx, cfg, stop, err := newAnalystRun(cmd.Model, cmd.Timeout)
 	if err != nil {
 		return err
 	}
-	if !ok {
-		return analyst.ErrNoAPIKey
-	}
-	ctx, stop := analystContext()
 	defer stop()
 
 	judge := func(jctx context.Context, r recallRun) ([]analyst.Finding, string, error) {
