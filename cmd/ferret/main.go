@@ -166,10 +166,11 @@ type LensFlags struct {
 // CLI is the root grammar parsed by kong.
 var CLI struct {
 	Ingest struct {
-		Data    string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
-		Root    string `help:"Transcript root (dir or .jsonl file)." name:"root"`
-		Project string `help:"Only projects whose slug contains this substring." name:"project"`
-		DryRun  bool   `help:"Scan and report; write nothing." name:"dry-run"`
+		Data       string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
+		Root       string `help:"Transcript root (dir or .jsonl file)." name:"root"`
+		Project    string `help:"Only projects whose slug contains this substring." name:"project"`
+		DryRun     bool   `help:"Scan and report; write nothing." name:"dry-run"`
+		SnipeUsage string `help:"Glob of snipe .snipe/usage.jsonl files to join by session, e.g. ~/Projects/*/.snipe/usage.jsonl." name:"snipe-usage"`
 	} `cmd:"" help:"Build ~/.ferret/events.jsonl from transcripts." name:"ingest"`
 
 	Summary struct {
@@ -447,7 +448,7 @@ func main() {
 		kong.Description(
 			"Mine Claude Code transcripts for repeated behavior:\n"+
 				"scriptable routines, friction loops, and noisy context.\n\n"+
-				"  ferret ingest   [--root DIR] [--project SUBSTR] [--dry-run]\n"+
+				"  ferret ingest   [--root DIR] [--project SUBSTR] [--dry-run] [--snipe-usage GLOB]\n"+
 				"  ferret summary  [--by corpus|project|session]\n"+
 				"  ferret ngrams   [--lens tool] [--n 2-5] [--min-count 5] [--min-sessions 3]\n"+
 				"  ferret seqs     [--lens tool] [--min-support 20] [--max-gap 3] [--max-len 5]\n"+
@@ -658,7 +659,7 @@ func (c *common) ensureData() error {
 		return nil
 	}
 	fmt.Fprintln(os.Stderr, "ferret: no events artifact — running ingest first")
-	return ingest(c.data, "", "", false)
+	return ingest(c.data, "", "", "", false)
 }
 
 // corpusStale reports whether the corpus described by the manifest at

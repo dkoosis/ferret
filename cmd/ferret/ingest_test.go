@@ -51,7 +51,7 @@ func TestConcurrentIngestNoInterleave(t *testing.T) {
 
 	// Single-run baseline count.
 	baseDir := t.TempDir()
-	if err := ingest(baseDir, root, "", false); err != nil {
+	if err := ingest(baseDir, root, "", "", false); err != nil {
 		t.Fatalf("baseline ingest: %v", err)
 	}
 	want := countEvents(t, filepath.Join(baseDir, "events.jsonl"))
@@ -67,7 +67,7 @@ func TestConcurrentIngestNoInterleave(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			errs[i] = ingest(dataDir, root, "", false)
+			errs[i] = ingest(dataDir, root, "", "", false)
 		}(i)
 	}
 	wg.Wait()
@@ -116,7 +116,7 @@ func TestIngestAbortsOnWriteError(t *testing.T) {
 	newEventWriter = func(string) (eventSink, error) { return stub, nil }
 	t.Cleanup(func() { newEventWriter = orig })
 
-	err := ingest(dataDir, root, "", false)
+	err := ingest(dataDir, root, "", "", false)
 	if err == nil {
 		t.Fatal("ingest with a failing writer must return an error")
 	}

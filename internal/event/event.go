@@ -22,11 +22,21 @@ type Event struct {
 	Retry     bool      `json:"rt,omitempty"` // same action+target shortly after a failure
 	Compound  bool      `json:"cp,omitempty"` // segment of a split compound bash chain
 	Approx    bool      `json:"ax,omitempty"` // tool served via fuzzy/semantic fallback (snipe ~approx marker in tool_result); silence = exact match
-	Bytes     int       `json:"b,omitempty"`  // measured context cost: tool_use input + tool_result content
-	Skill     string    `json:"skill,omitempty"`
-	Plugin    string    `json:"plug,omitempty"`
-	MCP       string    `json:"mcp,omitempty"`
-	Version   string    `json:"v,omitempty"`
+	// Rung/CandidateCount/TriedRungs/IndexState come from a session+ts-joined
+	// .snipe/usage.jsonl row (sn-r1do.2, internal/snipeusage). Empty Rung means
+	// unjoined — either no usage.jsonl was loaded for this ingest run, or this
+	// particular snipe call had no matching usage row — never "no rung fired":
+	// snipe's telemetry.ClassifyRung always returns one of six non-empty
+	// canonical tokens on every real emitted row.
+	Rung           string   `json:"rg,omitempty"`
+	CandidateCount int      `json:"cc,omitempty"`
+	TriedRungs     []string `json:"tr,omitempty"`
+	IndexState     string   `json:"ix,omitempty"`
+	Bytes          int      `json:"b,omitempty"` // measured context cost: tool_use input + tool_result content
+	Skill          string   `json:"skill,omitempty"`
+	Plugin         string   `json:"plug,omitempty"`
+	MCP            string   `json:"mcp,omitempty"`
+	Version        string   `json:"v,omitempty"`
 	// Prompt is the full, untruncated user-turn text — only set on KindPrompt
 	// events. Captured at ingestion so a downstream consumer can do linguistic /
 	// query-quality analysis without re-parsing raw transcripts (ferret-d01).
@@ -65,16 +75,22 @@ const (
 
 // Stats accumulates ingest health counters.
 type Stats struct {
-	Files       int            `json:"files"`
-	Lines       int            `json:"lines"`
-	Events      int            `json:"events"`
-	Prompts     int            `json:"prompts"`
-	Unpaired    int            `json:"unpaired"`
-	Fallback    int            `json:"shellFallback"`
-	Deduped     int            `json:"deduped"`
-	OrphanBytes int            `json:"orphanBytes"` // tool_result payload for a deduped/forked use with no pending event — accounted, not attributed to a burn row
-	DecodeErrs  int            `json:"decodeErrs"`
-	ByType      map[string]int `json:"byType"`
+	Files       int `json:"files"`
+	Lines       int `json:"lines"`
+	Events      int `json:"events"`
+	Prompts     int `json:"prompts"`
+	Unpaired    int `json:"unpaired"`
+	Fallback    int `json:"shellFallback"`
+	Deduped     int `json:"deduped"`
+	OrphanBytes int `json:"orphanBytes"` // tool_result payload for a deduped/forked use with no pending event — accounted, not attributed to a burn row
+	DecodeErrs  int `json:"decodeErrs"`
+	// UsageSources/UsageRecords/UsageJoined are the corpus-level answer to "was
+	// usage.jsonl even loaded, and how much of it joined" (sn-r1do.2) — set only
+	// when an ingest run supplied --snipe-usage; zero otherwise.
+	UsageSources int            `json:"usageSources,omitempty"`
+	UsageRecords int            `json:"usageRecords,omitempty"`
+	UsageJoined  int            `json:"usageJoined,omitempty"`
+	ByType       map[string]int `json:"byType"`
 }
 
 func NewStats() *Stats { return &Stats{ByType: map[string]int{}} }
