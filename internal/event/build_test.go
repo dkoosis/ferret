@@ -8,6 +8,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/dkoosis/ferret/internal/snipeusage"
 	"github.com/dkoosis/ferret/internal/transcript"
 )
 
@@ -52,6 +53,20 @@ func ingest(t *testing.T, src transcript.Source) []*Event {
 		t.Fatal(err)
 	}
 	return evs
+}
+
+// ingestWithUsage is ingest with a snipeusage.Index wired in via SetUsage —
+// used by the usage-join enrichment tests (sn-r1do.2). Also returns the
+// Builder's Stats so a test can assert on UsageJoined.
+func ingestWithUsage(t *testing.T, src transcript.Source, idx *snipeusage.Index) ([]*Event, *Stats) {
+	t.Helper()
+	b := NewBuilder()
+	b.SetUsage(idx)
+	var evs []*Event
+	if err := b.File(src, func(ev *Event) { evs = append(evs, ev) }); err != nil {
+		t.Fatal(err)
+	}
+	return evs, b.Stats
 }
 
 func TestPairingAndStatus(t *testing.T) {
@@ -620,4 +635,134 @@ func TestSnipeApproxNonSnipeUntagged(t *testing.T) {
 			t.Error("tagged Approx when snipe was not the trailing segment")
 		}
 	})
+}
+
+// TestUsageJoinEnrichesSnipeCall mirrors TestSnipeApproxMarker's shape for the
+// sn-r1do.2 usage.jsonl join: a snipe call with a session+action+window
+// matching usage row gets Rung/CandidateCount/TriedRungs/IndexState copied
+// onto the Event, and Stats.UsageJoined is incremented.
+func TestUsageJoinEnrichesSnipeCall(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"snipe sym Foo"}`),
+		toolResultContent("u2", "t1", `"def Foo(...) at foo.go:10"`),
+	)
+	idx := snipeusage.NewIndex([]snipeusage.Record{
+		{
+			TS: "2026-06-10T10:00:04Z", Command: "sym", SessionKey: "sess",
+			Rung: "exact", CandidateCount: 3, IndexState: "fresh",
+			TriedRungs: []string{"lookup:name"},
+		},
+	})
+	evs, stats := ingestWithUsage(t, src, idx)
+	if len(evs) != 1 {
+		t.Fatalf("events = %d, want 1", len(evs))
+	}
+	ev := evs[0]
+	if ev.Rung != "exact" || ev.CandidateCount != 3 || ev.IndexState != "fresh" {
+		t.Errorf("Rung=%q CandidateCount=%d IndexState=%q, want exact/3/fresh", ev.Rung, ev.CandidateCount, ev.IndexState)
+	}
+	if len(ev.TriedRungs) != 1 || ev.TriedRungs[0] != "lookup:name" {
+		t.Errorf("TriedRungs = %+v, want [lookup:name]", ev.TriedRungs)
+	}
+	if stats.UsageJoined != 1 {
+		t.Errorf("Stats.UsageJoined = %d, want 1", stats.UsageJoined)
+	}
+}
+
+// TestUsageJoinNonSnipeUntouched proves the enrichment is gated on isSnipe,
+// same as Approx: a non-snipe shell Event never gets the usage fields even
+// when a same-session usage Index is present (a coincidental session+ts
+// collision must not leak a snipe row onto an unrelated command).
+func TestUsageJoinNonSnipeUntouched(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"rg Foo"}`),
+		toolResultContent("u2", "t1", `"hit"`),
+	)
+	idx := snipeusage.NewIndex([]snipeusage.Record{
+		{TS: "2026-06-10T10:00:04Z", Command: "sym", SessionKey: "sess", Rung: "exact"},
+	})
+	evs, stats := ingestWithUsage(t, src, idx)
+	if len(evs) != 1 {
+		t.Fatalf("events = %d, want 1", len(evs))
+	}
+	if evs[0].Rung != "" {
+		t.Errorf("non-snipe event got Rung %q, want empty", evs[0].Rung)
+	}
+	if stats.UsageJoined != 0 {
+		t.Errorf("Stats.UsageJoined = %d, want 0 (rg is not snipe)", stats.UsageJoined)
+	}
+}
+
+// TestUsageJoinNoMatchStaysUnenriched covers both no-usage-loaded (nil index,
+// the default) and loaded-but-no-matching-row: either way Rung stays "" —
+// the documented "empty means unjoined" contract (event.go's Rung comment).
+func TestUsageJoinNoMatchStaysUnenriched(t *testing.T) {
+	t.Run("no usage index set (nil, the default)", func(t *testing.T) {
+		src := writeTranscript(t,
+			toolUse("u1", "t1", "Bash", `{"command":"snipe sym Foo"}`),
+			toolResultContent("u2", "t1", `"def Foo(...) at foo.go:10"`),
+		)
+		evs := ingest(t, src) // NewBuilder() default: b.usage == nil
+		if evs[0].Rung != "" {
+			t.Errorf("Rung = %q, want empty with no usage index", evs[0].Rung)
+		}
+	})
+	t.Run("usage index set but empty — no row anywhere", func(t *testing.T) {
+		src := writeTranscript(t,
+			toolUse("u1", "t1", "Bash", `{"command":"snipe sym Foo"}`),
+			toolResultContent("u2", "t1", `"def Foo(...) at foo.go:10"`),
+		)
+		evs, stats := ingestWithUsage(t, src, snipeusage.NewIndex(nil))
+		if evs[0].Rung != "" {
+			t.Errorf("Rung = %q, want empty with an empty usage index", evs[0].Rung)
+		}
+		if stats.UsageJoined != 0 {
+			t.Errorf("Stats.UsageJoined = %d, want 0", stats.UsageJoined)
+		}
+	})
+	t.Run("usage index set, row present but outside the join window", func(t *testing.T) {
+		src := writeTranscript(t,
+			toolUse("u1", "t1", "Bash", `{"command":"snipe sym Foo"}`),
+			toolResultContent("u2", "t1", `"def Foo(...) at foo.go:10"`),
+		)
+		idx := snipeusage.NewIndex([]snipeusage.Record{
+			// tool_result ts is 2026-06-10T10:00:05Z; this row is 5 minutes off.
+			{TS: "2026-06-10T10:05:05Z", Command: "sym", SessionKey: "sess", Rung: "exact"},
+		})
+		evs, stats := ingestWithUsage(t, src, idx)
+		if evs[0].Rung != "" {
+			t.Errorf("Rung = %q, want empty — candidate is outside the join window", evs[0].Rung)
+		}
+		if stats.UsageJoined != 0 {
+			t.Errorf("Stats.UsageJoined = %d, want 0", stats.UsageJoined)
+		}
+	})
+}
+
+// TestUsageJoinCompoundChainBothSegments pins Direction point 4: unlike
+// Approx (gated to the trailing segment of a compound chain), the usage join
+// applies to EVERY snipe segment — each subprocess in the chain emitted its
+// own usage.jsonl row, independently joinable by (session, action).
+func TestUsageJoinCompoundChainBothSegments(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"snipe def Foo && snipe callers Foo"}`),
+		toolResultContent("u2", "t1", `"def result\ncallers result"`),
+	)
+	idx := snipeusage.NewIndex([]snipeusage.Record{
+		{TS: "2026-06-10T10:00:03Z", Command: "def", SessionKey: "sess", Rung: "exact", IndexState: "fresh"},
+		{TS: "2026-06-10T10:00:04Z", Command: "callers", SessionKey: "sess", Rung: "fuzzy", IndexState: "fresh"},
+	})
+	evs, stats := ingestWithUsage(t, src, idx)
+	if len(evs) != 2 {
+		t.Fatalf("events = %d, want 2 (compound split)", len(evs))
+	}
+	if evs[0].Action != "snipe_def" || evs[0].Rung != "exact" {
+		t.Errorf("evs[0] Action=%q Rung=%q, want snipe_def/exact", evs[0].Action, evs[0].Rung)
+	}
+	if evs[1].Action != "snipe_callers" || evs[1].Rung != "fuzzy" {
+		t.Errorf("evs[1] Action=%q Rung=%q, want snipe_callers/fuzzy", evs[1].Action, evs[1].Rung)
+	}
+	if stats.UsageJoined != 2 {
+		t.Errorf("Stats.UsageJoined = %d, want 2 (both segments joined)", stats.UsageJoined)
+	}
 }

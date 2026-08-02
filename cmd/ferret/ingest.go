@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dkoosis/ferret/internal/event"
+	"github.com/dkoosis/ferret/internal/snipeusage"
 	"github.com/dkoosis/ferret/internal/transcript"
 )
 
@@ -33,7 +34,7 @@ func cmdIngest() error {
 		}
 		root = r
 	}
-	return ingest(data, root, cmd.Project, cmd.DryRun)
+	return ingest(data, root, cmd.Project, cmd.SnipeUsage, cmd.DryRun)
 }
 
 // eventSink is the persistence seam for ingest: the real implementation is
@@ -54,7 +55,7 @@ var newEventWriter = func(path string) (eventSink, error) { return event.NewWrit
 // loop and refuse to seal a manifest over a partially-written artifact.
 var errWriteAbort = errors.New("ingest aborted: record write failed")
 
-func ingest(dataDir, root, project string, dryRun bool) error {
+func ingest(dataDir, root, project, snipeUsageGlob string, dryRun bool) error {
 	if root == "" {
 		r, err := defaultRoot()
 		if err != nil {
@@ -77,6 +78,23 @@ func ingest(dataDir, root, project string, dryRun bool) error {
 	}
 
 	b := event.NewBuilder()
+	// Opt-in snipe usage.jsonl join (sn-r1do.2): strictly additive — no glob,
+	// no join, behavior-identical to before this bead. UsageSources/
+	// UsageRecords are set here; Index.Matched/Attempted (surfaced via
+	// b.Stats.UsageJoined) populate as the ingest loop below runs resolve().
+	if snipeUsageGlob != "" {
+		matches, gerr := filepath.Glob(snipeUsageGlob)
+		if gerr != nil {
+			return fmt.Errorf("snipe-usage glob %s: %w", snipeUsageGlob, gerr)
+		}
+		records, uerr := snipeusage.ReadGlob(snipeUsageGlob)
+		if uerr != nil {
+			return uerr
+		}
+		b.SetUsage(snipeusage.NewIndex(records))
+		b.Stats.UsageSources = len(matches)
+		b.Stats.UsageRecords = len(records)
+	}
 	// Builder.File takes a non-fallible emit; capture the first write error in a
 	// closure-scoped var instead. Once set, the outer loop stops and the run is
 	// treated as partial — no manifest gets sealed over a truncated artifact.
@@ -143,6 +161,9 @@ func ingest(dataDir, root, project string, dryRun bool) error {
 		st.Files, st.Lines, st.Events, st.Prompts, time.Since(start).Round(time.Millisecond))
 	fmt.Printf("health unpaired=%.1f%% shell-fallback=%d deduped=%d decode-errs=%d\n",
 		pct(st.Unpaired, st.Events), st.Fallback, st.Deduped, st.DecodeErrs)
+	if st.UsageSources > 0 {
+		fmt.Printf("usage sources=%d records=%d joined=%d\n", st.UsageSources, st.UsageRecords, st.UsageJoined)
+	}
 	types := make([]string, 0, len(st.ByType))
 	for t := range st.ByType {
 		types = append(types, t)

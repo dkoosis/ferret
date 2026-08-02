@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/dkoosis/ferret/internal/shellnorm"
+	"github.com/dkoosis/ferret/internal/snipeusage"
 	"github.com/dkoosis/ferret/internal/transcript"
 )
 
@@ -24,10 +25,19 @@ type Builder struct {
 	seen     map[uint64]struct{}
 	resolved map[string]struct{} // tool_use ids whose result we've applied, across the ingest
 	Stats    *Stats
+	usage    *snipeusage.Index // nil unless SetUsage is called — no-op guard everywhere it's read
 }
 
 func NewBuilder() *Builder {
 	return &Builder{seen: map[uint64]struct{}{}, resolved: map[string]struct{}{}, Stats: NewStats()}
+}
+
+// SetUsage wires a session+action+time-joined snipe usage.jsonl Index into
+// the builder, so resolve() can enrich every isSnipe Event it emits with
+// that call's resolution rung (sn-r1do.2). Optional: a nil/unset usage index
+// (the default) leaves ingest behavior-identical to before this bead.
+func (b *Builder) SetUsage(idx *snipeusage.Index) {
+	b.usage = idx
 }
 
 // fileState is the per-transcript accumulator: events buffer plus the
@@ -229,10 +239,37 @@ func (b *Builder) resolve(st *fileState, blk *transcript.Block, ts time.Time) {
 	if last := evs[n-1]; isSnipe(last) && snipeApprox(blk.Content) {
 		last.Approx = true
 	}
+	b.joinUsage(evs, ts)
 	attachRetrievalHits(evs, blk.Content)
 	b.resolved[blk.ToolUseID] = struct{}{}
 	delete(st.pending, blk.ToolUseID)
 	delete(st.callTime, blk.ToolUseID)
+}
+
+// joinUsage enriches every snipe segment in evs with a session+action+ts
+// matched .snipe/usage.jsonl row (sn-r1do.2). Unlike Approx (gated to the
+// trailing segment only — a single tool_result's ~approx suffix is ambiguous
+// about which earlier segment it describes), this join applies to every
+// snipe segment: each snipe subprocess in a compound chain emitted its own
+// usage.jsonl row independent of the others, and Index.Match's (session,
+// action) grouping resolves each one correctly even mid-chain. No-op when no
+// usage index was wired in (b.usage == nil, the default).
+func (b *Builder) joinUsage(evs []*Event, ts time.Time) {
+	if b.usage == nil {
+		return
+	}
+	for _, ev := range evs {
+		if !isSnipe(ev) {
+			continue
+		}
+		if rec, ok := b.usage.Match(ev.Session, ev.Action, ts); ok {
+			ev.Rung = rec.Rung
+			ev.CandidateCount = rec.CandidateCount
+			ev.TriedRungs = rec.TriedRungs
+			ev.IndexState = rec.IndexState
+			b.Stats.UsageJoined++
+		}
+	}
 }
 
 // attachRetrievalHits captures a query-mode retrieval event's returned hits in
