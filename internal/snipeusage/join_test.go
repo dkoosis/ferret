@@ -131,6 +131,36 @@ func TestMatchDroppedRowDoesNotCascade(t *testing.T) {
 	}
 }
 
+// TestMatchOutOfOrderCalls pins the sn-r1do.2 P0: a group's records can come
+// from more than one transcript file (subagent transcripts inherit the parent
+// session's key; resumed/forked sessions span files), and ingest walks files
+// in filepath.WalkDir LEXICAL order — so Match calls for ONE group do NOT
+// arrive in chronological `at` order. Here the chronologically-LATER call
+// (at=53:00) is issued FIRST, then the earlier one (at=52:00). Both must still
+// find their own nearest record. The retired cursor walk would advance past
+// the early record on the first call and hand the second call a miss.
+func TestMatchOutOfOrderCalls(t *testing.T) {
+	idx := NewIndex([]Record{
+		{TS: "2026-08-01T20:52:00-04:00", Command: "sym", SessionKey: "sess-1", Arg: "early"},
+		{TS: "2026-08-01T20:53:00-04:00", Command: "sym", SessionKey: "sess-1", Arg: "late"},
+	})
+
+	// Chronologically-later call issued first (out of order).
+	late, ok := idx.Match("sess-1", "snipe_sym", mustTime(t, "2026-08-01T20:53:00-04:00"))
+	if !ok || late.Arg != "late" {
+		t.Fatalf("late match = %+v, ok=%v, want Arg=late", late, ok)
+	}
+	// Earlier call issued second — must still find its own record, not be
+	// starved by a cursor that already skipped past it.
+	early, ok := idx.Match("sess-1", "snipe_sym", mustTime(t, "2026-08-01T20:52:00-04:00"))
+	if !ok || early.Arg != "early" {
+		t.Fatalf("early match = %+v, ok=%v, want Arg=early (cursor-free scan must not skip it)", early, ok)
+	}
+	if idx.Matched != 2 || idx.Attempted != 2 {
+		t.Errorf("Matched=%d Attempted=%d, want 2,2", idx.Matched, idx.Attempted)
+	}
+}
+
 func TestMatchUnknownGroupCounts(t *testing.T) {
 	idx := NewIndex(nil)
 	if _, ok := idx.Match("sess-x", "snipe_sym", time.Now()); ok {
