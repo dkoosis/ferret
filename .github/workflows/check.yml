@@ -1,0 +1,52 @@
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # Keep in lockstep with the `go` directive in go.mod.
+          go-version: '1.26'
+          check-latest: true
+
+      # Private dkoosis modules bypass the public proxy and authenticate with a
+      # PAT. Add DKOOSIS_MODULES_TOKEN in repo Settings → Secrets before merge —
+      # this step fails loudly if it is missing (module fetch would fail anyway).
+      - name: configure access to private dkoosis modules
+        env:
+          DKOOSIS_MODULES_TOKEN: ${{ secrets.DKOOSIS_MODULES_TOKEN }}
+        run: |
+          if [ -z "$DKOOSIS_MODULES_TOKEN" ]; then
+            echo "::error::DKOOSIS_MODULES_TOKEN secret not set — add it in repo Settings → Secrets."
+            exit 1
+          fi
+          echo "GOPRIVATE=github.com/dkoosis/*" >> "$GITHUB_ENV"
+          git config --global url."https://x-access-token:${DKOOSIS_MODULES_TOKEN}@github.com/dkoosis/".insteadOf "https://github.com/dkoosis/"
+
+      - name: vet
+        run: go vet ./...
+
+      # The -race gate (epic ccp-sbp.4): the race detector is the machine that
+      # catches the concurrency-lifecycle defect class. -count=1 bypasses the
+      # test cache so race runs on every push.
+      - name: test (race)
+        run: go test -race -count=1 ./...
+
+      - name: build
+        run: go build ./...
