@@ -8,6 +8,7 @@ require (
 	github.com/alecthomas/kong v1.15.0
 	github.com/anthropics/anthropic-sdk-go v1.50.2
 	github.com/dkoosis/keyring v0.1.0
+	github.com/quasilyte/go-ruleguard/dsl v0.3.23
 	mvdan.cc/sh/v3 v3.13.1
 )
 

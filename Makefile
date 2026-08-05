@@ -12,7 +12,7 @@ SHELL := /bin/bash
 include .sandbox/lib/Makefile.doctor.mk
 include .sandbox/lib/Makefile.cross.mk
 
-.PHONY: help check audit vet lint test race build vuln dupe nilcheck install deploy clean corpus
+.PHONY: help check audit vet lint test race build vuln dupe nilcheck pack-drift install deploy clean corpus
 
 # Serialize golangci-lint through the machine-global mkdir mutex (see script
 # header — golangci-lint's cache lock fails exit-3 on contention instead of
@@ -23,7 +23,7 @@ help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n\n"} \
 		/^[a-zA-Z0-9_-]+:.*?## / { printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
-check: vet lint test build ## Fast validation: vet + lint + test + build
+check: vet lint test build pack-drift ## Fast validation: vet + lint + test + build + pack-drift
 	@echo "=== check pass ==="
 
 audit: check race vuln dupe nilcheck ## Exhaustive validation
@@ -44,6 +44,13 @@ race: ## Run tests with race detector (fresh run)
 
 build: ## Compile everything
 	go build ./...
+
+# bugclasses pack (ccp-sbp): fail if .golangci-rules/bugclasses.go has drifted
+# from the upstream cc-plugins pack. Network-soft — an unreachable upstream
+# (cc-plugins is private) warns and passes, so this never breaks an offline
+# build; a real content/version mismatch fails loudly.
+pack-drift: ## Check bugclasses rules haven't drifted from upstream
+	scripts/check-pack-drift.sh .golangci-rules/bugclasses.go
 
 # CORPUS_OUT/N/SEED override the defaults: make corpus N=60 OUT=/tmp/big
 CORPUS_OUT ?= /tmp/ferret-corpus
