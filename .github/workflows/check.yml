@@ -21,9 +21,8 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          # Keep in lockstep with the `go` directive in go.mod.
-          go-version: '1.26'
-          check-latest: true
+          go-version-file: go.mod
+          check-latest: false
 
       # Private dkoosis modules bypass the public proxy and authenticate with a
       # PAT. Add DKOOSIS_MODULES_TOKEN in repo Settings → Secrets before merge —
@@ -39,21 +38,18 @@ jobs:
           echo "GOPRIVATE=github.com/dkoosis/*" >> "$GITHUB_ENV"
           git config --global url."https://x-access-token:${DKOOSIS_MODULES_TOKEN}@github.com/dkoosis/".insteadOf "https://github.com/dkoosis/"
 
-      - name: vet
-        run: go vet ./...
+      - name: golangci-lint (pinned in .sandbox/project.conf)
+        run: |
+          . ./.sandbox/project.conf
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh \
+            | sh -s -- -b "$(go env GOPATH)/bin" "$GOLANGCI_LINT_VERSION"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
-      # The -race gate (epic ccp-sbp.4): the race detector is the machine that
-      # catches the concurrency-lifecycle defect class. -count=1 bypasses the
-      # test cache so race runs on every push.
-      - name: test (race)
-        run: go test -race -count=1 ./...
+      - name: check
+        run: make check
 
-      # bugclasses pack drift (ccp-sbp): fail if .golangci-rules/bugclasses.go
-      # has drifted from upstream. Network-soft — skips cleanly when upstream is
-      # unreachable (cc-plugins is private; activates once a token or public URL
-      # is wired via PACK_UPSTREAM_URL).
-      - name: pack-drift
-        run: make pack-drift
-
-      - name: build
-        run: go build ./...
+      # The -race gate (epic ccp-sbp.4) survives the collapse as a make verb, not
+      # as re-implemented YAML. CI = local check + race; no step here duplicates
+      # what a Makefile target already owns.
+      - name: race
+        run: make race

@@ -12,7 +12,7 @@ SHELL := /bin/bash
 include .sandbox/lib/Makefile.doctor.mk
 include .sandbox/lib/Makefile.cross.mk
 
-.PHONY: help check audit vet lint test race build vuln dupe nilcheck pack-drift install deploy clean corpus
+.PHONY: help check audit vet lint test race build vuln dupe nilcheck fuzz pack-drift install deploy clean corpus
 
 # Serialize golangci-lint through the machine-global mkdir mutex (see script
 # header — golangci-lint's cache lock fails exit-3 on contention instead of
@@ -20,13 +20,23 @@ include .sandbox/lib/Makefile.cross.mk
 GOLANGCILINT := bash scripts/lint-locked
 
 help: ## Show this help
-	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n\n"} \
-		/^[a-zA-Z0-9_-]+:.*?## / { printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@printf '\n\033[1mFour verbs. Identical in every dkoosis repo.\033[0m\n\n'
+	@printf '  \033[36mcheck \033[0m  fast gate — vet + lint + test + build. Pre-commit; required in CI.\n'
+	@printf '  \033[36maudit \033[0m  check, plus race + fuzz + vuln + dupe + nilcheck. Before you ask for review.\n'
+	@printf '  \033[36mdeploy\033[0m  build + install this tool locally.\n'
+	@printf '  \033[36mhelp  \033[0m  this text.\n\n'
+	@printf 'Everything below is an internal step of one of those four. Call the verbs.\n\n'
+	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z0-9_.-]+:.*?## / { printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@printf '\n'
 
-check: vet lint test build pack-drift ## Fast validation: vet + lint + test + build + pack-drift
+check: vet lint test build ## Fast validation: vet + lint + test + build
 	@echo "=== check pass ==="
 
-audit: check race vuln dupe nilcheck ## Exhaustive validation
+FUZZTIME ?= 30s
+fuzz: ## Fuzz the parsers (FUZZTIME=30s)
+	go test -run '^$$' -fuzz '^FuzzSplit$$' -fuzztime=$(FUZZTIME) ./internal/shellnorm
+
+audit: check race fuzz vuln dupe nilcheck ## Exhaustive validation
 	@echo "=== audit pass ==="
 
 vet: ## Run go vet
