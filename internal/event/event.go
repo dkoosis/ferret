@@ -21,7 +21,16 @@ type Event struct {
 	DurMS     int64     `json:"ms,omitempty"` // tool_use → tool_result latency
 	Retry     bool      `json:"rt,omitempty"` // same action+target shortly after a failure
 	Compound  bool      `json:"cp,omitempty"` // segment of a split compound bash chain
-	Approx    bool      `json:"ax,omitempty"` // tool served via fuzzy/semantic fallback (snipe ~approx marker in tool_result); silence = exact match
+	// Swallow marks a shell segment in the left arm of `cmd 2>/dev/null ||
+	// fallback` (ferret-cax) — a failure that is structurally invisible to
+	// Status, because the error text is discarded and the chain exits with the
+	// fallback's code, so resolve() sees no is_error and records ok. The tell
+	// lives in the command text and must be captured here, at ingest:
+	// shellnorm.Split has already dissolved the `||` by the time Detail is
+	// written, so the two halves land in separate events and no downstream pass
+	// can put them back together. Set from Segment.Swallowed.
+	Swallow bool `json:"sw,omitempty"`
+	Approx  bool `json:"ax,omitempty"` // tool served via fuzzy/semantic fallback (snipe ~approx marker in tool_result); silence = exact match
 	// Rung/CandidateCount/TriedRungs/IndexState come from a session+ts-joined
 	// .snipe/usage.jsonl row (sn-r1do.2, internal/snipeusage). Empty Rung means
 	// unjoined — either no usage.jsonl was loaded for this ingest run, or this

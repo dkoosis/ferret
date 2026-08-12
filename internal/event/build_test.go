@@ -262,6 +262,49 @@ func TestCompoundFailureIsCFailNotFail(t *testing.T) {
 	}
 }
 
+// TestSwallowedErrorMarksLeftArmAndRecordsOK is the ferret-cax wiring test:
+// `cmd 2>/dev/null || fallback` exits 0, so Status stays ok and no misfire is
+// recorded — the failure is only visible through Swallow, which must land on
+// the left arm (the command whose error was discarded) and not on the
+// fallback that ran in its place.
+func TestSwallowedErrorMarksLeftArmAndRecordsOK(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"bd show x 2>/dev/null || bd list"}`),
+		toolResult("u2", "t1", false),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 2 {
+		t.Fatalf("events = %d, want 2 (split compound)", len(evs))
+	}
+	want := map[string]bool{"bd_show": true, "bd_list": false}
+	for _, ev := range evs {
+		if ev.Status != StatusOK {
+			t.Errorf("%s: status = %q, want %q — the chain exits with the fallback's code",
+				ev.Action, ev.Status, StatusOK)
+		}
+		if w, ok := want[ev.Action]; !ok {
+			t.Errorf("unexpected action %q", ev.Action)
+		} else if ev.Swallow != w {
+			t.Errorf("%s: Swallow = %v, want %v", ev.Action, ev.Swallow, w)
+		}
+	}
+}
+
+// TestUnswallowedCompoundLeavesSwallowUnset pins the negative: an `&&` chain
+// with the same redirect still surfaces its failure, so nothing is marked.
+func TestUnswallowedCompoundLeavesSwallowUnset(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"bd show x 2>/dev/null && bd list"}`),
+		toolResult("u2", "t1", true),
+	)
+	evs := ingest(t, src)
+	for _, ev := range evs {
+		if ev.Swallow {
+			t.Errorf("%s: Swallow = true, want false — an && chain still reports its failure", ev.Action)
+		}
+	}
+}
+
 func TestSingleSegmentFailureIsFail(t *testing.T) {
 	src := writeTranscript(t,
 		toolUse("u1", "t1", "Bash", `{"command":"go test ./..."}`),

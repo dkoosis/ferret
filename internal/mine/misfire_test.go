@@ -187,6 +187,129 @@ func TestMineMisfires_IgnoresRetryWithoutOpenFailure_When_NoPendingMatch(t *test
 	}
 }
 
+// swallowEv is a shell event carrying the ingest-set swallow flag — the shape
+// internal/event/build.go writes when shellnorm.Split marks a left arm.
+func swallowEv(session, action, detail string) event.Event {
+	e := ev(session, event.KindShell, action, "", event.StatusOK, detail)
+	e.Swallow = true
+	return e
+}
+
+func TestMineMisfires_RanksSwallowsByCountTimesSessionSpread_When_MultipleKeysSwallow(t *testing.T) {
+	events := []event.Event{
+		// bd_show swallows in 3 distinct sessions (score 3*3=9).
+		swallowEv("s1", "bd_show", "bd show x 2>/dev/null"),
+		swallowEv("s2", "bd_show", "bd show y 2>/dev/null"),
+		swallowEv("s3", "bd_show", "bd show z 2>/dev/null"),
+		// rg swallows twice, one session (score 2*1=2).
+		swallowEv("s1", "rg", "rg pat 2>/dev/null"),
+		swallowEv("s1", "rg", "rg pat 2>/dev/null"),
+	}
+	rep := MineMisfires(events)
+	if len(rep.Swallowed) != 2 {
+		t.Fatalf("swallowed = %d rows, want 2; got %+v", len(rep.Swallowed), rep.Swallowed)
+	}
+	top := rep.Swallowed[0]
+	if top.Key != "sh:bd_show" || top.Score != 9 {
+		t.Errorf("top swallow row = %+v, want sh:bd_show score=9", top)
+	}
+	if top.Swallows != 3 || top.SwallowSess != 3 {
+		t.Errorf("top row counts = %d/%d, want 3 swallows across 3 sessions", top.Swallows, top.SwallowSess)
+	}
+	if rep.Swallowed[1].Key != "sh:rg" || rep.Swallowed[1].Score != 2 {
+		t.Errorf("second row = %+v, want rg score=2", rep.Swallowed[1])
+	}
+}
+
+// TestMineMisfires_CountsSwallowsInvisibleToStatus_When_ChainExitsOK is the
+// bead's core claim: a swallowed failure records Status ok, so it contributes
+// nothing to the misfire table — the swallow table is the only place it shows.
+func TestMineMisfires_CountsSwallowsInvisibleToStatus_When_ChainExitsOK(t *testing.T) {
+	rep := MineMisfires([]event.Event{
+		swallowEv("s1", "bd_show", "bd show x 2>/dev/null"),
+		swallowEv("s2", "bd_show", "bd show y 2>/dev/null"),
+	})
+	if len(rep.Rows) != 0 {
+		t.Errorf("rows = %+v, want none — a swallowed failure never sets is_error", rep.Rows)
+	}
+	if len(rep.Swallowed) != 1 || rep.Swallowed[0].Swallows != 2 {
+		t.Fatalf("swallowed = %+v, want one row with 2 swallows", rep.Swallowed)
+	}
+}
+
+func TestMineMisfires_ComputesSwallowRateAndExemplar_When_KeyMixesShapes(t *testing.T) {
+	events := []event.Event{
+		swallowEv("s1", "jq", "jq '.[0]' out.json 2>/dev/null"),
+		ev("s1", event.KindShell, "jq", "", event.StatusOK, "jq '.result[0]' out.json"),
+		ev("s2", event.KindShell, "jq", "", event.StatusOK, "jq '.result[0]' out.json"),
+		ev("s2", event.KindShell, "jq", "", event.StatusOK, "jq '.result[0]' out.json"),
+	}
+	rep := MineMisfires(events)
+	if len(rep.Swallowed) != 1 {
+		t.Fatalf("swallowed = %+v, want 1 row", rep.Swallowed)
+	}
+	row := rep.Swallowed[0]
+	if row.Calls != 4 || row.Swallows != 1 {
+		t.Fatalf("calls/swallows = %d/%d, want 4/1", row.Calls, row.Swallows)
+	}
+	if got, want := row.SwallowRate, 0.25; got != want {
+		t.Errorf("swallowRate = %v, want %v", got, want)
+	}
+	if row.Exemplar != "jq '.[0]' out.json 2>/dev/null" {
+		t.Errorf("exemplar = %q, want the first swallowing command", row.Exemplar)
+	}
+}
+
+func TestMineMisfires_ExcludesSwallowFreeKeys_When_NoSwallowPresent(t *testing.T) {
+	rep := MineMisfires([]event.Event{
+		ev("s1", event.KindShell, "git_status", "", event.StatusOK, "git status"),
+		ev("s1", event.KindShell, "git_status", "", event.StatusFail, "git status --typo"),
+	})
+	if len(rep.Swallowed) != 0 {
+		t.Errorf("swallowed = %+v, want none — nothing hidden under this key", rep.Swallowed)
+	}
+}
+
+// TestMineMisfires_IgnoresSwallowFlagOnToolEvents_When_KindIsNotShell guards
+// the Kind check: only shell events carry command text, so a stray flag on a
+// tool event must not manufacture a swallow row.
+func TestMineMisfires_IgnoresSwallowFlagOnToolEvents_When_KindIsNotShell(t *testing.T) {
+	toolEv := event.Event{Session: "s1", Kind: event.KindTool, Action: "Read", Status: event.StatusOK, Swallow: true}
+	rep := MineMisfires([]event.Event{toolEv})
+	if len(rep.Swallowed) != 0 {
+		t.Errorf("swallowed = %+v, want none — tool events have no command to swallow with", rep.Swallowed)
+	}
+}
+
+// TestMineMisfires_RecoversSwallowFromDetailText_When_FlagAbsent covers the
+// compatibility path for a corpus ingested before Event.Swallow existed: the
+// whole command survives in Detail for the un-split forms, so the text re-check
+// still recovers the tell there.
+func TestMineMisfires_RecoversSwallowFromDetailText_When_FlagAbsent(t *testing.T) {
+	// No Swallow flag set — detection must come from the Detail text alone.
+	stale := ev("s1", event.KindShell, "sh", "", event.StatusOK, "bd show x 2>/dev/null || bd list")
+	rep := MineMisfires([]event.Event{stale})
+	if len(rep.Swallowed) != 1 || rep.Swallowed[0].Swallows != 1 {
+		t.Fatalf("swallowed = %+v, want the tell recovered from Detail", rep.Swallowed)
+	}
+	if rep.Swallowed[0].Key != "sh:sh" {
+		t.Errorf("key = %q, want sh:sh", rep.Swallowed[0].Key)
+	}
+}
+
+// TestMineMisfires_LeavesHalfShapesAlone_When_DetailIsNotASwallow pins the
+// negative half of the text path: a silenced command with no alternative, and
+// an alternative with nothing silenced, are both ordinary events.
+func TestMineMisfires_LeavesHalfShapesAlone_When_DetailIsNotASwallow(t *testing.T) {
+	rep := MineMisfires([]event.Event{
+		ev("s1", event.KindShell, "sh", "", event.StatusOK, "bd show x 2>/dev/null"),
+		ev("s1", event.KindShell, "sh", "", event.StatusOK, "bd show x || bd list"),
+	})
+	if len(rep.Swallowed) != 0 {
+		t.Errorf("swallowed = %+v, want none — neither half alone hides a failure", rep.Swallowed)
+	}
+}
+
 // TestMineMisfires_SurfacesKnownJQBdShowMotif_When_CorpusReproducesFerret67o
 // is the bead's named AC fixture: the jq / `bd show` saga (152 errors across
 // 130 transcripts before a manual tools.md fix, ferret-67o) must rank at or

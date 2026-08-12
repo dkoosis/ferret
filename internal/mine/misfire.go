@@ -2,8 +2,10 @@ package mine
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/dkoosis/ferret/internal/event"
+	"github.com/dkoosis/ferret/internal/shellnorm"
 )
 
 // Misfire ranking (ferret-ct1) — the missing front half of the fixes/
@@ -50,19 +52,50 @@ type RepairPair struct {
 	Count     int    `json:"count"`
 }
 
-// MisfireReport is the whole ranked bundle: the corpus's misfire table plus
-// the repair pairs pulled from it.
+// SwallowRow is one Action key's ranking of misfires that are structurally
+// invisible to Status (ferret-cax). A guess-chain written as
+// `cmd 2>/dev/null || fallback` discards the error text and exits with the
+// fallback's code, so the tool_result carries no is_error flag and
+// internal/event/build.go's resolve() records the call as ok — it never
+// reaches MisfireRow at all. shellnorm.Swallows recovers the shape from the
+// command text at ingest (Event.Swallow), which is what this table counts.
+//
+// Swallows is a FLOOR on hidden failures, not a count of them: the shape says
+// the left arm's failure *would* be invisible, never that it failed on this
+// run. The left arm's return code is exactly the thing the construct throws
+// away, so no pass over the corpus can separate "swallowed a failure" from
+// "succeeded quietly." A key that ranks high here is one where the corpus
+// cannot answer how often it misfires — which is the finding.
+type SwallowRow struct {
+	Key         string  `json:"key"`         // Event.Action, "sh:"-prefixed — same key space as MisfireRow
+	Swallows    int     `json:"swallows"`    // shell events whose command swallowed its own errors
+	SwallowSess int     `json:"swallowSess"` // distinct sessions with ≥1 swallow of this key — the "spread"
+	Calls       int     `json:"calls"`       // all shell events with this key, swallowing or not
+	SwallowRate float64 `json:"swallowRate"` // Swallows / Calls
+	Score       float64 `json:"score"`       // Swallows × SwallowSess — mirrors MisfireRow.Score
+	Exemplar    string  `json:"exemplar,omitempty"`
+}
+
+// MisfireReport is the whole ranked bundle: the corpus's misfire table, the
+// repair pairs pulled from it, and the swallowed-error table — the misfires
+// the first two tables can never see.
 type MisfireReport struct {
-	Rows    []MisfireRow `json:"rows"`
-	Repairs []RepairPair `json:"repairs"`
+	Rows      []MisfireRow `json:"rows"`
+	Repairs   []RepairPair `json:"repairs"`
+	Swallowed []SwallowRow `json:"swallowed"`
 }
 
 // misfireAgg accumulates one Action key's totals as the corpus walk streams
-// events into it.
+// events into it. swallows/swallowSess ride the same walk — a swallow is a
+// property of the command text, orthogonal to the event's Status, so both
+// tables are filled in one pass.
 type misfireAgg struct {
-	fails    int
-	calls    int
-	failSess map[string]struct{}
+	fails        int
+	calls        int
+	failSess     map[string]struct{}
+	swallows     int
+	swallowSess  map[string]struct{}
+	swallowFirst string // first swallowing command seen, as the row's exemplar
 }
 
 // failKey tracks the most recent unresolved failure's raw Detail per
@@ -92,19 +125,47 @@ func MineMisfires(events []event.Event) MisfireReport {
 		key := misfireKey(ev)
 		a := aggs[key]
 		if a == nil {
-			a = &misfireAgg{failSess: map[string]struct{}{}}
+			a = &misfireAgg{failSess: map[string]struct{}{}, swallowSess: map[string]struct{}{}}
 			aggs[key] = a
 		}
 		a.calls++
 
 		observeStatus(a, pending, pairCounts, key, ev)
+		observeSwallow(a, ev)
 	}
 
 	return MisfireReport{
-		Rows:    rankMisfires(aggs),
-		Repairs: rankRepairs(pairCounts),
+		Rows:      rankMisfires(aggs),
+		Repairs:   rankRepairs(pairCounts),
+		Swallowed: rankSwallows(aggs),
 	}
 }
+
+// observeSwallow folds one event's swallowed-error tell into its aggregate.
+// Event.Swallow is the authoritative signal — computed at ingest, where the
+// full command line still exists. The text re-check is a compatibility path
+// for a corpus ingested before that field existed: it only ever fires on the
+// forms whose whole command survives into Detail intact (the no-segment "sh"
+// event and the parse-fallback segment), because a normal compound is split
+// and its `||` is gone. Cheap by construction — the substring guard means the
+// bash parser runs only for the handful of commands that mention /dev/null.
+func observeSwallow(a *misfireAgg, ev *event.Event) {
+	if ev.Kind != event.KindShell {
+		return // tool events carry no command text to swallow anything with
+	}
+	swallowed := ev.Swallow || (strings.Contains(ev.Detail, devNull) && shellnorm.Swallows(ev.Detail))
+	if !swallowed {
+		return
+	}
+	a.swallows++
+	a.swallowSess[ev.Session] = struct{}{}
+	if a.swallowFirst == "" {
+		a.swallowFirst = ev.Detail
+	}
+}
+
+// devNull guards observeSwallow's fallback parse — see its doc comment.
+const devNull = "/dev/null"
 
 // observeStatus folds one event's outcome into its command aggregate and the
 // pending-fail → repair-pair state machine. cfail's failing segment is unknown
@@ -185,6 +246,42 @@ func rankMisfires(aggs map[string]*misfireAgg) []MisfireRow {
 		}
 		if x.FailSess != y.FailSess {
 			return x.FailSess > y.FailSess
+		}
+		return x.Key < y.Key
+	})
+	return rows
+}
+
+// rankSwallows projects the per-key aggregates into the sorted SwallowRow
+// table, using the same Score = count × session-spread rank and the same
+// deterministic tie-break ladder as rankMisfires so the two tables read alike.
+func rankSwallows(aggs map[string]*misfireAgg) []SwallowRow {
+	rows := make([]SwallowRow, 0, len(aggs))
+	for key, a := range aggs {
+		if a.swallows == 0 {
+			continue // nothing hidden under this key
+		}
+		row := SwallowRow{
+			Key:         key,
+			Swallows:    a.swallows,
+			SwallowSess: len(a.swallowSess),
+			Calls:       a.calls,
+			SwallowRate: misfireRatio(a.swallows, a.calls),
+			Exemplar:    a.swallowFirst,
+		}
+		row.Score = float64(row.Swallows) * float64(row.SwallowSess)
+		rows = append(rows, row)
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		x, y := rows[i], rows[j]
+		if x.Score != y.Score {
+			return x.Score > y.Score
+		}
+		if x.Swallows != y.Swallows {
+			return x.Swallows > y.Swallows
+		}
+		if x.SwallowSess != y.SwallowSess {
+			return x.SwallowSess > y.SwallowSess
 		}
 		return x.Key < y.Key
 	})

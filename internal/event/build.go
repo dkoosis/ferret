@@ -374,6 +374,7 @@ func (b *Builder) fromToolUse(src transcript.Source, raw *transcript.Raw, blk *t
 			ev.Action = "sh"
 			ev.Detail = trunc(cmd, detailMax)
 			ev.Bytes = len(cmd)
+			ev.Swallow = shellnorm.Swallows(cmd)
 			return []*Event{&ev}
 		}
 		out := make([]*Event, 0, len(segs))
@@ -384,6 +385,7 @@ func (b *Builder) fromToolUse(src transcript.Source, raw *transcript.Raw, blk *t
 			ev.Detail = trunc(seg.Raw, detailMax)
 			ev.Bytes = len(seg.Raw)
 			ev.Compound = len(segs) > 1
+			ev.Swallow = seg.Swallowed
 			ev.Query = trixiCLIQuery(seg.Cmd, seg.Raw)
 			out = append(out, &ev)
 		}
