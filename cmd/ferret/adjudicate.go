@@ -26,7 +26,7 @@ func analystContext() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), os.Interrupt)
 }
 
-var errAdjSessionRequired = errors.New("adjudicate: --session PREFIX required")
+var errAdjSessionRequired = usage("adjudicate: --session PREFIX required")
 
 // errNoRecallRuns is the empty-honest sentinel: a recall-trace with no runs is a
 // hard error, never a silent zero-finding green (the downstream metric must not
@@ -250,7 +250,7 @@ func writeProposeText(w io.Writer, res analyst.ProposeResult) error {
 	// dk translates a proposal above into the two flags. Bare (unquoted) angle
 	// brackets keep it from pasting cleanly into a shell and recording literal
 	// placeholders in the ledger.
-	sink.Head(`next (template — fill from a proposal above): ferret fixes add --motif <tokens> --fix <action>`)
+	sink.NextHead(`(template — fill from a proposal above) ferret fixes add --motif <tokens> --fix <action>`)
 	return nil
 }
 

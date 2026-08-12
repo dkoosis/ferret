@@ -25,13 +25,33 @@ import (
 )
 
 var (
-	errBadFormat    = errors.New("bad --format")
-	errMaxBytesJSON = errors.New("--max-bytes is not supported with --format json (use --limit)")
-	errMinSupport   = errors.New("--min-support must be ≥ 1 (0 or negative grows the pattern lattice unbounded)")
-	errMaxGap       = errors.New("--max-gap must be ≥ 1")
-	errMaxLen       = errors.New("--max-len must be ≥ 1")
-	errOrder        = errors.New("--order must be ≥ 1")
+	errBadFormat    = usage("bad --format")
+	errMaxBytesJSON = usage("--max-bytes is not supported with --format json (use --limit)")
+	errMinSupport   = usage("--min-support must be ≥ 1 (0 or negative grows the pattern lattice unbounded)")
+	errMaxGap       = usage("--max-gap must be ≥ 1")
+	errMaxLen       = usage("--max-len must be ≥ 1")
+	errOrder        = usage("--order must be ≥ 1")
+	errBadSource    = usage("bad --source")
 )
+
+// usageError marks a sentinel as a complaint about the COMMAND LINE rather
+// than about the run — the distinction the contract's exit-code split turns
+// on. Declaring it at the sentinel (rather than listing sentinels at the exit
+// path) is what keeps the classification from drifting: a new validation error
+// is usage-classified by construction, and cannot be forgotten in a list far
+// from where it was written.
+//
+// Each sentinel is a distinct pointer, so errors.Is against it keeps working
+// through `fmt.Errorf("%w: %q", …)` exactly as an errors.New value would.
+type usageError struct{ msg string }
+
+func (e *usageError) Error() string { return e.msg }
+
+// usage declares a command-line validation sentinel. Use it for anything the
+// caller could fix by retyping the command; leave runtime failures
+// (unreadable file, malformed input data, absent API key) on errors.New —
+// those are not the caller's typing.
+func usage(msg string) error { return &usageError{msg} }
 
 // validateSeqParams rejects the PrefixSpan bounds that would otherwise blow up
 // the search (ferret-g2o): a non-positive --min-support makes every token a
@@ -57,8 +77,17 @@ const (
 	fmtMD        = "md"
 	fmtText      = "text"
 	keyLens      = "lens"
+	keyRows      = "rows"
+	keySessions  = "sessions"
 	keyTotal     = "total"
 	keyTruncated = "truncated"
+)
+
+// Exit codes, per the DK-AXI operating contract: a caller distinguishes a
+// mistyped invocation from a run that tried and failed.
+const (
+	exitFailure = 1 // the command ran and could not finish
+	exitUsage   = 2 // the command line itself was wrong (unknown flag, bad value)
 )
 
 // ---- CLI grammar ----
@@ -151,7 +180,7 @@ func warnAmbiguousSession(session string, distinct int, chosen, verb string) {
 type CommonFlags struct {
 	Data     string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
 	Format   string `help:"Output format: text|json (graph: +mermaid|dot|sankey)." default:"text" name:"format"`
-	Limit    int    `help:"Max rows (0 = unlimited)." default:"0" name:"limit"`
+	Limit    int    `help:"Max rows (unset = the command's compact default; N = exactly N; negative = unlimited)." default:"0" name:"limit"`
 	MaxBytes int    `help:"Max output bytes, text only (0 = unlimited)." default:"0" name:"max-bytes"`
 }
 
@@ -286,6 +315,13 @@ var CLI struct {
 	Gates struct {
 		CommonFlags
 	} `cmd:"" help:"Mine review gates (code-review/plan-review/precommit/QA): per-gate rejection sets + overlap ratio ω (high ω = redundant gate) + confirmed friction loops."`
+
+	// default:"withargs" makes a bare `ferret` (and `ferret --data X`) run
+	// status instead of erroring into the synopsis — AXI #8, content first.
+	// `ferret --help` still prints the full command list.
+	Status StatusCmd `cmd:"" default:"withargs" help:"Corpus health + the heaviest waste rows (the bare-ferret default)." name:"status"`
+
+	Friction FrictionCmd `cmd:"" help:"One ranked table of estimated wasted bytes — polling, misfires and motif findings merged, priced by burn." name:"friction"`
 
 	Burn BurnCmd `cmd:"" help:"Ranked corpus-wide render-cost burn per normalized command (the tune-up list)."`
 
@@ -469,6 +505,8 @@ func main() {
 				"  ferret conformance [--spec FILE] [--format text|json]   (reads stdin if no --spec)\n"+
 				"  ferret landmark  [--spec FILE | --session PREFIX [--root DIR]] [--data DIR] [--format text|json]   (milestone progress; spec reads stdin if no --spec)\n"+
 				"  ferret gates    [--data DIR] [--format text|json]   (overlap ratio ω over review-gate rejections)\n"+
+				"  ferret status   [--data DIR] [--format text|json]   (corpus health + heaviest waste — what bare `ferret` runs)\n"+
+				"  ferret friction [--data DIR] [--source poll|misfire|motif] [--no-motifs] [--format text|json]   (ONE waste-ranked table: polling + misfires + motifs, priced by burn)\n"+
 				"  ferret burn     [--data DIR] [--format text|json]   (ranked render-cost burn per normalized command)\n"+
 				"  ferret misfires [--data DIR] [--format text|json]   (repeated command failures + repair pairs)\n"+
 				"  ferret polling  [--data DIR] [--format text|json]   (exact-duplicate commands repeated within a session)\n"+
@@ -484,11 +522,22 @@ func main() {
 				"  ferret reach    [--since Y-M-D] [--until Y-M-D] [--project SUBSTR] [--format text|json|md]   (recall-opportunity reach-rate)\n"+
 				"  ferret recurrence [--signatures FILE] [--format text|json]   (flag 2nd+ occurrence of a known friction signature)\n"+
 				"  ferret emit     [--root DIR] [--window 8] [--order 3] [--min-bits N] [--dry-run] [--format text|json]   (candidate spool rows → ~/.ferret/spool)\n\n"+
-				"common: --data DIR (default ~/.ferret)  --format text|json  --limit N  --max-bytes N\n"+
+				"common: --data DIR (default ~/.ferret)  --format text|json  --limit N (negative = unlimited)  --max-bytes N\n"+
 				"lenses: coarse | tool | target | exact",
 		),
 		kong.UsageOnError(),
 		kong.ConfigureHelp(kong.HelpOptions{Compact: true}),
+		// DK-AXI operating-contract rule 3: an unknown flag or an unparseable
+		// command line is fatal with a DISTINCT code, so a caller can tell
+		// "you typed it wrong" (2) from "the run failed" (1). kong's own
+		// default here is 80, which collides with nothing but means nothing
+		// either.
+		kong.Exit(func(code int) {
+			if code != 0 {
+				code = exitUsage
+			}
+			os.Exit(code)
+		}),
 	)
 
 	var err error
@@ -527,6 +576,10 @@ func main() {
 		err = cmdLandmark()
 	case "gates":
 		err = cmdGates()
+	case "status":
+		err = cmdStatus(&CLI.Status)
+	case "friction":
+		err = cmdFriction(&CLI.Friction)
 	case "burn":
 		err = cmdBurn(&CLI.Burn)
 	case "misfires":
@@ -573,9 +626,24 @@ func main() {
 		k.Fatalf("unknown command %q", k.Command())
 	}
 	if err != nil {
+		// Diagnostics to stderr, nonzero exit (contract rule 4) — stdout stays
+		// machine-consumable, so a `| jq` on a failed run gets an empty stream
+		// rather than a prose line it can't parse. A usage-shaped error (a bad
+		// flag VALUE, which kong accepts and the command rejects) exits 2 like
+		// a bad flag NAME; anything else is a run that failed.
 		fmt.Fprintln(os.Stderr, "ferret:", err)
-		os.Exit(1)
+		os.Exit(exitCodeFor(err))
 	}
+}
+
+// exitCodeFor maps a command error to the contract's exit codes: the
+// command-line validation sentinels are usage errors, everything else is a
+// failed run.
+func exitCodeFor(err error) int {
+	if _, ok := errors.AsType[*usageError](err); ok {
+		return exitUsage
+	}
+	return exitFailure
 }
 
 // ---- shared helpers ----
@@ -747,6 +815,39 @@ const legendMarks = "≡ tok! failed · tok? in failed chain · tok+ collapsed r
 func about(sink *out.Sink, lines ...string) {
 	for _, ln := range lines {
 		sink.Head("%s", ln)
+	}
+}
+
+// applyDefaultLimit resolves --limit for a command that has a sensible row
+// default. The flag's three states, per the DK-AXI contract's "compact default
+// with an escape hatch" rule:
+//
+//	unset (0)  → the command's default (compact output, the common case)
+//	N > 0      → exactly N rows
+//	negative   → unlimited (the escape hatch)
+//
+// Before this existed, nine commands silently rewrote 0 to their own default,
+// which left `--limit 0` — documented as unlimited — truncating instead. There
+// is no way to both default to compact AND read bare 0 as unlimited, since
+// kong cannot report whether a zero was typed; a distinct sentinel is the only
+// honest resolution.
+func applyDefaultLimit(c *common, def int) {
+	switch {
+	case c.limit == 0:
+		c.limit = def
+	case c.limit < 0:
+		c.limit = 0 // out.Sink reads 0 as unlimited
+	}
+}
+
+// emptyNote prints a definitive empty state — the DK-AXI operating contract's
+// "0 results" rule. A table that renders a header and then nothing is
+// ambiguous: a model cannot tell a genuinely empty result from a run that
+// failed silently, so it retries, which is the exact friction ferret exists to
+// find. Says so out loud instead. No-op when there are rows.
+func emptyNote(sink *out.Sink, n int, noun string) {
+	if n == 0 {
+		sink.Head("0 %s", noun)
 	}
 }
 

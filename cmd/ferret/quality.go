@@ -289,10 +289,10 @@ func writeQualityCorpusJSON(w io.Writer, root string, sessions, tasks int, clust
 		})
 	}
 	return out.JSON(w, map[string]any{
-		"root":     root,
-		"sessions": sessions,
-		"tasks":    tasks,
-		"clusters": rows,
+		"root":      root,
+		keySessions: sessions,
+		"tasks":     tasks,
+		"clusters":  rows,
 	})
 }
 

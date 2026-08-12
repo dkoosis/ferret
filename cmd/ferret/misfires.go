@@ -68,7 +68,7 @@ func writeMisfiresJSON(w io.Writer, rep mine.MisfireReport, limit int) error {
 		swallowed = swallowed[:limit]
 	}
 	return out.JSON(w, map[string]any{
-		"rows":           rows,
+		keyRows:          rows,
 		"repairs":        repairs,
 		"swallowed":      swallowed,
 		keyTotal:         rowsTotal,
@@ -96,31 +96,45 @@ func writeMisfiresText(w io.Writer, rep mine.MisfireReport, limit, maxBytes int)
 		"≡ proves a failure would be invisible, never that one happened.")
 
 	sink.Head("misfires rows=%d repairs=%d", len(rep.Rows), len(rep.Repairs))
+	emptyNote(sink, len(rep.Rows), "misfiring commands")
 	for _, row := range rep.Rows {
-		if !sink.Row("%-24s  fails=%-4d sessions=%-4d calls=%-4d fail-rate=%.2f  score=%.0f",
-			row.Key, row.Fails, row.FailSess, row.Calls, row.FailRate, row.Score) {
-			break
-		}
+		sink.Row("%-24s  fails=%-4d sessions=%-4d calls=%-4d fail-rate=%.2f  score=%.0f",
+			row.Key, row.Fails, row.FailSess, row.Calls, row.FailRate, row.Score)
 	}
 
-	if len(rep.Repairs) > 0 {
-		sink.Head("repair pairs (failed → fixed):")
-		for _, p := range rep.Repairs {
-			if !repairRow(sink, p) {
-				break
-			}
-		}
-	}
-
-	if len(rep.Swallowed) > 0 {
-		sink.Head("swallowed errors (invisible to is_error — floor on hidden misfires):")
-		for _, row := range rep.Swallowed {
-			if !swallowRow(sink, row) {
-				break
-			}
-		}
+	writeRepairSection(sink, rep.Repairs)
+	writeSwallowSection(sink, rep.Swallowed)
+	// Legal moves, not a plan (DK-AXI rule 11): price these failures against
+	// the other detectors, or record a repair pair as a substitution.
+	if len(rep.Rows) > 0 {
+		sink.NextHead("ferret friction --source misfire", "ferret fixes sub --intent <class> --wrong <tool> --better <template>")
 	}
 	return nil
+}
+
+// writeRepairSection emits the failed→fixed pairs under their own header, or
+// nothing when none were detected. Extracted from writeMisfiresText with its
+// swallow sibling to keep that function under the gocognit ceiling.
+func writeRepairSection(sink *out.Sink, repairs []mine.RepairPair) {
+	if len(repairs) == 0 {
+		return
+	}
+	sink.Head("repair pairs (failed → fixed):")
+	for _, p := range repairs {
+		repairRow(sink, p)
+	}
+}
+
+// writeSwallowSection emits the swallowed-error table — the misfires the rows
+// above structurally cannot see — or nothing when none were detected.
+func writeSwallowSection(sink *out.Sink, swallowed []mine.SwallowRow) {
+	if len(swallowed) == 0 {
+		return
+	}
+	sink.Head("swallowed errors (invisible to is_error — floor on hidden misfires):")
+	for _, row := range swallowed {
+		swallowRow(sink, row)
+	}
 }
 
 // swallowRow renders one swallowed-error row, appending the exemplar command

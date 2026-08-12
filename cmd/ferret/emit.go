@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -82,16 +81,14 @@ func cmdEmit() error {
 		mode, res.Written, res.Sources, res.Derived, res.Learned, spool.Dir(data))
 	for i := range cands {
 		c := &cands[i]
-		if !sink.Row("%s  %s@%s  seq %d-%d  novelty=%.2f rec=%d",
+		sink.Row("%s  %s@%s  seq %d-%d  novelty=%.2f rec=%d",
 			c.ID, c.Source.Session, c.Source.Agent, c.Source.SeqStart, c.Source.SeqEnd,
-			c.Signals.NoveltyBits, c.Signals.Recurrence) {
-			break
-		}
+			c.Signals.NoveltyBits, c.Signals.Recurrence)
 	}
 	return nil
 }
 
-var errEmitWindow = errors.New("--window must be ≥ 1")
+var errEmitWindow = usage("--window must be ≥ 1")
 
 // emitOpts bundles the resolved emit parameters so runEmit is one pure-ish
 // entry point the CLI wraps and a test drives directly.

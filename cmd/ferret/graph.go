@@ -17,9 +17,7 @@ func cmdGraph() error {
 	if err != nil {
 		return err
 	}
-	if c.limit == 0 {
-		c.limit = 40
-	}
+	applyDefaultLimit(c, 40)
 	lo := fromLensFlags(cmd.LensFlags)
 	if err := c.validate("text", "json", "mermaid", "dot", "sankey"); err != nil {
 		return err
@@ -80,10 +78,9 @@ func cmdGraph() error {
 		"≡ graph: action→action transition counts (what typically follows what).",
 		"≡ --loops adds A⇄B bounce cycles — back-and-forth churn, often friction.")
 	sink.Head("graph lens=%s edges=%d (min-count=%d)", l.Name(), len(edges), cmd.MinCount)
+	emptyNote(sink, len(edges), "edges")
 	for _, e := range edges {
-		if !sink.Row("%6dx  %s → %s", e.Count, corpus.Vocab[e.From], corpus.Vocab[e.To]) {
-			break
-		}
+		sink.Row("%6dx  %s → %s", e.Count, corpus.Vocab[e.From], corpus.Vocab[e.To])
 	}
 	if err := sink.Close(); err != nil {
 		return err
@@ -93,9 +90,7 @@ func cmdGraph() error {
 		ls := out.NewSink(os.Stdout, 20, c.maxBytes)
 		ls.Head("bounce cycles (A→B→A):")
 		for _, cy := range f.Cycles {
-			if !ls.Row("%6dx  %s ⇄ %s", cy.Count, corpus.Vocab[cy.A], corpus.Vocab[cy.B]) {
-				break
-			}
+			ls.Row("%6dx  %s ⇄ %s", cy.Count, corpus.Vocab[cy.A], corpus.Vocab[cy.B])
 		}
 		return ls.Close()
 	}

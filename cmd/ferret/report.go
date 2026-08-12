@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -15,8 +14,8 @@ import (
 // ---- report (Finding projection) ----
 
 var (
-	errBadKind    = errors.New("bad --kind (want routine|friction|loop|noise)")
-	errMaxBytesMD = errors.New("--max-bytes is not supported with --format md (whole-document output; use --limit)")
+	errBadKind    = usage("bad --kind (want routine|friction|loop|noise)")
+	errMaxBytesMD = usage("--max-bytes is not supported with --format md (whole-document output; use --limit)")
 )
 
 func cmdReport() error {
@@ -25,9 +24,7 @@ func cmdReport() error {
 	if err != nil {
 		return err
 	}
-	if c.limit == 0 {
-		c.limit = 30
-	}
+	applyDefaultLimit(c, 30)
 	lo := fromLensFlags(cmd.LensFlags)
 	if err := c.validate("text", fmtJSON, fmtMD); err != nil {
 		return err
@@ -223,6 +220,7 @@ func cmdReport() error {
 	}
 	sink.Head("report lens=%s findings=%d (min-support=%d order=%d)",
 		l.Name(), len(findings), cmd.MinSupport, cmd.Order)
+	emptyNote(sink, len(findings), "findings")
 	if capped {
 		sink.Head("‡ seqs hit the 10000-pattern cap — raise --min-support")
 	}
@@ -234,19 +232,24 @@ func cmdReport() error {
 			row += ann
 		}
 		row += reportDialogueNote(f)
-		if !sink.Row("%s", row) {
-			break
-		}
+		sink.Row("%s", row)
 	}
 	if len(suppressed) > 0 {
 		sink.Head("⊘ suppressed=%d (adjudicated wontfix/watch — not actionable, kept for memory)", len(suppressed))
 		for _, f := range suppressed {
 			e := fixIdx[fixes.MotifKey(corpus.Tokens(f.IDs))]
-			if !sink.Row("⊘ %-8s %s  [%s]", e.Disp(),
-				strings.Join(corpus.Tokens(f.IDs), " ⇝ "), suppressReason(e)) {
-				break
-			}
+			sink.Row("⊘ %-8s %s  [%s]", e.Disp(),
+				strings.Join(corpus.Tokens(f.IDs), " ⇝ "), suppressReason(e))
 		}
+	}
+	// Legal moves, not a plan (DK-AXI rule 11): a motif's burn is gross cost —
+	// the merged view prices how much of it bought nothing, and the ledger is
+	// where a decided fix goes.
+	// The ledger hint is for actionable findings; a --kind noise view has none
+	// by definition (finding.go's kind assignment), so offering it there would
+	// be steering a caller into a no-op.
+	if len(findings) > 0 && cmd.Kind != string(mine.KindNoise) {
+		sink.NextHead("ferret friction", "ferret fixes add --motif <tokens> --fix <action>")
 	}
 	return nil
 }

@@ -16,9 +16,7 @@ func cmdSeqs() error {
 	if err != nil {
 		return err
 	}
-	if c.limit == 0 {
-		c.limit = 30
-	}
+	applyDefaultLimit(c, 30)
 	lo := fromLensFlags(cmd.LensFlags)
 	if err := c.validate("text", fmtJSON); err != nil {
 		return err
@@ -67,10 +65,8 @@ func cmdSeqs() error {
 		sink.Head("‡ search hit the 10000-pattern cap — raise --min-support")
 	}
 	for _, p := range pats {
-		if !sink.Row("%5ds %s  ex: %s",
-			p.Support, strings.Join(corpus.Tokens(p.IDs), " ⇝ "), exemplar(corpus, p.ExStream, p.ExSeq)) {
-			break
-		}
+		sink.Row("%5ds %s  ex: %s",
+			p.Support, strings.Join(corpus.Tokens(p.IDs), " ⇝ "), exemplar(corpus, p.ExStream, p.ExSeq))
 	}
 	return nil
 }

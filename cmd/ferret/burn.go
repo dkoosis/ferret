@@ -37,9 +37,7 @@ func cmdBurn(cmd *BurnCmd) error {
 	if err != nil {
 		return err
 	}
-	if c.limit == 0 {
-		c.limit = 20
-	}
+	applyDefaultLimit(c, 20)
 	if err := c.validate(fmtText, fmtJSON); err != nil {
 		return err
 	}
@@ -83,11 +81,17 @@ func writeBurnText(w io.Writer, res *mine.BurnResult, limit, maxBytes int) error
 		"≡ out-bytes = event.Bytes (tool_use input + tool_result content); kept beside rend because they disagree — a cheap-output, high-count command is near-zero on bytes and a top burner on rend.",
 		"≡ shell rows are shellnorm-normalized (sh:git_commit, ...), tool rows keyed by tool name.")
 	sink.Head("burn events=%d sessions=%d rows=%d", res.Events, res.Sessions, len(res.Rows))
+	emptyNote(sink, len(res.Rows), "commands")
 	for i := range res.Rows {
 		r := &res.Rows[i] // index-range: BurnRow carries a map field, value-range trips rangeValCopy
 		sink.Row("%10s rend  %8s/call  %10s out  %6d calls  %8s/call  %4d sess  %s",
 			humanBytes(r.RenderCost), humanBytes(int(r.RenderPerCall)),
 			humanBytes(r.OutBytes), r.Calls, humanBytes(int(r.BytesPerCall)), r.Sessions, r.Key)
+	}
+	// Legal moves, not a plan (DK-AXI rule 11): gross cost is not waste — the
+	// merged view says how much of it bought nothing.
+	if len(res.Rows) > 0 {
+		sink.NextHead("ferret friction")
 	}
 	return nil
 }

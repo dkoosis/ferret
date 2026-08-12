@@ -10,7 +10,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -25,7 +24,7 @@ import (
 
 // errFeedbackSearchEventRequired guards `feedback judge` — without a target
 // event id there is nothing to re-derive a verdict for.
-var errFeedbackSearchEventRequired = errors.New("feedback judge: --search-event ID required")
+var errFeedbackSearchEventRequired = usage("feedback judge: --search-event ID required")
 
 // nugCandidateInput is one stdin candidate: a nug id + its fetched body text
 // (the bash Stop-hook script assembles this by looping `trixi get` over

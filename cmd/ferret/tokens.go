@@ -22,9 +22,7 @@ func cmdTokens() error {
 	if err != nil {
 		return err
 	}
-	if c.limit == 0 {
-		c.limit = 200
-	}
+	applyDefaultLimit(c, 200)
 	lo := fromLensFlags(cmd.LensFlags)
 	if cmd.Session == "" {
 		return errSessionRequired
@@ -80,9 +78,7 @@ func cmdTokens() error {
 	for _, si := range matches {
 		sink.Head("stream %s lens=%s toks=%d", corpus.StreamKeys[si], l.Name(), len(corpus.Streams[si]))
 		for _, t := range corpus.Streams[si] {
-			if !sink.Row("%6d  %s", t.Seq, corpus.Vocab[t.ID]) {
-				break
-			}
+			sink.Row("%6d  %s", t.Seq, corpus.Vocab[t.ID])
 		}
 	}
 	return nil
