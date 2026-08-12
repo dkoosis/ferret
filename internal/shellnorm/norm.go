@@ -109,8 +109,8 @@ func fromBinaryCmd(c *syntax.BinaryCmd, pr *syntax.Printer, depth int) []Segment
 	switch c.Op {
 	case syntax.AndStmt, syntax.OrStmt:
 		left := fromStmt(c.X, pr, depth+1)
-		if c.Op == syntax.OrStmt && silencesStderr(c.X, depth+1) {
-			markSwallowed(left)
+		if c.Op == syntax.OrStmt {
+			markSwallowedArm(c.X, left, pr, depth+1)
 		}
 		return append(left, fromStmt(c.Y, pr, depth+1)...)
 	case syntax.Pipe, syntax.PipeAll:
@@ -259,29 +259,34 @@ func silencesStderr(st *syntax.Stmt, depth int) bool {
 	return false
 }
 
-// redirsSilenceStderr scans one statement's redirect list in source order,
-// because order decides the verdict: `>/dev/null 2>&1` points fd 2 at the
-// already-nulled fd 1, while `2>&1 >/dev/null` points it at the terminal fd 1
-// and only then nulls stdout — the error still prints.
+// redirsSilenceStderr replays a statement's whole redirect list in source
+// order and reports where fd 2 finally points, because order decides the
+// verdict and no single redirect settles it. `>/dev/null 2>&1` points fd 2 at
+// the already-nulled fd 1; `2>&1 >/dev/null` points it at the terminal fd 1
+// and only then nulls stdout; `2>/dev/null 2>&1` re-binds a nulled fd 2 back
+// to the visible fd 1. Each dup copies its target as of its own position, so
+// the list must run to the end before the answer is known.
 func redirsSilenceStderr(redirs []*syntax.Redirect) bool {
-	stdoutNulled := false
+	var stdoutNulled, stderrNulled bool
 	for _, r := range redirs {
 		switch {
-		case toDevNull(r) && redirFD(r) == "2":
-			return true // 2>/dev/null, 2>>/dev/null
-		case toDevNullAll(r):
-			return true // &>/dev/null, &>>/dev/null
-		case toDevNull(r) && (redirFD(r) == "" || redirFD(r) == "1"):
-			stdoutNulled = true
-		case stdoutNulled && r.Op == syntax.DplOut && redirFD(r) == "2" && wordLit(r.Word) == "1":
-			return true // >/dev/null 2>&1
+		case toDevNullAll(r): // &>/dev/null, &>>/dev/null
+			stdoutNulled, stderrNulled = true, true
+		case r.Op == syntax.DplOut && redirFD(r) == "2": // 2>&N
+			stderrNulled = wordLit(r.Word) == "1" && stdoutNulled
+		case r.Op == syntax.DplOut && redirFD(r) == "1": // 1>&N
+			stdoutNulled = wordLit(r.Word) == "2" && stderrNulled
+		case isOutRedir(r) && redirFD(r) == "2": // 2>TARGET, 2>>TARGET
+			stderrNulled = wordLit(r.Word) == devNull
+		case isOutRedir(r) && (redirFD(r) == "" || redirFD(r) == "1"): // >TARGET
+			stdoutNulled = wordLit(r.Word) == devNull
 		}
 	}
-	return false
+	return stderrNulled
 }
 
-func toDevNull(r *syntax.Redirect) bool {
-	return (r.Op == syntax.RdrOut || r.Op == syntax.AppOut) && wordLit(r.Word) == devNull
+func isOutRedir(r *syntax.Redirect) bool {
+	return r.Op == syntax.RdrOut || r.Op == syntax.AppOut
 }
 
 func toDevNullAll(r *syntax.Redirect) bool {
@@ -328,11 +333,38 @@ func concatStmts(a, b []*syntax.Stmt) []*syntax.Stmt {
 	return append(out, b...)
 }
 
+// markSwallowedArm flags the segments of an `||` left arm whose stderr the arm
+// actually discards. A redirect riding the arm's own statement covers every
+// segment under it (`{ a; b; } 2>/dev/null || fallback` hides both), but a
+// nested && / || chain silences only the branch carrying the redirect: in
+// `a 2>/dev/null && b || fallback` only a's errors vanish, so marking b too
+// would invent a hidden failure it never had.
+func markSwallowedArm(st *syntax.Stmt, segs []Segment, pr *syntax.Printer, depth int) {
+	if st == nil || len(segs) == 0 || depth > maxRecurseDepth {
+		return
+	}
+	if redirsSilenceStderr(st.Redirs) {
+		markSwallowed(segs)
+		return
+	}
+	if chain, ok := st.Cmd.(*syntax.BinaryCmd); ok &&
+		(chain.Op == syntax.AndStmt || chain.Op == syntax.OrStmt) {
+		split := min(len(fromStmt(chain.X, pr, depth+1)), len(segs))
+		markSwallowedArm(chain.X, segs[:split], pr, depth+1)
+		markSwallowedArm(chain.Y, segs[split:], pr, depth+1)
+		return
+	}
+	if silencesStderr(st, depth) {
+		markSwallowed(segs)
+	}
+}
+
 // markSwallowed flags every segment Split produced from a swallowing left arm.
 // The whole arm is marked, not just its first command: in
 // `a | b 2>/dev/null || fallback` any of the arm's normalized tokens is a
 // plausible owner of the hidden failure, and over-attributing within one arm
-// is cheaper than dropping the tell.
+// is cheaper than dropping the tell. markSwallowedArm narrows that arm to the
+// branch that carries the redirect before calling this.
 func markSwallowed(segs []Segment) {
 	for i := range segs {
 		segs[i].Swallowed = true
@@ -399,6 +431,11 @@ func Argv(raw string) (argv []string, plain bool) {
 	return argv, true
 }
 
+// globMeta are the unquoted characters that make a word a pathname pattern
+// rather than a filename. Quoting any of them (`cat '*.go'`) restores the
+// literal reading, which is why the check sits on the bare-Lit branch only.
+const globMeta = "*?["
+
 // plainWordLit returns a word's literal value when every part is a bare
 // literal or a single-/double-quoted span whose own contents are pure
 // literals too — the forms a plain argv token can take. Any expansion fails
@@ -410,6 +447,14 @@ func plainWordLit(w *syntax.Word) (string, bool) {
 	for _, part := range w.Parts {
 		switch p := part.(type) {
 		case *syntax.Lit:
+			// A bare glob parses as an ordinary literal — mvdan has no
+			// separate pathname-expansion node — so `cat *.go` would read as
+			// one plain filename while the shell may hand cat a dozen. An
+			// unquoted metacharacter means the argv the program saw is not the
+			// argv written, which is the same decline as an expansion.
+			if strings.ContainsAny(p.Value, globMeta) {
+				return "", false
+			}
 			sb.WriteString(p.Value)
 		case *syntax.SglQuoted:
 			sb.WriteString(p.Value)
