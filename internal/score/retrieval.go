@@ -61,10 +61,13 @@ type Episode struct {
 	EmptyResult bool `json:"emptyResult,omitempty"` // served set was empty — R3a / HopRetrieval tell
 	Oversized   bool `json:"oversized,omitempty"`   // served set over the QPP cap — R3a tell
 
-	ConsumedStrict bool   `json:"consumedStrict,omitempty"` // tell 1: explicit id/content reference
-	ConsumedLoose  bool   `json:"consumedLoose,omitempty"`  // tell 1 ∨ 2 ∨ 3
-	ConsumedID     string `json:"consumedId,omitempty"`     // the referenced nug id (tell 1), for audit
-	ConsumedRank   int    `json:"consumedRank,omitempty"`   // 1-based rank of the consumed id in Results (0 = no explicit rank) — R2
+	// No omitempty on either: these are RU's primary consumption verdict — false
+	// is "not consumed", a real finding, not "unevaluated" (mirrors GoalReached,
+	// ferret-917).
+	ConsumedStrict bool   `json:"consumedStrict"`         // tell 1: explicit id/content reference
+	ConsumedLoose  bool   `json:"consumedLoose"`          // tell 1 ∨ 2 ∨ 3
+	ConsumedID     string `json:"consumedId,omitempty"`   // the referenced nug id (tell 1), for audit
+	ConsumedRank   int    `json:"consumedRank,omitempty"` // 1-based rank of the consumed id in Results (0 = no explicit rank) — R2
 
 	ClosingMove dialogue.Move    `json:"closingMove,omitempty"` // move of the human turn that closed the episode
 	Outcome     dialogue.Outcome `json:"outcome"`               // PARADISE rollup of the closing reaction
@@ -79,8 +82,9 @@ type Episode struct {
 // (slice position in the served set). Surfaces the ranked candidate list that the
 // Results count alone drops.
 type ResultHit struct {
-	ID    string  `json:"id"`
-	Score float64 `json:"score,omitempty"`
+	ID string `json:"id"`
+	// No omitempty: 0.0 is a real, legitimate low-relevance score, not "unscored".
+	Score float64 `json:"score"`
 	Rank  int     `json:"rank"`
 }
 

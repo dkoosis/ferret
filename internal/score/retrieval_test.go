@@ -1,12 +1,51 @@
 package score
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 
 	"github.com/dkoosis/ferret/internal/dialogue"
 	"github.com/dkoosis/ferret/internal/event"
 )
+
+// TestEpisodeConsumptionVerdictsSerializeAtZero pins ferret-mml: ConsumedStrict
+// and ConsumedLoose are RU's primary consumption verdict (mirrors the
+// goalReached/turnsToGoal fix, ferret-917) — false is "not consumed", a real
+// finding, not "unevaluated". A consumer must see the key even when false.
+func TestEpisodeConsumptionVerdictsSerializeAtZero(t *testing.T) {
+	b, err := json.Marshal(Episode{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := got["consumedStrict"]; !ok || v != false {
+		t.Errorf("consumedStrict = %v (present=%v), want explicit false", v, ok)
+	}
+	if v, ok := got["consumedLoose"]; !ok || v != false {
+		t.Errorf("consumedLoose = %v (present=%v), want explicit false", v, ok)
+	}
+}
+
+// TestResultHitScoreSerializesAtZero pins ferret-mml: a served candidate can
+// legitimately score 0.0 (the lowest real relevance score); omitempty must not
+// make it indistinguishable from a hit with no score computed.
+func TestResultHitScoreSerializesAtZero(t *testing.T) {
+	b, err := json.Marshal(ResultHit{ID: "x", Score: 0, Rank: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := got["score"]; !ok || v != float64(0) {
+		t.Errorf("score = %v (present=%v), want explicit 0", v, ok)
+	}
+}
 
 // --- event builders (terse, mirror the table-driven style) ---
 
