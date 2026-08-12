@@ -89,5 +89,10 @@ func writeBurnText(w io.Writer, res *mine.BurnResult, limit, maxBytes int) error
 			humanBytes(r.RenderCost), humanBytes(int(r.RenderPerCall)),
 			humanBytes(r.OutBytes), r.Calls, humanBytes(int(r.BytesPerCall)), r.Sessions, r.Key)
 	}
+	// Legal moves, not a plan (DK-AXI rule 11): gross cost is not waste — the
+	// merged view says how much of it bought nothing.
+	if len(res.Rows) > 0 {
+		sink.NextHead("ferret friction")
+	}
 	return nil
 }

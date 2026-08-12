@@ -92,5 +92,10 @@ func writePollingText(w io.Writer, rep mine.PollingReport, limit, maxBytes int) 
 			break
 		}
 	}
+	// Legal moves, not a plan (DK-AXI rule 11): price these repeats against the
+	// other detectors, or see what the key costs per call.
+	if len(rep.Rows) > 0 {
+		sink.NextHead("ferret friction --source poll", "ferret burn")
+	}
 	return nil
 }

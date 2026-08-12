@@ -10,6 +10,7 @@ import (
 	"sort"
 
 	"github.com/dkoosis/ferret/internal/conform"
+	"github.com/dkoosis/ferret/internal/out"
 	"github.com/dkoosis/ferret/internal/score"
 )
 
@@ -343,7 +344,7 @@ func writeCandidatesText(w io.Writer, res candResult) error {
 	// the ranked bundle into proposals. Data first, hint last (AXI #8); omitted
 	// on an empty ranking (nothing to adjudicate). Text mode only.
 	if len(res.Candidates) > 0 {
-		fmt.Fprintf(bw, "next: ferret adjudicate --session %s --propose\n", res.Session)
+		out.Next(bw, fmt.Sprintf("ferret adjudicate --session %s --propose", res.Session))
 	}
 	return bw.Flush()
 }

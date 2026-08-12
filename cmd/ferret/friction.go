@@ -160,8 +160,11 @@ func writeFrictionText(w io.Writer, rep mine.WasteReport, limit, maxBytes int) e
 		"≡ the first per session (poll), calls that failed (misfire), motif occurrences past the",
 		"≡ first per session (motif). burn contributes no rows of its own — it prices the others,",
 		"≡ and each row carries its key's GROSS cost beside the waste. A model, not a measurement",
-		"≡ (ccp-3s1c); swallowed-error rows are excluded because a swallow count is a floor, not a count.",
-		"≡ Drill: ferret polling · ferret misfires · ferret report --kind friction · ferret burn.")
+		"≡ (ccp-3s1c); swallowed-error rows are excluded because a swallow count is a floor, not a count.")
+	// Legal moves, not a plan (DK-AXI rule 11): each detector's own command
+	// holds the detail this table summarizes. Head-style so the hints survive
+	// row truncation — the truncated case is when a reader most needs them.
+	sink.NextHead("ferret polling", "ferret misfires", "ferret report --kind friction", "ferret burn")
 	sink.Head("friction rows=%d waste=%s of %s rendered  events=%d sessions=%d",
 		len(rep.Rows), humanBytes(rep.TotalWasted), humanBytes(rep.TotalRender), rep.Events, rep.Sessions)
 	if len(rep.Rows) == 0 {

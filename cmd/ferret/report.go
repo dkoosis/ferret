@@ -248,6 +248,12 @@ func cmdReport() error {
 			}
 		}
 	}
+	// Legal moves, not a plan (DK-AXI rule 11): a motif's burn is gross cost —
+	// the merged view prices how much of it bought nothing, and the ledger is
+	// where a decided fix goes.
+	if len(findings) > 0 {
+		sink.NextHead("ferret friction", "ferret fixes add --motif <tokens> --fix <action>")
+	}
 	return nil
 }
 

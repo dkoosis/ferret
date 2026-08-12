@@ -39,7 +39,11 @@ func TestWriteProposeTextRendersActionable(t *testing.T) {
 	// AXI #9: actionable proposals chain to the fix ledger (ferret-8bb). The hint
 	// is a fill-in template — labeled as such, with bare (unquoted) placeholders so
 	// it can't paste into a shell and record literal <tokens>/<action> values.
-	if !strings.Contains(out, "next (template — fill from a proposal above): ferret fixes add --motif <tokens> --fix <action>") {
+	// Wording moved behind out.Sink.NextHead (ferret-nh6) so every command emits
+	// one `next:` shape — the label now follows the prefix instead of splitting
+	// it. The template's content and its bare placeholders are what this pins,
+	// and both are unchanged.
+	if !strings.Contains(out, "next: (template — fill from a proposal above) ferret fixes add --motif <tokens> --fix <action>") {
 		t.Errorf("actionable output missing/altered next template line:\n%s", out)
 	}
 	if strings.Contains(out, `--motif "<tokens>"`) {

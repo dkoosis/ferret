@@ -103,24 +103,43 @@ func writeMisfiresText(w io.Writer, rep mine.MisfireReport, limit, maxBytes int)
 		}
 	}
 
-	if len(rep.Repairs) > 0 {
-		sink.Head("repair pairs (failed → fixed):")
-		for _, p := range rep.Repairs {
-			if !repairRow(sink, p) {
-				break
-			}
-		}
-	}
-
-	if len(rep.Swallowed) > 0 {
-		sink.Head("swallowed errors (invisible to is_error — floor on hidden misfires):")
-		for _, row := range rep.Swallowed {
-			if !swallowRow(sink, row) {
-				break
-			}
-		}
+	writeRepairSection(sink, rep.Repairs)
+	writeSwallowSection(sink, rep.Swallowed)
+	// Legal moves, not a plan (DK-AXI rule 11): price these failures against
+	// the other detectors, or record a repair pair as a substitution.
+	if len(rep.Rows) > 0 {
+		sink.NextHead("ferret friction --source misfire", "ferret fixes sub --from <failed> --to <fixed>")
 	}
 	return nil
+}
+
+// writeRepairSection emits the failed→fixed pairs under their own header, or
+// nothing when none were detected. Extracted from writeMisfiresText with its
+// swallow sibling to keep that function under the gocognit ceiling.
+func writeRepairSection(sink *out.Sink, repairs []mine.RepairPair) {
+	if len(repairs) == 0 {
+		return
+	}
+	sink.Head("repair pairs (failed → fixed):")
+	for _, p := range repairs {
+		if !repairRow(sink, p) {
+			return
+		}
+	}
+}
+
+// writeSwallowSection emits the swallowed-error table — the misfires the rows
+// above structurally cannot see — or nothing when none were detected.
+func writeSwallowSection(sink *out.Sink, swallowed []mine.SwallowRow) {
+	if len(swallowed) == 0 {
+		return
+	}
+	sink.Head("swallowed errors (invisible to is_error — floor on hidden misfires):")
+	for _, row := range swallowed {
+		if !swallowRow(sink, row) {
+			return
+		}
+	}
 }
 
 // swallowRow renders one swallowed-error row, appending the exemplar command
