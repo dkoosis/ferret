@@ -335,10 +335,16 @@ func concatStmts(a, b []*syntax.Stmt) []*syntax.Stmt {
 
 // markSwallowedArm flags the segments of an `||` left arm whose stderr the arm
 // actually discards. A redirect riding the arm's own statement covers every
-// segment under it (`{ a; b; } 2>/dev/null || fallback` hides both), but a
-// nested && / || chain silences only the branch carrying the redirect: in
-// `a 2>/dev/null && b || fallback` only a's errors vanish, so marking b too
-// would invent a hidden failure it never had.
+// segment under it (`{ a; b; } 2>/dev/null || fallback` hides both), but where
+// the arm is a sequence — an && / || chain, or a group's statement list — only
+// the member carrying the redirect goes quiet: in
+// `a 2>/dev/null && b || fallback` and `{ a 2>/dev/null; b; } || fallback`
+// alike, marking b would invent a hidden failure it never had.
+//
+// Descending mirrors fromStmt's own walk so the segment slice stays aligned
+// with the statements that produced it. Shapes fromStmt flattens less
+// predictably (if/while/for) keep the old mark-the-whole-arm posture, which
+// over-attributes within one arm rather than dropping the tell.
 func markSwallowedArm(st *syntax.Stmt, segs []Segment, pr *syntax.Printer, depth int) {
 	if st == nil || len(segs) == 0 || depth > maxRecurseDepth {
 		return
@@ -349,14 +355,42 @@ func markSwallowedArm(st *syntax.Stmt, segs []Segment, pr *syntax.Printer, depth
 	}
 	if chain, ok := st.Cmd.(*syntax.BinaryCmd); ok &&
 		(chain.Op == syntax.AndStmt || chain.Op == syntax.OrStmt) {
-		split := min(len(fromStmt(chain.X, pr, depth+1)), len(segs))
-		markSwallowedArm(chain.X, segs[:split], pr, depth+1)
-		markSwallowedArm(chain.Y, segs[split:], pr, depth+1)
+		markSwallowedSeq([]*syntax.Stmt{chain.X, chain.Y}, segs, pr, depth)
+		return
+	}
+	if group := groupStmts(st.Cmd); group != nil {
+		markSwallowedSeq(group, segs, pr, depth)
 		return
 	}
 	if silencesStderr(st, depth) {
 		markSwallowed(segs)
 	}
+}
+
+// markSwallowedSeq walks a statement sequence alongside the segments it
+// produced, handing each statement exactly its own slice.
+func markSwallowedSeq(sts []*syntax.Stmt, segs []Segment, pr *syntax.Printer, depth int) {
+	used := 0
+	for _, sub := range sts {
+		if used >= len(segs) {
+			return
+		}
+		n := min(len(fromStmt(sub, pr, depth+1)), len(segs)-used)
+		markSwallowedArm(sub, segs[used:used+n], pr, depth+1)
+		used += n
+	}
+}
+
+// groupStmts returns the statement list of a command that fromStmt flattens in
+// source order — the only shapes markSwallowedSeq can align segments against.
+func groupStmts(cmd syntax.Command) []*syntax.Stmt {
+	switch c := cmd.(type) {
+	case *syntax.Subshell:
+		return c.Stmts
+	case *syntax.Block:
+		return c.Stmts
+	}
+	return nil
 }
 
 // markSwallowed flags every segment Split produced from a swallowing left arm.
@@ -431,10 +465,34 @@ func Argv(raw string) (argv []string, plain bool) {
 	return argv, true
 }
 
-// globMeta are the unquoted characters that make a word a pathname pattern
-// rather than a filename. Quoting any of them (`cat '*.go'`) restores the
-// literal reading, which is why the check sits on the bare-Lit branch only.
+// globMeta are the unescaped characters that make a bare word a pathname
+// pattern rather than a filename. Quoting any of them (`cat '*.go'`) restores
+// the literal reading, which is why the check sits on the bare-Lit branch only.
 const globMeta = "*?["
+
+// unescapeLit resolves a bare literal's backslash escapes and rejects the word
+// outright if an *unescaped* glob metacharacter survives. Both jobs need the
+// same pass because mvdan keeps the backslashes in Lit.Value: `cat a\ b.txt`
+// passes one argument spelled `a b.txt`, and `cat \*.go` names a file
+// literally called `*.go`, but a raw scan reads the first as two arguments and
+// the second as a pattern. A true pattern (`cat *.go`) declines — mvdan has no
+// separate expansion node for it, so without this check the shell handing cat
+// a dozen files would still read as a single-file Read.
+func unescapeLit(s string) (string, bool) {
+	var sb strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			i++
+			sb.WriteByte(s[i])
+			continue
+		}
+		if strings.IndexByte(globMeta, s[i]) >= 0 {
+			return "", false
+		}
+		sb.WriteByte(s[i])
+	}
+	return sb.String(), true
+}
 
 // plainWordLit returns a word's literal value when every part is a bare
 // literal or a single-/double-quoted span whose own contents are pure
@@ -447,15 +505,11 @@ func plainWordLit(w *syntax.Word) (string, bool) {
 	for _, part := range w.Parts {
 		switch p := part.(type) {
 		case *syntax.Lit:
-			// A bare glob parses as an ordinary literal — mvdan has no
-			// separate pathname-expansion node — so `cat *.go` would read as
-			// one plain filename while the shell may hand cat a dozen. An
-			// unquoted metacharacter means the argv the program saw is not the
-			// argv written, which is the same decline as an expansion.
-			if strings.ContainsAny(p.Value, globMeta) {
+			lit, ok := unescapeLit(p.Value)
+			if !ok {
 				return "", false
 			}
-			sb.WriteString(p.Value)
+			sb.WriteString(lit)
 		case *syntax.SglQuoted:
 			sb.WriteString(p.Value)
 		case *syntax.DblQuoted:

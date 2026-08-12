@@ -172,6 +172,10 @@ func TestSplitMarksSwallowedSegment(t *testing.T) {
 		// A redirect riding the arm's own statement still covers everything
 		// under it — narrowing applies to chains, not to grouped commands.
 		{"block-level redirect marks the whole arm", "{ bd show x; bd list; } 2>/dev/null || go vet ./...", []bool{true, true, false}},
+		// Inside a group the same narrowing applies: a redirect on one member
+		// leaves its visible siblings unmarked.
+		{"grouped arm marks only the silenced member", "{ bd show x; bd list 2>/dev/null; } || go vet ./...", []bool{false, true, false}},
+		{"subshell arm marks only the silenced member", "( bd show x 2>/dev/null; bd list ) || go vet ./...", []bool{true, false, false}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -266,6 +270,11 @@ func TestArgv(t *testing.T) {
 		{"unquoted bracket glob", "cat f[0-9].txt", nil, false},
 		{"unquoted question glob", "cat f?.txt", nil, false},
 		{"quoted glob is a literal name", "cat '*.go'", []string{"cat", "*.go"}, true},
+		// mvdan keeps the backslashes in Lit.Value, so escapes have to be
+		// resolved before the argv is trusted: an escaped metacharacter is a
+		// filename, and an escaped space is one argument, not two.
+		{"escaped glob is a literal name", `cat \*.go`, []string{"cat", "*.go"}, true},
+		{"escaped space stays one argument", `cat a\ b.txt`, []string{"cat", "a b.txt"}, true},
 		{"pipe is not a single call", "rg foo | head", nil, false},
 		{"and-chain is not a single call", "rg foo && head", nil, false},
 	}
