@@ -120,6 +120,9 @@ func TestSwallows(t *testing.T) {
 		// `2>&1` before `>/dev/null` points stderr at the *old* stdout, so the
 		// error still prints — order decides the verdict.
 		{"reversed dup order", "bd show x 2>&1 >/dev/null || bd list", false},
+		// A later `2>&1` re-binds an already-nulled fd 2 back to the visible
+		// fd 1 — the whole list has to run before the verdict is known.
+		{"dup after devnull restores stderr", "bd show x 2>/dev/null 2>&1 || bd list", false},
 		{"redirect to a real file", "bd show x 2>errs.log || bd list", false},
 		{"pipe, not or", "bd show x 2>/dev/null | jq .", false},
 		{"empty", "", false},
@@ -162,6 +165,17 @@ func TestSplitMarksSwallowedSegment(t *testing.T) {
 		{"whole left pipeline marked", "cat f.json 2>/dev/null || echo none", []bool{true}},
 		{"and-chain marks nothing", "bd show x 2>/dev/null && bd list", []bool{false, false}},
 		{"plain compound marks nothing", "go vet ./... && go test ./...", []bool{false, false}},
+		// The `||` left arm is itself an `&&` chain: only the branch carrying
+		// the redirect loses its errors, so `bd list` must stay unmarked.
+		{"chained arm marks only the silenced branch", "bd show x 2>/dev/null && bd list || go vet ./...", []bool{true, false, false}},
+		{"chained arm, silence on the second branch", "bd show x && bd list 2>/dev/null || go vet ./...", []bool{false, true, false}},
+		// A redirect riding the arm's own statement still covers everything
+		// under it — narrowing applies to chains, not to grouped commands.
+		{"block-level redirect marks the whole arm", "{ bd show x; bd list; } 2>/dev/null || go vet ./...", []bool{true, true, false}},
+		// Inside a group the same narrowing applies: a redirect on one member
+		// leaves its visible siblings unmarked.
+		{"grouped arm marks only the silenced member", "{ bd show x; bd list 2>/dev/null; } || go vet ./...", []bool{false, true, false}},
+		{"subshell arm marks only the silenced member", "( bd show x 2>/dev/null; bd list ) || go vet ./...", []bool{true, false, false}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -250,6 +264,17 @@ func TestArgv(t *testing.T) {
 		{"unparseable", "cat 'unterminated", nil, false},
 		{"env assignment prefix", "RIPGREP_CONFIG_PATH=custom rg foo", nil, false},
 		{"bare assignment", "FOO=1", nil, false},
+		// A bare glob is a Lit like any other, but the shell may hand the
+		// program a dozen filenames — the written argv is not the real one.
+		{"unquoted star glob", "cat *.go", nil, false},
+		{"unquoted bracket glob", "cat f[0-9].txt", nil, false},
+		{"unquoted question glob", "cat f?.txt", nil, false},
+		{"quoted glob is a literal name", "cat '*.go'", []string{"cat", "*.go"}, true},
+		// mvdan keeps the backslashes in Lit.Value, so escapes have to be
+		// resolved before the argv is trusted: an escaped metacharacter is a
+		// filename, and an escaped space is one argument, not two.
+		{"escaped glob is a literal name", `cat \*.go`, []string{"cat", "*.go"}, true},
+		{"escaped space stays one argument", `cat a\ b.txt`, []string{"cat", "a b.txt"}, true},
 		{"pipe is not a single call", "rg foo | head", nil, false},
 		{"and-chain is not a single call", "rg foo && head", nil, false},
 	}

@@ -25,9 +25,11 @@ type BurnCmd struct {
 }
 
 // cmdBurn renders `ferret burn`: rows are normalized commands (shellnorm key
-// for shell, tool name for tool), ranked by modeled render cost across the
-// whole ingested corpus — what the reader pays per call rendered, not per byte
-// returned (ferret-cax) — with the output-byte columns kept alongside so the
+// for shell, tool name for tool), ranked by each row's TOTAL modeled render
+// cost across the whole ingested corpus — the sum of its per-call charges, not
+// its returned bytes (ferret-cax). Charging per call is what separates this
+// ordering from the byte ordering: many small calls out-render one huge one.
+// The output-byte columns stay alongside so the
 // old ordering stays readable in the same table. Mirrors cmdSummary's shape
 // (fromCommonFlags → ensureData → mine.* → text/json render).
 func cmdBurn(cmd *BurnCmd) error {

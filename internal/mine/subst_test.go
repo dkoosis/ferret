@@ -33,7 +33,7 @@ func TestMineSubstitutions_Hits(t *testing.T) {
 		{"find -name", "find", "find . -name '*.go'", "Glob"},
 		{"cat single file", "cat", "cat main.go", "Read"},
 		{"head -n", "head", "head -n 20 f", "Read"},
-		{"tail -n", "tail", "tail -n 5 f", "Read"},
+		{"tail -n +N is a start offset", "tail", "tail -n +5 f", "Read"},
 		{"sed print range", "sed", "sed -n '10,20p' f", "Read"},
 	}
 	for _, c := range cases {
@@ -77,7 +77,11 @@ func TestMineSubstitutions_Hatches(t *testing.T) {
 		{"unsupported flag: grep -c", substEv("s1", "grep", "grep -c foo f.go", false, false), "unsupported_flag"},
 		{"unsupported flag: tail -f", substEv("s1", "tail", "tail -f f", false, false), "unsupported_flag"},
 		{"head -n -5 is all-but-last-5", substEv("s1", "head", "head -n -5 f", false, false), "unsupported_flag"},
-		{"tail -n +5 starts at line 5", substEv("s1", "tail", "tail -n +5 f", false, false), "unsupported_flag"},
+		// tail's default sense is the file's END, which no Read offset names
+		// without first knowing the length — only `-n +N` survives.
+		{"tail -n 50 is the last 50 lines", substEv("s1", "tail", "tail -n 50 f", false, false), "unsupported_flag"},
+		{"bare tail is the last 10 lines", substEv("s1", "tail", "tail f", false, false), "unsupported_flag"},
+		{"unquoted glob may expand to many files", substEv("s1", "cat", "cat *.go", false, false), "glob"},
 		{"repeated find -name ANDs two globs", substEv("s1", "find", "find . -name a.go -name b.go", false, false), "unsupported_flag"},
 		{"env assignment prefix", substEv("s1", "rg", "RG_CONFIG=x rg foo", false, false), "unparseable"},
 		{"redirect", substEv("s1", "rg", "rg foo > out.txt", false, false), "redirect"},
