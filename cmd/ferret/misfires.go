@@ -68,7 +68,7 @@ func writeMisfiresJSON(w io.Writer, rep mine.MisfireReport, limit int) error {
 		swallowed = swallowed[:limit]
 	}
 	return out.JSON(w, map[string]any{
-		"rows":           rows,
+		keyRows:          rows,
 		"repairs":        repairs,
 		"swallowed":      swallowed,
 		keyTotal:         rowsTotal,

@@ -63,8 +63,8 @@ func writePollingJSON(w io.Writer, rep mine.PollingReport, limit int) error {
 		rows = rows[:limit]
 	}
 	return out.JSON(w, map[string]any{
-		"rows":       rows,
-		"sessions":   rep.Sessions,
+		keyRows:      rows,
+		keySessions:  rep.Sessions,
 		keyTotal:     total,
 		keyTruncated: len(rows) < total,
 	})

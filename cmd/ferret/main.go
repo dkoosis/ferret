@@ -31,6 +31,7 @@ var (
 	errMaxGap       = errors.New("--max-gap must be ≥ 1")
 	errMaxLen       = errors.New("--max-len must be ≥ 1")
 	errOrder        = errors.New("--order must be ≥ 1")
+	errBadSource    = errors.New("bad --source")
 )
 
 // validateSeqParams rejects the PrefixSpan bounds that would otherwise blow up
@@ -57,6 +58,8 @@ const (
 	fmtMD        = "md"
 	fmtText      = "text"
 	keyLens      = "lens"
+	keyRows      = "rows"
+	keySessions  = "sessions"
 	keyTotal     = "total"
 	keyTruncated = "truncated"
 )
@@ -287,6 +290,8 @@ var CLI struct {
 		CommonFlags
 	} `cmd:"" help:"Mine review gates (code-review/plan-review/precommit/QA): per-gate rejection sets + overlap ratio ω (high ω = redundant gate) + confirmed friction loops."`
 
+	Friction FrictionCmd `cmd:"" help:"One ranked table of estimated wasted bytes — polling, misfires and motif findings merged, priced by burn." name:"friction"`
+
 	Burn BurnCmd `cmd:"" help:"Ranked corpus-wide render-cost burn per normalized command (the tune-up list)."`
 
 	Misfires MisfiresCmd `cmd:"" help:"Rank repeated command misfires + repair pairs corpus-wide."`
@@ -469,6 +474,7 @@ func main() {
 				"  ferret conformance [--spec FILE] [--format text|json]   (reads stdin if no --spec)\n"+
 				"  ferret landmark  [--spec FILE | --session PREFIX [--root DIR]] [--data DIR] [--format text|json]   (milestone progress; spec reads stdin if no --spec)\n"+
 				"  ferret gates    [--data DIR] [--format text|json]   (overlap ratio ω over review-gate rejections)\n"+
+				"  ferret friction [--data DIR] [--source poll|misfire|motif] [--no-motifs] [--format text|json]   (ONE waste-ranked table: polling + misfires + motifs, priced by burn)\n"+
 				"  ferret burn     [--data DIR] [--format text|json]   (ranked render-cost burn per normalized command)\n"+
 				"  ferret misfires [--data DIR] [--format text|json]   (repeated command failures + repair pairs)\n"+
 				"  ferret polling  [--data DIR] [--format text|json]   (exact-duplicate commands repeated within a session)\n"+
@@ -527,6 +533,8 @@ func main() {
 		err = cmdLandmark()
 	case "gates":
 		err = cmdGates()
+	case "friction":
+		err = cmdFriction(&CLI.Friction)
 	case "burn":
 		err = cmdBurn(&CLI.Burn)
 	case "misfires":
