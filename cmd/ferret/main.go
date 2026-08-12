@@ -293,6 +293,8 @@ var CLI struct {
 
 	Polling PollingCmd `cmd:"" help:"Rank exact-duplicate commands repeated within a session." name:"polling"`
 
+	Substitutable SubstitutableCmd `cmd:"" help:"Rank Bash calls a native tool (Grep/Glob/Read) could replace — deterministic, no judge." name:"substitutable"`
+
 	Retrieval struct {
 		CommonFlags
 		Session    string        `help:"Only episodes from sessions matching this prefix/substring (omit for whole corpus)." name:"session"`
@@ -530,6 +532,8 @@ func main() {
 		err = cmdMisfires(CLI.Misfires)
 	case "polling":
 		err = cmdPolling(CLI.Polling)
+	case "substitutable":
+		err = cmdSubstitutable(CLI.Substitutable)
 	case "retrieval":
 		err = cmdRetrieval()
 	case "quality":

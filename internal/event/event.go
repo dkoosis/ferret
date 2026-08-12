@@ -30,7 +30,18 @@ type Event struct {
 	// written, so the two halves land in separate events and no downstream pass
 	// can put them back together. Set from Segment.Swallowed.
 	Swallow bool `json:"sw,omitempty"`
-	Approx  bool `json:"ax,omitempty"` // tool served via fuzzy/semantic fallback (snipe ~approx marker in tool_result); silence = exact match
+	// Pipe marks a shell segment that came from a pipeline (`a | b`) — info
+	// shellnorm.Split's pipe collapse dissolves by the time Detail is written
+	// (same one-way loss Swallow exists to capture), so it must be captured
+	// here, at ingest. Set from Segment.Piped (ferret-cax item 3).
+	Pipe bool `json:"pi,omitempty"`
+	// CwdReset marks the trailing shell segment of a Bash call whose tool_result
+	// reported "Shell cwd was reset" (ferret-cax item 5) — the harness resetting
+	// a session's working directory out from under an in-flight sequence of
+	// relative-path commands. Set in resolve() on a raw-content string match,
+	// gated to a trailing KindShell segment the same way Approx is attributed.
+	CwdReset bool `json:"cw,omitempty"`
+	Approx   bool `json:"ax,omitempty"` // tool served via fuzzy/semantic fallback (snipe ~approx marker in tool_result); silence = exact match
 	// Rung/CandidateCount/TriedRungs/IndexState come from a session+ts-joined
 	// .snipe/usage.jsonl row (sn-r1do.2, internal/snipeusage). Empty Rung means
 	// unjoined — either no usage.jsonl was loaded for this ingest run, or this
@@ -96,10 +107,12 @@ type Stats struct {
 	// UsageSources/UsageRecords/UsageJoined are the corpus-level answer to "was
 	// usage.jsonl even loaded, and how much of it joined" (sn-r1do.2) — set only
 	// when an ingest run supplied --snipe-usage; zero otherwise.
-	UsageSources int            `json:"usageSources,omitempty"`
-	UsageRecords int            `json:"usageRecords,omitempty"`
-	UsageJoined  int            `json:"usageJoined,omitempty"`
-	ByType       map[string]int `json:"byType"`
+	UsageSources int `json:"usageSources,omitempty"`
+	UsageRecords int `json:"usageRecords,omitempty"`
+	UsageJoined  int `json:"usageJoined,omitempty"`
+	// CwdResets counts CwdReset events seen this ingest (ferret-cax item 5).
+	CwdResets int            `json:"cwdResets,omitempty"`
+	ByType    map[string]int `json:"byType"`
 }
 
 func NewStats() *Stats { return &Stats{ByType: map[string]int{}} }

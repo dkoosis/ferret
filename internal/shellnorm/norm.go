@@ -21,6 +21,12 @@ type Segment struct {
 	// the whole call ok. Set by Split so ingest can carry the tell forward
 	// per-segment; the predicate form for a whole command line is Swallows.
 	Swallowed bool
+	// Piped marks a segment that came from a pipeline (`a | b`) — info
+	// fromBinaryCmd's Pipe/PipeAll arm dissolves by collapsing to a single
+	// command, the same one-way loss Swallowed exists to capture. A
+	// substitution detector needs this: `rg foo | head` truncates rg's output,
+	// so the pipe itself is an escape hatch from "rg alone could replace this."
+	Piped bool
 }
 
 // subcmdTools take a significant first subcommand worth keeping.
@@ -110,9 +116,12 @@ func fromBinaryCmd(c *syntax.BinaryCmd, pr *syntax.Printer, depth int) []Segment
 	case syntax.Pipe, syntax.PipeAll:
 		// a pipeline collapses to its first non-trivial command
 		if left := fromStmt(c.X, pr, depth+1); len(left) > 0 {
+			markPiped(left)
 			return left
 		}
-		return fromStmt(c.Y, pr, depth+1)
+		right := fromStmt(c.Y, pr, depth+1)
+		markPiped(right)
+		return right
 	}
 	return nil
 }
@@ -328,6 +337,108 @@ func markSwallowed(segs []Segment) {
 	for i := range segs {
 		segs[i].Swallowed = true
 	}
+}
+
+// markPiped flags every segment fromBinaryCmd's Pipe/PipeAll arm produced —
+// sibling of markSwallowed, same all-segments-in-the-arm rationale: a
+// pipeline's collapsed-to command may itself be compound (rare, but
+// `a && b | c` nests), and every segment in that arm shares the same
+// "this ran inside a pipe" fact.
+func markPiped(segs []Segment) {
+	for i := range segs {
+		segs[i].Piped = true
+	}
+}
+
+// Argv (ferret-cax item 3) extracts the literal argv of a plain, single,
+// redirect-free shell command — the scan internal/mine's substitution
+// detector reads verb/flags/args from. plain is false whenever raw is not
+// exactly that shape: a parse failure, more than one top-level statement, a
+// negated/backgrounded/coprocess statement, any redirect, a command-local
+// environment assignment (`VAR=x cmd`), a compound command
+// (pipe, &&/||, subshell, block, ...), or an argument that is not a pure
+// literal (a parameter expansion `$VAR`, command substitution `$( )`,
+// arithmetic expansion, process substitution, extended glob, or brace
+// expansion). A redirect or expansion changes what the program actually
+// receives or does — exactly the cases where guessing from text would be
+// unsafe — so the detector must decline rather than parse around them.
+//
+// Single- and double-quoted literal spans (`'pattern'`, `"10,20p"`) do count
+// as plain: the quotes are shell syntax, not part of the value the program
+// receives, so they are stripped like Split's wordLit already does for the
+// argv0/subcommand case.
+func Argv(raw string) (argv []string, plain bool) {
+	parser := syntax.NewParser(syntax.Variant(syntax.LangBash))
+	file, err := parser.Parse(strings.NewReader(raw), "")
+	if err != nil || len(file.Stmts) != 1 {
+		return nil, false
+	}
+	st := file.Stmts[0]
+	if st.Negated || st.Background || st.Coprocess || len(st.Redirs) > 0 {
+		return nil, false
+	}
+	call, ok := st.Cmd.(*syntax.CallExpr)
+	if !ok {
+		return nil, false
+	}
+	// A command-local environment assignment (`RIPGREP_CONFIG_PATH=x rg foo`)
+	// changes what the program does without appearing in argv at all, so the
+	// scan would read as plain while the behavior is not — decline, same
+	// posture as a redirect.
+	if len(call.Assigns) > 0 {
+		return nil, false
+	}
+	argv = make([]string, 0, len(call.Args))
+	for _, w := range call.Args {
+		lit, ok := plainWordLit(w)
+		if !ok {
+			return nil, false
+		}
+		argv = append(argv, lit)
+	}
+	return argv, true
+}
+
+// plainWordLit returns a word's literal value when every part is a bare
+// literal or a single-/double-quoted span whose own contents are pure
+// literals too — the forms a plain argv token can take. Any expansion fails
+// the word, mirroring Word.Lit()'s all-*Lit rule but additionally accepting
+// quoted spans (Word.Lit alone returns "" for `'pattern'`, which would wrongly
+// reject a quoted literal argument as non-plain).
+func plainWordLit(w *syntax.Word) (string, bool) {
+	var sb strings.Builder
+	for _, part := range w.Parts {
+		switch p := part.(type) {
+		case *syntax.Lit:
+			sb.WriteString(p.Value)
+		case *syntax.SglQuoted:
+			sb.WriteString(p.Value)
+		case *syntax.DblQuoted:
+			s, ok := plainWordPartsLit(p.Parts)
+			if !ok {
+				return "", false
+			}
+			sb.WriteString(s)
+		default:
+			return "", false
+		}
+	}
+	return sb.String(), true
+}
+
+// plainWordPartsLit requires every part of a double-quoted span to be a bare
+// literal — a `"$VAR"` interpolation fails here even though the outer word is
+// double-quoted, because the inner part is a ParamExp, not a Lit.
+func plainWordPartsLit(parts []syntax.WordPart) (string, bool) {
+	var sb strings.Builder
+	for _, part := range parts {
+		lit, ok := part.(*syntax.Lit)
+		if !ok {
+			return "", false
+		}
+		sb.WriteString(lit.Value)
+	}
+	return sb.String(), true
 }
 
 func fallbackSegment(command string) (Segment, bool) {

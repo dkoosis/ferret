@@ -8,14 +8,15 @@ import (
 
 // Bucket is one aggregation row in a summary.
 type Bucket struct {
-	Key      string         `json:"key"`
-	Events   int            `json:"events"`
-	Sessions int            `json:"sessions,omitempty"`
-	Fails    int            `json:"fails"`
-	CFails   int            `json:"cfails"` // compound-chain failures; segment unknown
-	Retries  int            `json:"retries"`
-	Unpaired int            `json:"unpaired"`
-	ByKind   map[string]int `json:"byKind,omitempty"`
+	Key       string         `json:"key"`
+	Events    int            `json:"events"`
+	Sessions  int            `json:"sessions,omitempty"`
+	Fails     int            `json:"fails"`
+	CFails    int            `json:"cfails"` // compound-chain failures; segment unknown
+	Retries   int            `json:"retries"`
+	Unpaired  int            `json:"unpaired"`
+	CwdResets int            `json:"cwdResets"` // ferret-cax item 5: harness cwd-reset tells in this bucket
+	ByKind    map[string]int `json:"byKind,omitempty"`
 
 	sessions map[string]struct{}
 }
@@ -85,6 +86,9 @@ func (sm *summarizer) addBucket(ev *event.Event) {
 	}
 	if ev.Retry {
 		b.Retries++
+	}
+	if ev.CwdReset {
+		b.CwdResets++
 	}
 }
 

@@ -1,6 +1,7 @@
 package event
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -807,5 +808,133 @@ func TestUsageJoinCompoundChainBothSegments(t *testing.T) {
 	}
 	if stats.UsageJoined != 2 {
 		t.Errorf("Stats.UsageJoined = %d, want 2 (both segments joined)", stats.UsageJoined)
+	}
+}
+
+// TestPipeFlagCapturedAtIngest covers the PIPE-ERASURE wiring (ferret-cax
+// item 3): a piped Bash call carries Event.Pipe forward from
+// shellnorm.Segment.Piped — the fact is gone from Detail alone (`rg foo |
+// head` collapses to the "rg" segment), so it must be captured here.
+func TestPipeFlagCapturedAtIngest(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"rg foo | head"}`),
+		toolResult("u2", "t1", false),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 1 {
+		t.Fatalf("events = %d, want 1", len(evs))
+	}
+	if !evs[0].Pipe {
+		t.Error("Pipe = false, want true — command came from a pipeline")
+	}
+}
+
+// TestPipeFlagUnsetOnPlainCall is the negative twin: a bare command never
+// gets Pipe set.
+func TestPipeFlagUnsetOnPlainCall(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"rg foo"}`),
+		toolResult("u2", "t1", false),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 1 {
+		t.Fatalf("events = %d, want 1", len(evs))
+	}
+	if evs[0].Pipe {
+		t.Error("Pipe = true, want false for a bare command")
+	}
+}
+
+// TestLegacyDecodeMissingPiCwKeys pins backward compatibility (ferret-cax):
+// a JSONL line from before Pipe/CwdReset existed carries neither the "pi" nor
+// the "cw" key, and must decode with both flags false and no error.
+func TestLegacyDecodeMissingPiCwKeys(t *testing.T) {
+	line := `{"i":1,"p":"proj","s":"sess","k":"shell","act":"rg"}`
+	var ev Event
+	if err := json.Unmarshal([]byte(line), &ev); err != nil {
+		t.Fatalf("Unmarshal legacy line: %v", err)
+	}
+	if ev.Pipe {
+		t.Error("Pipe = true decoding a legacy line with no \"pi\" key, want false")
+	}
+	if ev.CwdReset {
+		t.Error("CwdReset = true decoding a legacy line with no \"cw\" key, want false")
+	}
+}
+
+// TestCwdResetMarksTrailingShellSegment covers the ferret-cax item 5 tell:
+// a tool_result containing the harness's cwd-reset notice marks the trailing
+// shell segment of the Bash call it belongs to, and counts into Stats.
+func TestCwdResetMarksTrailingShellSegment(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"ls"}`),
+		toolResultContent("u2", "t1", `"Shell cwd was reset to /Users/x/project"`),
+	)
+	b := NewBuilder()
+	var evs []*Event
+	if err := b.File(src, func(ev *Event) { evs = append(evs, ev) }); err != nil {
+		t.Fatal(err)
+	}
+	if len(evs) != 1 {
+		t.Fatalf("events = %d, want 1", len(evs))
+	}
+	if !evs[0].CwdReset {
+		t.Error("CwdReset = false, want true — result carries the marker")
+	}
+	if b.Stats.CwdResets != 1 {
+		t.Errorf("Stats.CwdResets = %d, want 1", b.Stats.CwdResets)
+	}
+}
+
+// TestCwdResetOnlyTrailingSegmentOfCompound checks a compound chain only
+// flags its last segment — the marker describes the shell's state after the
+// whole tool_result, mirroring Approx's trailing-segment attribution rule.
+func TestCwdResetOnlyTrailingSegmentOfCompound(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"ls /x && cat f"}`),
+		toolResultContent("u2", "t1", `"Shell cwd was reset to /x"`),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 2 {
+		t.Fatalf("events = %d, want 2 (both segments survive shellnorm)", len(evs))
+	}
+	if evs[0].CwdReset {
+		t.Error("leading segment CwdReset = true, want false")
+	}
+	if !evs[1].CwdReset {
+		t.Error("trailing segment CwdReset = false, want true")
+	}
+}
+
+// TestCwdResetNotSetOnToolResult is the negative twin: the marker text
+// appearing in a non-shell tool's result (e.g. a Read whose file content
+// happens to quote the phrase) must not set the flag — the tell is gated to
+// KindShell.
+func TestCwdResetNotSetOnToolResult(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Read", `{"file_path":"a.go"}`),
+		toolResultContent("u2", "t1", `"// contains the string Shell cwd was reset in a comment"`),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 1 {
+		t.Fatalf("events = %d, want 1", len(evs))
+	}
+	if evs[0].CwdReset {
+		t.Error("CwdReset = true, want false — marker in a tool result must not set the tell")
+	}
+}
+
+// TestCwdResetAbsentWithoutMarker is the plain negative: no marker text, no flag.
+func TestCwdResetAbsentWithoutMarker(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"ls"}`),
+		toolResultContent("u2", "t1", `"total 0"`),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 1 {
+		t.Fatalf("events = %d, want 1", len(evs))
+	}
+	if evs[0].CwdReset {
+		t.Error("CwdReset = true, want false — no marker present")
 	}
 }

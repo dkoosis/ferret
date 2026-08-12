@@ -53,11 +53,12 @@ func cmdSummary() error {
 	defer sink.Close()
 	about(sink,
 		"≡ summary: corpus health — event volume, failure and retry rates per "+cmd.By+".",
-		"≡ fail = action errored · cfail = inside a failed compound · unpaired = call without result.")
+		"≡ fail = action errored · cfail = inside a failed compound · unpaired = call without result.",
+		"≡ cwd = harness cwd-reset tells (ferret-cax) — count, not a rate; a floor on hidden resets.")
 	sink.Head("summary by=%s buckets=%d", s.By, len(s.Buckets))
 	for _, b := range s.Buckets {
-		sink.Row("%8d ev %5d sess fail=%.1f%% cfail=%.1f%% retry=%.1f%% unpaired=%.1f%%  %s",
-			b.Events, b.Sessions, pct(b.Fails, b.Events), pct(b.CFails, b.Events), pct(b.Retries, b.Events), pct(b.Unpaired, b.Events), b.Key)
+		sink.Row("%8d ev %5d sess fail=%.1f%% cfail=%.1f%% retry=%.1f%% unpaired=%.1f%% cwd=%-4d  %s",
+			b.Events, b.Sessions, pct(b.Fails, b.Events), pct(b.CFails, b.Events), pct(b.Retries, b.Events), pct(b.Unpaired, b.Events), b.CwdResets, b.Key)
 	}
 	if cmd.By == "corpus" && len(s.TopActions) > 0 {
 		sink.Head("top actions:")
