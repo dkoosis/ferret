@@ -76,14 +76,31 @@ type WasteRow struct {
 	Detail string `json:"detail,omitempty"`
 }
 
-// WasteReport is the merged ranking plus the denominators a reader needs to
-// size it.
+// WasteReport is the merged ranking plus the figures a reader needs to size
+// it.
 type WasteReport struct {
-	Rows        []WasteRow `json:"rows"`
-	TotalWasted int        `json:"totalWasted"` // summed WastedBytes over ALL rows, before any caller-side cap
-	TotalRender int        `json:"totalRender"` // summed RenderCost over the whole corpus — the denominator
-	Events      int        `json:"events"`
-	Sessions    int        `json:"sessions"`
+	Rows []WasteRow `json:"rows"`
+
+	// TotalWasted sums WastedBytes over ALL rows (before any caller-side cap).
+	//
+	// It is an UPPER BOUND, not a corpus measurement, because the detectors
+	// are not disjoint: two identical failing shell calls in one session are
+	// charged once by polling and twice by misfires, and a motif can charge
+	// the same calls a third time. Deduplicating is not available at this
+	// grain — the detectors hand over aggregates, not events — so the honest
+	// move is to label the sum and publish the per-source split beside it.
+	// Never render this as a percentage of TotalRender: overlapping charges
+	// can exceed the rendered total they would be a fraction of.
+	TotalWasted int `json:"totalWasted"`
+	// BySource splits TotalWasted per detector. Within one source the rows ARE
+	// disjoint (one row per key, or per command text for polling), so each
+	// subtotal is a sound figure on its own — which is why the breakdown, not
+	// the sum, is what the renderers lead with.
+	BySource map[WasteSource]int `json:"bySource,omitempty"`
+
+	TotalRender int `json:"totalRender"` // summed RenderCost over the whole corpus — context, not a denominator for TotalWasted
+	Events      int `json:"events"`
+	Sessions    int `json:"sessions"`
 }
 
 // MergeWaste joins the four detectors' reports into one waste-ranked table.
@@ -105,11 +122,13 @@ func MergeWaste(burn *BurnResult, mis MisfireReport, poll PollingReport, corpus 
 	rows = appendMotifWaste(rows, corpus, motifs)
 
 	kept := rows[:0]
+	rep.BySource = map[WasteSource]int{}
 	for _, r := range rows {
 		if r.WastedBytes <= 0 {
 			continue // no estimable waste — a row of zeros is noise in a ranking
 		}
 		rep.TotalWasted += r.WastedBytes
+		rep.BySource[r.Source] += r.WastedBytes
 		kept = append(kept, r)
 	}
 	sort.Slice(kept, func(i, j int) bool { return wasteLess(&kept[i], &kept[j]) })

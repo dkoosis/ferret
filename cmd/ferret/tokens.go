@@ -22,9 +22,7 @@ func cmdTokens() error {
 	if err != nil {
 		return err
 	}
-	if c.limit == 0 {
-		c.limit = 200
-	}
+	applyDefaultLimit(c, 200)
 	lo := fromLensFlags(cmd.LensFlags)
 	if cmd.Session == "" {
 		return errSessionRequired

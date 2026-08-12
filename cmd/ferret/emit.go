@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -89,7 +88,7 @@ func cmdEmit() error {
 	return nil
 }
 
-var errEmitWindow = errors.New("--window must be ≥ 1")
+var errEmitWindow = usage("--window must be ≥ 1")
 
 // emitOpts bundles the resolved emit parameters so runEmit is one pure-ish
 // entry point the CLI wraps and a test drives directly.

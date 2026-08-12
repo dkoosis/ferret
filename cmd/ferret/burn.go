@@ -37,9 +37,7 @@ func cmdBurn(cmd *BurnCmd) error {
 	if err != nil {
 		return err
 	}
-	if c.limit == 0 {
-		c.limit = 20
-	}
+	applyDefaultLimit(c, 20)
 	if err := c.validate(fmtText, fmtJSON); err != nil {
 		return err
 	}

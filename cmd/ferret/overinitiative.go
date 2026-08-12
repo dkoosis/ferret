@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -29,7 +28,7 @@ import (
 
 const overInitPromptCap = 600 // opening prompt chars sent to the judge / rendered
 
-var errOverInitSessionRequired = errors.New("over-initiative: --session PREFIX required")
+var errOverInitSessionRequired = usage("over-initiative: --session PREFIX required")
 
 // mutatingTools is the precision-first v1 set: the built-in tools that
 // unambiguously mutate durable state. Bash is deliberately EXCLUDED — it is

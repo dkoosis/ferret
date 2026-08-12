@@ -26,7 +26,7 @@ func analystContext() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), os.Interrupt)
 }
 
-var errAdjSessionRequired = errors.New("adjudicate: --session PREFIX required")
+var errAdjSessionRequired = usage("adjudicate: --session PREFIX required")
 
 // errNoRecallRuns is the empty-honest sentinel: a recall-trace with no runs is a
 // hard error, never a silent zero-finding green (the downstream metric must not

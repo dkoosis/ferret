@@ -23,8 +23,18 @@ var errRuntimeFixture = errors.New("disk on fire")
 // tried and failed. Every validation sentinel is usage; everything else is a
 // failure.
 func TestExitCodeFor_SeparatesUsageFromFailure_When_ErrorIsValidation(t *testing.T) {
-	usage := []error{errBadFormat, errBadKind, errBadSource, errMaxBytesJSON, errMaxBytesMD, errMinSupport, errMaxGap, errMaxLen, errOrder}
-	for _, err := range usage {
+	// The sentinels Codex named as previously misclassified are in here on
+	// purpose: --by, --n, --window and the required-flag errors all exited 1
+	// before the usageError marker replaced the hand-picked list.
+	sentinels := []error{
+		errBadFormat, errBadKind, errBadSource, errMaxBytesJSON, errMaxBytesMD,
+		errMinSupport, errMaxGap, errMaxLen, errOrder,
+		errBadBy, errBadRange, errEmitWindow,
+		errBadSince, errBadUntil, errReachWindow,
+		errAdjSessionRequired, errSpineSessionRequired, errFeedbackSessionRequired,
+		errFeedbackSearchEventRequired, errFixMotifRequired, errOverInitSessionRequired,
+	}
+	for _, err := range sentinels {
 		if got := exitCodeFor(err); got != exitUsage {
 			t.Errorf("exitCodeFor(%v) = %d, want %d", err, got, exitUsage)
 		}
@@ -35,6 +45,34 @@ func TestExitCodeFor_SeparatesUsageFromFailure_When_ErrorIsValidation(t *testing
 	}
 	if got := exitCodeFor(errRuntimeFixture); got != exitFailure {
 		t.Errorf("exitCodeFor(runtime error) = %d, want %d", got, exitFailure)
+	}
+}
+
+// A runtime sentinel must NOT be usage-classified — the split is only useful
+// if both sides are real.
+func TestExitCodeFor_KeepsRuntimeSentinelsAtFailure_When_NotCommandLine(t *testing.T) {
+	for _, err := range []error{errNoHomeDir, errConformReadSpec, errLandmarkBadSpec} {
+		if got := exitCodeFor(err); got != exitFailure {
+			t.Errorf("exitCodeFor(%v) = %d, want %d — not a command-line complaint", err, got, exitFailure)
+		}
+	}
+}
+
+// --limit's three states. Bare 0 could not mean "unlimited" and "compact
+// default" at once, so the escape hatch is a negative value; before this, nine
+// commands silently rewrote 0 and `--limit 0` truncated.
+func TestApplyDefaultLimit_ResolvesAllThreeStates_When_FlagIsSet(t *testing.T) {
+	for _, tc := range []struct{ in, want int }{
+		{in: 0, want: 20},  // unset → the command's default
+		{in: 5, want: 5},   // explicit N
+		{in: -1, want: 0},  // escape hatch → out.Sink's unlimited
+		{in: -99, want: 0}, // any negative
+	} {
+		c := &common{limit: tc.in}
+		applyDefaultLimit(c, 20)
+		if c.limit != tc.want {
+			t.Errorf("applyDefaultLimit(%d, 20) → %d, want %d", tc.in, c.limit, tc.want)
+		}
 	}
 }
 

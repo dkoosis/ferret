@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -11,7 +10,7 @@ import (
 	"github.com/dkoosis/ferret/internal/out"
 )
 
-var errBadRange = errors.New("bad --n range (gram length must be ≥ 2; 1-gram frequency = summary top actions)")
+var errBadRange = usage("bad --n range (gram length must be ≥ 2; 1-gram frequency = summary top actions)")
 
 // ---- ngrams ----
 
@@ -21,9 +20,7 @@ func cmdNgrams() error {
 	if err != nil {
 		return err
 	}
-	if c.limit == 0 {
-		c.limit = 30
-	}
+	applyDefaultLimit(c, 30)
 	lo := fromLensFlags(cmd.LensFlags)
 	minN, maxN, err := parseRange(cmd.N)
 	if err != nil {

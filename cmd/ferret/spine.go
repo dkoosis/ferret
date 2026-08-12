@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	errSpineSessionRequired = errors.New("spine: --session PREFIX required")
+	errSpineSessionRequired = usage("spine: --session PREFIX required")
 	errSpineNoMatch         = errors.New("spine: no transcript matches --session")
 )
 

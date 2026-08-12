@@ -85,6 +85,7 @@ func readStatus(c *common) status {
 		// A readable manifest with an unreadable events file is a real corpus
 		// problem, but it is still a state this view reports rather than an
 		// exit code: the ingest hint below is the fix either way.
+		st.Ready = false // a JSON consumer must not see ready:true with no metrics
 		st.Note = "corpus unreadable: " + err.Error()
 		return st
 	}
@@ -125,11 +126,15 @@ func writeStatusText(w io.Writer, st status, maxBytes int) error {
 	}
 	sink.Head("ferret %s · %d events · %d sessions · built %s%s",
 		st.Data, st.Events, st.Sessions, st.BuiltAt.Format(time.RFC3339), staleMark(st))
-	sink.Head("waste %s of %s rendered — top %d:",
+	// waste≤: the detectors overlap, so the sum is an upper bound, never a
+	// share of the rendered total (internal/mine/friction.go's WasteReport).
+	sink.Head("waste≤%s of %s rendered — top %d:",
 		humanBytes(st.Waste), humanBytes(st.Render), len(st.Top))
+	// Rows go through Row, not Head, so --max-bytes actually caps this command
+	// (contract: a hard output budget that some lines ignore is not a budget).
 	for i := range st.Top {
 		r := &st.Top[i]
-		sink.Head("  %10s  %-8s %5dx  %s", humanBytes(r.WastedBytes), r.Source, r.Occurrences, r.Key)
+		sink.Row("  %10s  %-8s %5dx  %s", humanBytes(r.WastedBytes), r.Source, r.Occurrences, r.Key)
 	}
 	// Legal moves, not a plan (DK-AXI rule 11). The refresh hint appears only
 	// when the corpus is actually stale — a hint that is always on is noise a

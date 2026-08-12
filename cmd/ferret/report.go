@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -15,8 +14,8 @@ import (
 // ---- report (Finding projection) ----
 
 var (
-	errBadKind    = errors.New("bad --kind (want routine|friction|loop|noise)")
-	errMaxBytesMD = errors.New("--max-bytes is not supported with --format md (whole-document output; use --limit)")
+	errBadKind    = usage("bad --kind (want routine|friction|loop|noise)")
+	errMaxBytesMD = usage("--max-bytes is not supported with --format md (whole-document output; use --limit)")
 )
 
 func cmdReport() error {
@@ -25,9 +24,7 @@ func cmdReport() error {
 	if err != nil {
 		return err
 	}
-	if c.limit == 0 {
-		c.limit = 30
-	}
+	applyDefaultLimit(c, 30)
 	lo := fromLensFlags(cmd.LensFlags)
 	if err := c.validate("text", fmtJSON, fmtMD); err != nil {
 		return err
@@ -248,7 +245,10 @@ func cmdReport() error {
 	// Legal moves, not a plan (DK-AXI rule 11): a motif's burn is gross cost —
 	// the merged view prices how much of it bought nothing, and the ledger is
 	// where a decided fix goes.
-	if len(findings) > 0 {
+	// The ledger hint is for actionable findings; a --kind noise view has none
+	// by definition (finding.go's kind assignment), so offering it there would
+	// be steering a caller into a no-op.
+	if len(findings) > 0 && cmd.Kind != string(mine.KindNoise) {
 		sink.NextHead("ferret friction", "ferret fixes add --motif <tokens> --fix <action>")
 	}
 	return nil

@@ -16,9 +16,7 @@ func cmdSeqs() error {
 	if err != nil {
 		return err
 	}
-	if c.limit == 0 {
-		c.limit = 30
-	}
+	applyDefaultLimit(c, 30)
 	lo := fromLensFlags(cmd.LensFlags)
 	if err := c.validate("text", fmtJSON); err != nil {
 		return err

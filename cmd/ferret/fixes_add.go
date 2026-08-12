@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -10,7 +9,7 @@ import (
 	"github.com/dkoosis/ferret/internal/fixes"
 )
 
-var errFixMotifRequired = errors.New("fixes add: --motif must not be empty")
+var errFixMotifRequired = usage("fixes add: --motif must not be empty")
 
 // cmdFixesAdd records motif→fix in the ledger, capturing the motif's CURRENT
 // burn as the baseline. The baseline is measured through the same findings

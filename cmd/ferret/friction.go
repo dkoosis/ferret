@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/dkoosis/ferret/internal/mine"
 	"github.com/dkoosis/ferret/internal/out"
@@ -40,9 +41,7 @@ func cmdFriction(cmd *FrictionCmd) error {
 	if err != nil {
 		return err
 	}
-	if c.limit == 0 {
-		c.limit = 20
-	}
+	applyDefaultLimit(c, 20)
 	if err := c.validate(fmtText, fmtJSON); err != nil {
 		return err
 	}
@@ -58,7 +57,7 @@ func cmdFriction(cmd *FrictionCmd) error {
 		return err
 	}
 	if cmd.Source != "" {
-		rep.Rows = filterWasteSource(rep.Rows, mine.WasteSource(cmd.Source))
+		rep = filterWasteReport(rep, mine.WasteSource(cmd.Source))
 	}
 
 	if c.format == fmtJSON {
@@ -116,21 +115,36 @@ func validateWasteSource(src string) error {
 	return fmt.Errorf("%w: %q (want poll|misfire|motif)", errBadSource, src)
 }
 
-// filterWasteSource narrows the merged table to one detector's rows, in place.
-func filterWasteSource(rows []mine.WasteRow, src mine.WasteSource) []mine.WasteRow {
-	kept := rows[:0]
-	for _, r := range rows {
-		if r.Source == src {
-			kept = append(kept, r)
+// filterWasteReport narrows the merged table to one detector and re-derives
+// the totals from what survived. Filtering rows without re-summing would print
+// a header that counts detectors the table no longer shows — `--source poll`
+// reporting misfire waste. Per-source subtotals are re-derived too, so the
+// breakdown always describes the rows on screen.
+//
+// TotalRender is left alone on purpose: it is the corpus denominator, not a
+// property of the selected rows.
+func filterWasteReport(rep mine.WasteReport, src mine.WasteSource) mine.WasteReport {
+	kept := rep.Rows[:0]
+	rep.TotalWasted = 0
+	rep.BySource = map[mine.WasteSource]int{}
+	for _, r := range rep.Rows {
+		if r.Source != src {
+			continue
 		}
+		rep.TotalWasted += r.WastedBytes
+		rep.BySource[r.Source] += r.WastedBytes
+		kept = append(kept, r)
 	}
-	return kept
+	rep.Rows = kept
+	return rep
 }
 
 // writeFrictionJSON emits the merged bundle as one JSON document, pre-capping
 // rows to limit (0 = unlimited) — out.JSON ignores row limits itself, so the
-// cap happens here. totalWasted stays uncapped on purpose: it is the corpus
-// figure, not the figure for the rows shown.
+// cap happens here. totalWasted stays uncapped on purpose: it describes every
+// row the merge produced, not the page of them shown. bySource rides along
+// because it is the sound figure — see WasteReport on why the sum is only an
+// upper bound.
 func writeFrictionJSON(w io.Writer, rep mine.WasteReport, limit int) error {
 	total := len(rep.Rows)
 	rows := rep.Rows
@@ -140,6 +154,7 @@ func writeFrictionJSON(w io.Writer, rep mine.WasteReport, limit int) error {
 	return out.JSON(w, map[string]any{
 		keyRows:       rows,
 		"totalWasted": rep.TotalWasted,
+		"bySource":    rep.BySource,
 		"totalRender": rep.TotalRender,
 		"events":      rep.Events,
 		keySessions:   rep.Sessions,
@@ -160,13 +175,17 @@ func writeFrictionText(w io.Writer, rep mine.WasteReport, limit, maxBytes int) e
 		"≡ the first per session (poll), calls that failed (misfire), motif occurrences past the",
 		"≡ first per session (motif). burn contributes no rows of its own — it prices the others,",
 		"≡ and each row carries its key's GROSS cost beside the waste. A model, not a measurement",
-		"≡ (ccp-3s1c); swallowed-error rows are excluded because a swallow count is a floor, not a count.")
+		"≡ (ccp-3s1c); swallowed-error rows are excluded because a swallow count is a floor, not a count.",
+		"≡ The per-source subtotals are sound; their SUM is an upper bound, because the detectors",
+		"≡ overlap (one failing repeated command is charged by both poll and misfire, and a motif",
+		"≡ can charge the same calls again). ✗ read it as a share of the rendered total.")
 	// Legal moves, not a plan (DK-AXI rule 11): each detector's own command
 	// holds the detail this table summarizes. Head-style so the hints survive
 	// row truncation — the truncated case is when a reader most needs them.
 	sink.NextHead("ferret polling", "ferret misfires", "ferret report --kind friction", "ferret burn")
-	sink.Head("friction rows=%d waste=%s of %s rendered  events=%d sessions=%d",
-		len(rep.Rows), humanBytes(rep.TotalWasted), humanBytes(rep.TotalRender), rep.Events, rep.Sessions)
+	sink.Head("friction rows=%d waste≤%s [%s]  rendered=%s  events=%d sessions=%d",
+		len(rep.Rows), humanBytes(rep.TotalWasted), wasteSplit(rep),
+		humanBytes(rep.TotalRender), rep.Events, rep.Sessions)
 	if len(rep.Rows) == 0 {
 		sink.Head("0 rows — no estimable waste in this corpus")
 		return nil
@@ -183,6 +202,22 @@ func writeFrictionText(w io.Writer, rep mine.WasteReport, limit, maxBytes int) e
 			r.Source, r.Key, detailSuffix(r.Detail))
 	}
 	return nil
+}
+
+// wasteSplit renders the per-source subtotals — the figures that are actually
+// sound, since rows within one detector are disjoint. Fixed source order so
+// repeated runs are byte-stable (map iteration is not).
+func wasteSplit(rep mine.WasteReport) string {
+	parts := make([]string, 0, 3)
+	for _, src := range []mine.WasteSource{mine.WasteRepeat, mine.WasteFail, mine.WasteMotif} {
+		if n := rep.BySource[src]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%s %s", src, humanBytes(n)))
+		}
+	}
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, " · ")
 }
 
 // detailSuffix appends a poll row's raw command text — its unit is the exact

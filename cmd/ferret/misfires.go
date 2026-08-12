@@ -107,7 +107,7 @@ func writeMisfiresText(w io.Writer, rep mine.MisfireReport, limit, maxBytes int)
 	// Legal moves, not a plan (DK-AXI rule 11): price these failures against
 	// the other detectors, or record a repair pair as a substitution.
 	if len(rep.Rows) > 0 {
-		sink.NextHead("ferret friction --source misfire", "ferret fixes sub --from <failed> --to <fixed>")
+		sink.NextHead("ferret friction --source misfire", "ferret fixes sub --intent <class> --wrong <tool> --better <template>")
 	}
 	return nil
 }

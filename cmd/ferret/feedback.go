@@ -18,7 +18,7 @@ import (
 // errFeedbackSessionRequired guards every feedback subcommand — none of them
 // makes sense unscoped: the cursor, the pending bank, and the budget's
 // per-session cap are all keyed by session.
-var errFeedbackSessionRequired = errors.New("feedback: --session PREFIX required")
+var errFeedbackSessionRequired = usage("feedback: --session PREFIX required")
 
 // nugTextCap bounds each candidate nug's body text sent to the relevance
 // judge, via the shared truncateRunes helper (spine.go). Sized against

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -17,9 +16,9 @@ import (
 const dateLayout = "2006-01-02"
 
 var (
-	errBadSince    = errors.New("bad --since (want YYYY-MM-DD)")
-	errBadUntil    = errors.New("bad --until (want YYYY-MM-DD)")
-	errReachWindow = errors.New("--since must not be after --until")
+	errBadSince    = usage("bad --since (want YYYY-MM-DD)")
+	errBadUntil    = usage("bad --until (want YYYY-MM-DD)")
+	errReachWindow = usage("--since must not be after --until")
 )
 
 // cmdReach mines recall-opportunity moments across the transcript corpus over a

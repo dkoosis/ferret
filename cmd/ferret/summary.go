@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 
@@ -9,7 +8,7 @@ import (
 	"github.com/dkoosis/ferret/internal/out"
 )
 
-var errBadBy = errors.New("bad --by (want corpus|project|session)")
+var errBadBy = usage("bad --by (want corpus|project|session)")
 
 // ---- summary ----
 
@@ -19,9 +18,7 @@ func cmdSummary() error {
 	if err != nil {
 		return err
 	}
-	if c.limit == 0 {
-		c.limit = 20
-	}
+	applyDefaultLimit(c, 20)
 	if err := c.validate("text", "json"); err != nil {
 		return err
 	}

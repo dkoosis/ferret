@@ -32,7 +32,10 @@ func TestWriteStatusText_ShowsCorpusAndTopWaste_When_CorpusIsReady(t *testing.T)
 		t.Fatalf("writeStatusText: %v", err)
 	}
 	got := buf.String()
-	for _, want := range []string{"149060 events", "1416 sessions", "waste 2.0KB of 8.8KB", "SendMessage", "sh:git_status", "next:"} {
+	// waste≤ : the detectors overlap, so the figure is an upper bound
+	// (internal/mine/friction.go's WasteReport) — the status view must carry
+	// the same qualifier the friction table does.
+	for _, want := range []string{"149060 events", "1416 sessions", "waste≤2.0KB of 8.8KB", "SendMessage", "sh:git_status", "next:"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q\n---\n%s", want, got)
 		}
@@ -107,5 +110,21 @@ func TestWriteStatusJSON_CarriesTheWholeView_When_CorpusIsReady(t *testing.T) {
 	}
 	if !got.Ready || got.Events != 149060 || len(got.Top) != 2 {
 		t.Errorf("round-trip lost data: %+v", got)
+	}
+}
+
+// Codex flagged this: every status line went through the uncapped Head path,
+// so --max-bytes printed the whole response regardless. Rows are budgeted now.
+func TestWriteStatusText_HonorsMaxBytes_When_BudgetIsTiny(t *testing.T) {
+	var buf bytes.Buffer
+	if err := writeStatusText(&buf, readyStatus(), 120); err != nil {
+		t.Fatalf("writeStatusText: %v", err)
+	}
+	got := buf.String()
+	if strings.Contains(got, "sh:git_status") {
+		t.Errorf("second row printed past a 120-byte budget\n---\n%s", got)
+	}
+	if !strings.Contains(got, "more (raise") {
+		t.Errorf("budgeted-out rows must be reported, not dropped silently\n---\n%s", got)
 	}
 }

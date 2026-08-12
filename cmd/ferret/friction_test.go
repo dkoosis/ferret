@@ -16,6 +16,7 @@ import (
 func wasteReport() mine.WasteReport {
 	return mine.WasteReport{
 		Events: 40, Sessions: 6, TotalWasted: 1900, TotalRender: 9000,
+		BySource: map[mine.WasteSource]int{mine.WasteRepeat: 1200, mine.WasteFail: 500, mine.WasteMotif: 200},
 		Rows: []mine.WasteRow{
 			{Key: "sh:git_status", Source: mine.WasteRepeat, WastedBytes: 1200, Occurrences: 9,
 				Sessions: 3, RenderCost: 4000, RenderPerCall: 133, Detail: "git status --short"},
@@ -56,16 +57,17 @@ func TestWriteFrictionText_RanksWasteFirstInTheEyePath_When_RowsAreMixedSources(
 	}
 }
 
-// The header carries the corpus denominator: a waste figure with nothing to
-// compare it against can't tell a reader whether it's worth a fix.
-func TestWriteFrictionText_ReportsWasteAgainstTotalRender_When_CorpusIsScored(t *testing.T) {
+// The header carries the corpus size for scale — a waste figure with nothing
+// beside it can't tell a reader whether it's worth a fix. It is context, not a
+// denominator: see the upper-bound test below.
+func TestWriteFrictionText_ReportsRenderedTotalForScale_When_CorpusIsScored(t *testing.T) {
 	var buf bytes.Buffer
 	if err := writeFrictionText(&buf, wasteReport(), 0, 0); err != nil {
 		t.Fatalf("writeFrictionText: %v", err)
 	}
 	hdr := frictionRowsOut(t, buf.String())
-	if !strings.Contains(hdr, "waste=1.9KB of 8.8KB rendered") {
-		t.Errorf("header missing the waste-of-total figure\n---\n%s", hdr)
+	if !strings.Contains(hdr, "rendered=8.8KB") {
+		t.Errorf("header missing the corpus rendered total\n---\n%s", hdr)
 	}
 }
 
@@ -127,9 +129,46 @@ func TestValidateWasteSource_Rejects_When_SourceIsUnknown(t *testing.T) {
 	}
 }
 
-func TestFilterWasteSource_KeepsOnlyTheNamedDetector_When_SourceIsSet(t *testing.T) {
-	got := filterWasteSource(wasteReport().Rows, mine.WasteRepeat)
-	if len(got) != 1 || got[0].Source != mine.WasteRepeat {
-		t.Errorf("filtered = %+v, want the single poll row", got)
+func TestFilterWasteReport_KeepsOnlyTheNamedDetector_When_SourceIsSet(t *testing.T) {
+	got := filterWasteReport(wasteReport(), mine.WasteRepeat)
+	if len(got.Rows) != 1 || got.Rows[0].Source != mine.WasteRepeat {
+		t.Errorf("filtered rows = %+v, want the single poll row", got.Rows)
+	}
+}
+
+// Filtering rows without re-summing prints a header that counts detectors the
+// table no longer shows — `--source poll` reporting misfire waste.
+func TestFilterWasteReport_ReDerivesTotals_When_SourceIsSet(t *testing.T) {
+	got := filterWasteReport(wasteReport(), mine.WasteRepeat)
+	if got.TotalWasted != 1200 {
+		t.Errorf("totalWasted = %d, want 1200 (the poll row alone, not the 1900 all-source sum)", got.TotalWasted)
+	}
+	if got.BySource[mine.WasteFail] != 0 || got.BySource[mine.WasteRepeat] != 1200 {
+		t.Errorf("bySource = %v, want only the poll subtotal", got.BySource)
+	}
+	if got.TotalRender != 9000 {
+		t.Errorf("totalRender = %d, want the corpus denominator untouched", got.TotalRender)
+	}
+}
+
+// The detectors overlap, so the sum is an upper bound. The header must not
+// present it as a share of the rendered total, and must show the split that IS
+// sound.
+func TestWriteFrictionText_LabelsWasteAsUpperBoundWithSplit_When_SourcesOverlap(t *testing.T) {
+	var buf bytes.Buffer
+	if err := writeFrictionText(&buf, wasteReport(), 0, 0); err != nil {
+		t.Fatalf("writeFrictionText: %v", err)
+	}
+	hdr := frictionRowsOut(t, buf.String())
+	if !strings.Contains(hdr, "waste≤") {
+		t.Errorf("total must be marked an upper bound\n---\n%s", hdr)
+	}
+	if strings.Contains(hdr, "waste=1.9KB of") {
+		t.Errorf("total must not read as a fraction of the rendered corpus\n---\n%s", hdr)
+	}
+	for _, want := range []string{"poll 1.2KB", "misfire 500B", "motif 200B"} {
+		if !strings.Contains(hdr, want) {
+			t.Errorf("header missing per-source subtotal %q\n---\n%s", want, hdr)
+		}
 	}
 }

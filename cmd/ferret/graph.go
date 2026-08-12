@@ -17,9 +17,7 @@ func cmdGraph() error {
 	if err != nil {
 		return err
 	}
-	if c.limit == 0 {
-		c.limit = 40
-	}
+	applyDefaultLimit(c, 40)
 	lo := fromLensFlags(cmd.LensFlags)
 	if err := c.validate("text", "json", "mermaid", "dot", "sankey"); err != nil {
 		return err
@@ -92,9 +90,7 @@ func cmdGraph() error {
 		ls := out.NewSink(os.Stdout, 20, c.maxBytes)
 		ls.Head("bounce cycles (A→B→A):")
 		for _, cy := range f.Cycles {
-			if !ls.Row("%6dx  %s ⇄ %s", cy.Count, corpus.Vocab[cy.A], corpus.Vocab[cy.B]) {
-				break
-			}
+			ls.Row("%6dx  %s ⇄ %s", cy.Count, corpus.Vocab[cy.A], corpus.Vocab[cy.B])
 		}
 		return ls.Close()
 	}
