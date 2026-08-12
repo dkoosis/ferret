@@ -290,6 +290,11 @@ var CLI struct {
 		CommonFlags
 	} `cmd:"" help:"Mine review gates (code-review/plan-review/precommit/QA): per-gate rejection sets + overlap ratio ω (high ω = redundant gate) + confirmed friction loops."`
 
+	// default:"withargs" makes a bare `ferret` (and `ferret --data X`) run
+	// status instead of erroring into the synopsis — AXI #8, content first.
+	// `ferret --help` still prints the full command list.
+	Status StatusCmd `cmd:"" default:"withargs" help:"Corpus health + the heaviest waste rows (the bare-ferret default)." name:"status"`
+
 	Friction FrictionCmd `cmd:"" help:"One ranked table of estimated wasted bytes — polling, misfires and motif findings merged, priced by burn." name:"friction"`
 
 	Burn BurnCmd `cmd:"" help:"Ranked corpus-wide render-cost burn per normalized command (the tune-up list)."`
@@ -474,6 +479,7 @@ func main() {
 				"  ferret conformance [--spec FILE] [--format text|json]   (reads stdin if no --spec)\n"+
 				"  ferret landmark  [--spec FILE | --session PREFIX [--root DIR]] [--data DIR] [--format text|json]   (milestone progress; spec reads stdin if no --spec)\n"+
 				"  ferret gates    [--data DIR] [--format text|json]   (overlap ratio ω over review-gate rejections)\n"+
+				"  ferret status   [--data DIR] [--format text|json]   (corpus health + heaviest waste — what bare `ferret` runs)\n"+
 				"  ferret friction [--data DIR] [--source poll|misfire|motif] [--no-motifs] [--format text|json]   (ONE waste-ranked table: polling + misfires + motifs, priced by burn)\n"+
 				"  ferret burn     [--data DIR] [--format text|json]   (ranked render-cost burn per normalized command)\n"+
 				"  ferret misfires [--data DIR] [--format text|json]   (repeated command failures + repair pairs)\n"+
@@ -533,6 +539,8 @@ func main() {
 		err = cmdLandmark()
 	case "gates":
 		err = cmdGates()
+	case "status":
+		err = cmdStatus(&CLI.Status)
 	case "friction":
 		err = cmdFriction(&CLI.Friction)
 	case "burn":
