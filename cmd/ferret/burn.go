@@ -14,7 +14,7 @@ import (
 //
 //	Burn struct {
 //	    CommonFlags
-//	} `cmd:"" help:"Ranked corpus-wide output-byte burn per normalized command."`
+//	} `cmd:"" help:"Ranked corpus-wide render burn per normalized command."`
 //
 // and dispatches alongside the other subcommands' switch arm:
 //
@@ -25,10 +25,11 @@ type BurnCmd struct {
 }
 
 // cmdBurn renders `ferret burn`: rows are normalized commands (shellnorm key
-// for shell, tool name for tool), ranked by total measured output-byte cost
-// across the whole ingested corpus, with calls/bytes-per-call/session-count
-// alongside. Mirrors cmdSummary's shape (fromCommonFlags → ensureData →
-// mine.* → text/json render).
+// for shell, tool name for tool), ranked by modeled render cost across the
+// whole ingested corpus — what the reader pays per call rendered, not per byte
+// returned (ferret-cax) — with the output-byte columns kept alongside so the
+// old ordering stays readable in the same table. Mirrors cmdSummary's shape
+// (fromCommonFlags → ensureData → mine.* → text/json render).
 func cmdBurn(cmd *BurnCmd) error {
 	c, err := fromCommonFlags(cmd.CommonFlags)
 	if err != nil {
@@ -76,10 +77,14 @@ func writeBurnText(w io.Writer, res *mine.BurnResult, limit, maxBytes int) error
 	defer sink.Close()
 	about(sink,
 		"≡ burn: ranked context cost per normalized command across the whole corpus — the tune-up list.",
-		"≡ out-bytes = event.Bytes (tool_use input + tool_result content, output-dominated for read/list/search calls); shell rows are shellnorm-normalized (sh:git_commit, ...), tool rows keyed by tool name.")
+		"≡ rend = modeled rendered cost, the ranking key: per-call chrome (shell ≈6 lines of command echo + preview frame + permission line; native tools ≈1 collapsed line) + each call's preview-capped output share. A model, not a measurement (ccp-3s1c).",
+		"≡ out-bytes = event.Bytes (tool_use input + tool_result content); kept beside rend because they disagree — a cheap-output, high-count command is near-zero on bytes and a top burner on rend.",
+		"≡ shell rows are shellnorm-normalized (sh:git_commit, ...), tool rows keyed by tool name.")
 	sink.Head("burn events=%d sessions=%d rows=%d", res.Events, res.Sessions, len(res.Rows))
-	for _, r := range res.Rows {
-		sink.Row("%10s out  %6d calls  %8s/call  %4d sess  %s",
+	for i := range res.Rows {
+		r := &res.Rows[i] // index-range: BurnRow carries a map field, value-range trips rangeValCopy
+		sink.Row("%10s rend  %8s/call  %10s out  %6d calls  %8s/call  %4d sess  %s",
+			humanBytes(r.RenderCost), humanBytes(int(r.RenderPerCall)),
 			humanBytes(r.OutBytes), r.Calls, humanBytes(int(r.BytesPerCall)), r.Sessions, r.Key)
 	}
 	return nil
