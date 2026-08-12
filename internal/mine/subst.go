@@ -58,6 +58,7 @@ const (
 	reasonTruncated       = "truncated"
 	reasonRedirect        = "redirect"
 	reasonExpansion       = "expansion"
+	reasonGlob            = "glob"
 	reasonUnparseable     = "unparseable"
 	reasonArity           = "arity"
 	reasonUnsupportedFlag = "unsupported_flag"
@@ -178,6 +179,12 @@ func argvFailReason(detail string) string {
 	if strings.Contains(detail, "$") {
 		return reasonExpansion
 	}
+	// A pathname pattern is its own bucket, not "expansion": the word parses
+	// fine and the shell, not a variable, is what turns one token into many
+	// filenames — a distinct reason the reader will want counted separately.
+	if strings.ContainsAny(detail, "*?[") {
+		return reasonGlob
+	}
 	return reasonUnparseable
 }
 
@@ -292,14 +299,21 @@ func substRuleCat(args []string) (bool, string) {
 
 var nValueAllow = map[string]bool{"-n": true}
 
-// plainCount matches the only `-n` value head/tail take that means a bare line
-// count. A signed value means something else entirely — `head -n -5` prints all
-// but the LAST 5 lines, `tail -n +5` starts AT line 5 — neither of which is the
-// "first/last N lines" shape Read's offset/limit reproduces, so both escape.
+// plainCount matches `head -n`'s bare line count. A signed value means
+// something else entirely — `head -n -5` prints all but the LAST 5 lines,
+// which Read's positive limit cannot express — so it escapes.
 var plainCount = regexp.MustCompile(`^[0-9]+$`)
 
-// substRuleHead/-Tail: `-n COUNT FILE` is the only recognized shape — Read
-// with an offset/limit covers the same "give me N lines of one file" case.
+// tailStartOffset matches `tail -n +N`, the one tail shape Read reproduces:
+// start at line N and read on, exactly Read's offset. Head and tail do NOT
+// share a rule despite the shared flag, because their default sense is
+// opposite — bare `tail -n 50` (and plain `tail file`) means the LAST 50
+// lines, and no Read offset names those without first knowing how long the
+// file is.
+var tailStartOffset = regexp.MustCompile(`^\+[0-9]+$`)
+
+// substRuleHead: `[-n COUNT] FILE` — Read's limit covers the same "give me the
+// first N lines of one file" case, and bare `head file` is that shape too.
 func substRuleHead(args []string) (bool, string) {
 	pos, values, ok := splitArgs(args, flagSpec{allow: nValueAllow, value: nValueAllow})
 	if !ok {
@@ -314,8 +328,20 @@ func substRuleHead(args []string) (bool, string) {
 	return true, ""
 }
 
+// substRuleTail: `-n +N FILE` only — see tailStartOffset for why the
+// last-N-lines forms escape instead.
 func substRuleTail(args []string) (bool, string) {
-	return substRuleHead(args)
+	pos, values, ok := splitArgs(args, flagSpec{allow: nValueAllow, value: nValueAllow})
+	if !ok {
+		return false, reasonUnsupportedFlag
+	}
+	if n, given := values["-n"]; !given || !tailStartOffset.MatchString(n) {
+		return false, reasonUnsupportedFlag
+	}
+	if len(pos) != 1 {
+		return false, reasonArity
+	}
+	return true, ""
 }
 
 var sedAllow = map[string]bool{"-n": true} // boolean: suppresses auto-print
