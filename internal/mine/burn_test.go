@@ -19,11 +19,20 @@ func writeBurnFixture(t *testing.T, lines string) string {
 	return path
 }
 
-// TestBurn_RanksByTotalOutBytesDescending_When_MultipleKeysPresent pins the
-// core AC: events group by their normalized command key (shellnorm segment
-// for shell, tool name for tool), sum to a per-key OutBytes total, and rows
-// sort by that total descending with a stable key tie-break.
-func TestBurn_RanksByTotalOutBytesDescending_When_MultipleKeysPresent(t *testing.T) {
+// TestBurn_RanksByRenderCostDescending_When_MultipleKeysPresent pins the
+// ferret-cax ranking flip and the reason for it: rows sort by modeled render
+// cost, so the high-count/low-byte shell key outranks the low-count/high-byte
+// tool key — the exact inversion the ccp-3s1c measurement demanded, and the
+// exact case the old total-OutBytes ranking got backwards.
+//
+// Fixture arithmetic, spelled out because the flip is the whole point:
+//
+//	Read          2 tool calls, 150 out-bytes → 2*80 chrome + 150 = 310 rend
+//	sh:git_commit 3 shell calls, 35 out-bytes → 3*480 chrome + 35 = 1475 rend
+//
+// Read wins on bytes 150→35; sh:git_commit wins on render 1475→310, and
+// render is what ranks.
+func TestBurn_RanksByRenderCostDescending_When_MultipleKeysPresent(t *testing.T) {
 	lines := `{"i":1,"p":"proj","s":"s1","k":"tool","act":"Read","b":100}
 {"i":2,"p":"proj","s":"s1","k":"tool","act":"Read","b":50}
 {"i":3,"p":"proj","s":"s2","k":"shell","act":"git_commit","b":10}
@@ -40,13 +49,147 @@ func TestBurn_RanksByTotalOutBytesDescending_When_MultipleKeysPresent(t *testing
 	if len(res.Rows) != 2 {
 		t.Fatalf("len(Rows) = %d, want 2 (Read, sh:git_commit): %+v", len(res.Rows), res.Rows)
 	}
-	// Read totals 150, sh:git_commit totals 35 — Read must rank first.
-	if res.Rows[0].Key != "Read" {
-		t.Errorf("Rows[0].Key = %q, want %q (higher total out-bytes ranks first)", res.Rows[0].Key, "Read")
+	if res.Rows[0].Key != "sh:git_commit" {
+		t.Errorf("Rows[0].Key = %q, want %q (higher render cost ranks first)", res.Rows[0].Key, "sh:git_commit")
 	}
-	if res.Rows[1].Key != "sh:git_commit" {
-		t.Errorf("Rows[1].Key = %q, want %q", res.Rows[1].Key, "sh:git_commit")
+	if res.Rows[1].Key != "Read" {
+		t.Errorf("Rows[1].Key = %q, want %q", res.Rows[1].Key, "Read")
 	}
+	// The byte ordering must remain *readable* even though it no longer ranks:
+	// the row that lost the ranking still carries the larger OutBytes.
+	if res.Rows[1].OutBytes <= res.Rows[0].OutBytes {
+		t.Errorf("expected the lower-ranked row to still show more out-bytes (byte columns stay visible): %+v", res.Rows)
+	}
+}
+
+// TestBurn_ComputesRenderCost_When_KindAndBytesVary is the cost-model table:
+// per-kind chrome constants, the per-call preview cap, and the per-call
+// division into RenderPerCall. Each case is one key's worth of events so the
+// expected arithmetic stays inspectable.
+func TestBurn_ComputesRenderCost_When_KindAndBytesVary(t *testing.T) {
+	const (
+		toolChrome  = toolChromeLines * renderedLineBytes  // 80
+		shellChrome = shellChromeLines * renderedLineBytes // 480
+	)
+	tests := []struct {
+		name          string
+		lines         string
+		key           string
+		wantRender    int
+		wantPerCall   float64
+		wantOutBytes  int
+		wantCallCount int
+	}{
+		{
+			name:          "tool call pays one collapsed line of chrome",
+			lines:         `{"i":1,"p":"proj","s":"s1","k":"tool","act":"Read","b":100}`,
+			key:           "Read",
+			wantRender:    toolChrome + 100,
+			wantPerCall:   toolChrome + 100,
+			wantOutBytes:  100,
+			wantCallCount: 1,
+		},
+		{
+			name:          "shell call pays the full command-echo-plus-classifier chrome",
+			lines:         `{"i":1,"p":"proj","s":"s1","k":"shell","act":"git_status","b":100}`,
+			key:           "sh:git_status",
+			wantRender:    shellChrome + 100,
+			wantPerCall:   shellChrome + 100,
+			wantOutBytes:  100,
+			wantCallCount: 1,
+		},
+		{
+			name:          "output past the preview cap is collapsed, not charged",
+			lines:         `{"i":1,"p":"proj","s":"s1","k":"tool","act":"Read","b":999999}`,
+			key:           "Read",
+			wantRender:    toolChrome + previewCapBytes,
+			wantPerCall:   toolChrome + previewCapBytes,
+			wantOutBytes:  999999,
+			wantCallCount: 1,
+		},
+		{
+			name: "the preview cap applies per call, never to the summed total",
+			lines: `{"i":1,"p":"proj","s":"s1","k":"tool","act":"Read","b":999999}
+{"i":2,"p":"proj","s":"s1","k":"tool","act":"Read","b":999999}`,
+			key:           "Read",
+			wantRender:    2 * (toolChrome + previewCapBytes),
+			wantPerCall:   toolChrome + previewCapBytes,
+			wantOutBytes:  1999998,
+			wantCallCount: 2,
+		},
+		{
+			name: "a zero-output shell call still costs its chrome",
+			lines: `{"i":1,"p":"proj","s":"s1","k":"shell","act":"git_status"}
+{"i":2,"p":"proj","s":"s1","k":"shell","act":"git_status"}`,
+			key:           "sh:git_status",
+			wantRender:    2 * shellChrome,
+			wantPerCall:   shellChrome,
+			wantOutBytes:  0,
+			wantCallCount: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res, err := Burn(writeBurnFixture(t, tt.lines+"\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			row := findBurnRow(t, res, tt.key)
+			if row.RenderCost != tt.wantRender {
+				t.Errorf("RenderCost = %d, want %d", row.RenderCost, tt.wantRender)
+			}
+			if row.RenderPerCall != tt.wantPerCall {
+				t.Errorf("RenderPerCall = %v, want %v", row.RenderPerCall, tt.wantPerCall)
+			}
+			if row.OutBytes != tt.wantOutBytes {
+				t.Errorf("OutBytes = %d, want %d (byte accounting must be untouched by the model)", row.OutBytes, tt.wantOutBytes)
+			}
+			if row.Calls != tt.wantCallCount {
+				t.Errorf("Calls = %d, want %d", row.Calls, tt.wantCallCount)
+			}
+		})
+	}
+}
+
+// TestBurn_BreaksRenderTiesOnBytesThenKey_When_CostsMatch pins the two-deep
+// tie-break that keeps repeated runs byte-stable: equal render cost falls to
+// out-bytes descending, and an equal-on-both pair falls to key ascending.
+func TestBurn_BreaksRenderTiesOnBytesThenKey_When_CostsMatch(t *testing.T) {
+	// Three tool keys, one call each. alpha/beta are identical on both cost
+	// columns (key breaks the tie); gamma matches their render cost but is
+	// capped, so it carries far more out-bytes and must outrank both.
+	lines := `{"i":1,"p":"proj","s":"s1","k":"tool","act":"beta","b":2048}
+{"i":2,"p":"proj","s":"s1","k":"tool","act":"alpha","b":2048}
+{"i":3,"p":"proj","s":"s1","k":"tool","act":"gamma","b":900000}
+`
+	res, err := Burn(writeBurnFixture(t, lines))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(res.Rows))
+	for i := range res.Rows {
+		got = append(got, res.Rows[i].Key)
+	}
+	want := []string{"gamma", "alpha", "beta"}
+	for i := range want {
+		if i >= len(got) || got[i] != want[i] {
+			t.Fatalf("row order = %v, want %v (render tie → out-bytes desc → key asc)", got, want)
+		}
+	}
+}
+
+// findBurnRow returns the row for key, failing the test if it is absent —
+// pointer-returning so callers never copy a BurnRow (it carries a map field).
+func findBurnRow(t *testing.T, res *BurnResult, key string) *BurnRow {
+	t.Helper()
+	for i := range res.Rows {
+		if res.Rows[i].Key == key {
+			return &res.Rows[i]
+		}
+	}
+	t.Fatalf("no row for key %q: %+v", key, res.Rows)
+	return nil
 }
 
 // TestBurn_AggregatesCallsBytesPerCallAndSessions_When_KeyRecursAcrossSessions
@@ -148,7 +291,8 @@ func TestBurn_RoundTripsThroughJSON_When_ResultMarshaled(t *testing.T) {
 	}
 	for i := range res.Rows {
 		if got.Rows[i].Key != res.Rows[i].Key || got.Rows[i].OutBytes != res.Rows[i].OutBytes ||
-			got.Rows[i].Calls != res.Rows[i].Calls || got.Rows[i].Sessions != res.Rows[i].Sessions {
+			got.Rows[i].Calls != res.Rows[i].Calls || got.Rows[i].Sessions != res.Rows[i].Sessions ||
+			got.Rows[i].RenderCost != res.Rows[i].RenderCost || got.Rows[i].RenderPerCall != res.Rows[i].RenderPerCall {
 			t.Errorf("round-tripped Rows[%d] = %+v, want %+v", i, got.Rows[i], res.Rows[i])
 		}
 	}

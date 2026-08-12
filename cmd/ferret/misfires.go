@@ -56,19 +56,24 @@ func cmdMisfires(cmd MisfiresCmd) error {
 // capping rows and repairs to limit (0 = unlimited) — mirrors writeBurnJSON;
 // the out.JSON contract ignores row limits itself, so the cap happens here.
 func writeMisfiresJSON(w io.Writer, rep mine.MisfireReport, limit int) error {
-	rowsTotal, repairsTotal := len(rep.Rows), len(rep.Repairs)
-	rows, repairs := rep.Rows, rep.Repairs
+	rowsTotal, repairsTotal, swallowedTotal := len(rep.Rows), len(rep.Repairs), len(rep.Swallowed)
+	rows, repairs, swallowed := rep.Rows, rep.Repairs, rep.Swallowed
 	if limit > 0 && len(rows) > limit {
 		rows = rows[:limit]
 	}
 	if limit > 0 && len(repairs) > limit {
 		repairs = repairs[:limit]
 	}
+	if limit > 0 && len(swallowed) > limit {
+		swallowed = swallowed[:limit]
+	}
 	return out.JSON(w, map[string]any{
-		"rows":         rows,
-		"repairs":      repairs,
-		keyTotal:       rowsTotal,
-		"repairsTotal": repairsTotal,
+		"rows":           rows,
+		"repairs":        repairs,
+		"swallowed":      swallowed,
+		keyTotal:         rowsTotal,
+		"repairsTotal":   repairsTotal,
+		"swallowedTotal": swallowedTotal,
 	})
 }
 
@@ -84,7 +89,11 @@ func writeMisfiresText(w io.Writer, rep mine.MisfireReport, limit, maxBytes int)
 		"≡ sessions — a command that fails the same way across many sessions ranks highest.",
 		"≡ repair pairs: a failed call followed by a same-key success (Event.Retry) — the",
 		"≡ existing repair tell. Feeds the fixes/substitution ledger loop (ferret fixes sub);",
-		"≡ this command only ranks, it does not write to the ledger.")
+		"≡ this command only ranks, it does not write to the ledger.",
+		"≡ swallowed: `cmd 2>/dev/null || fallback` — the error text is discarded and the",
+		"≡ chain exits with the fallback's code, so no is_error ever fires and the rows",
+		"≡ above cannot see these at all. Counts are a FLOOR on hidden failures: the shape",
+		"≡ proves a failure would be invisible, never that one happened.")
 
 	sink.Head("misfires rows=%d repairs=%d", len(rep.Rows), len(rep.Repairs))
 	for _, row := range rep.Rows {
@@ -102,7 +111,30 @@ func writeMisfiresText(w io.Writer, rep mine.MisfireReport, limit, maxBytes int)
 			}
 		}
 	}
+
+	if len(rep.Swallowed) > 0 {
+		sink.Head("swallowed errors (invisible to is_error — floor on hidden misfires):")
+		for _, row := range rep.Swallowed {
+			if !swallowRow(sink, row) {
+				break
+			}
+		}
+	}
 	return nil
+}
+
+// swallowRow renders one swallowed-error row, appending the exemplar command
+// only when ingest captured one — the shape is the finding, and the exemplar
+// is what makes it actionable (it names the chain to rewrite). Returns the
+// sink's keep-going signal.
+func swallowRow(sink *out.Sink, row mine.SwallowRow) bool {
+	line := "%-24s  swallowed=%-4d sessions=%-4d calls=%-4d rate=%.2f  score=%.0f"
+	args := []any{row.Key, row.Swallows, row.SwallowSess, row.Calls, row.SwallowRate, row.Score}
+	if row.Exemplar != "" {
+		line += "  %q"
+		args = append(args, row.Exemplar)
+	}
+	return sink.Row(line, args...)
 }
 
 // repairRow renders one repair pair, falling back to the key-level form when

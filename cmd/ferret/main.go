@@ -291,6 +291,8 @@ var CLI struct {
 
 	Misfires MisfiresCmd `cmd:"" help:"Rank repeated command misfires + repair pairs corpus-wide."`
 
+	Polling PollingCmd `cmd:"" help:"Rank exact-duplicate commands repeated within a session." name:"polling"`
+
 	Retrieval struct {
 		CommonFlags
 		Session    string        `help:"Only episodes from sessions matching this prefix/substring (omit for whole corpus)." name:"session"`
@@ -526,6 +528,8 @@ func main() {
 		err = cmdBurn(&CLI.Burn)
 	case "misfires":
 		err = cmdMisfires(CLI.Misfires)
+	case "polling":
+		err = cmdPolling(CLI.Polling)
 	case "retrieval":
 		err = cmdRetrieval()
 	case "quality":

@@ -87,6 +87,101 @@ func TestSplitDeepNestingDegradesToComplex(t *testing.T) {
 	}
 }
 
+// TestSwallows covers the SWALLOWED-ERROR predicate (ferret-cax): true only
+// when stderr-silencing and an `||` alternative appear together in the same
+// left arm. Either half alone leaves a trace — `2>/dev/null` still surfaces
+// the return code, `||` alone still prints the error — so only the pair hides
+// a failure from ferret's is_error signal.
+func TestSwallows(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		// Positives — every silencing form paired with an alternative.
+		{"stderr to devnull", "bd show x 2>/dev/null || bd list", true},
+		{"stderr appended to devnull", "bd show x 2>>/dev/null || bd list", true},
+		{"stdout then stderr dup", "command -v foo >/dev/null 2>&1 || echo missing", true},
+		{"all-output shorthand", "rg pat &>/dev/null || rg -F pat", true},
+		{"all-output append shorthand", "rg pat &>>/dev/null || rg -F pat", true},
+		{"fallback is trivial", "jq '.[0]' out.json 2>/dev/null || true", true},
+		{"nested in subshell", "make lint && (go test ./... 2>/dev/null || go test ./x)", true},
+		{"redirect on a block arm", "{ go build ./...; } 2>/dev/null || go vet ./...", true},
+		{"redirect inside a block arm", "{ go build ./... 2>/dev/null; } || go vet ./...", true},
+		{"swallow in a later statement", "git status; git show 2>/dev/null || git log", true},
+
+		// Negatives — one half only, or the wrong half.
+		{"silence without alternative", "bd show x 2>/dev/null", false},
+		{"alternative without silence", "bd show x || bd list", false},
+		{"plain command", "go test ./...", false},
+		{"and-chain, not or", "bd show x 2>/dev/null && bd list", false},
+		{"silence on the right arm", "bd show x || bd list 2>/dev/null", false},
+		{"stdout only", "bd show x >/dev/null || bd list", false},
+		// `2>&1` before `>/dev/null` points stderr at the *old* stdout, so the
+		// error still prints — order decides the verdict.
+		{"reversed dup order", "bd show x 2>&1 >/dev/null || bd list", false},
+		{"redirect to a real file", "bd show x 2>errs.log || bd list", false},
+		{"pipe, not or", "bd show x 2>/dev/null | jq .", false},
+		{"empty", "", false},
+		// A command that will not parse yields no verdict — the count this
+		// predicate feeds must stay a floor, never a guess from raw text.
+		{"parse failure", "bd show 'unterminated 2>/dev/null || bd list", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := Swallows(c.in); got != c.want {
+				t.Errorf("Swallows(%q) = %v, want %v", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+// TestSwallowsDeepNestingTerminates pairs with
+// TestSplitDeepNestingDegradesToComplex: the swallow walk shares fromStmt's
+// depth ceiling, so pathological nesting returns rather than recursing away.
+func TestSwallowsDeepNestingTerminates(t *testing.T) {
+	n := 200
+	cmd := strings.Repeat("( ", n) + "cat f.json 2>/dev/null || true" + strings.Repeat(" )", n)
+	if got := Swallows(cmd); got {
+		t.Errorf("Swallows(%d-deep nesting) = true, want false at the depth ceiling", n)
+	}
+}
+
+// TestSplitMarksSwallowedSegment checks the per-segment flag ingest carries
+// forward: only the left arm — the command whose failure gets hidden — is
+// marked, never the fallback that runs in its place.
+func TestSplitMarksSwallowedSegment(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want []bool // parallel to the returned segments
+	}{
+		{"left arm only", "bd show x 2>/dev/null || bd list", []bool{true, false}},
+		{"trivial fallback drops out", "jq '.[0]' 2>/dev/null || true", []bool{true}},
+		{"nested or inside subshell", "make lint && (go test ./... 2>/dev/null || go vet ./...)", []bool{false, true, false}},
+		{"whole left pipeline marked", "cat f.json 2>/dev/null || echo none", []bool{true}},
+		{"and-chain marks nothing", "bd show x 2>/dev/null && bd list", []bool{false, false}},
+		{"plain compound marks nothing", "go vet ./... && go test ./...", []bool{false, false}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			segs, fb := Split(c.in)
+			if fb {
+				t.Fatalf("unexpected fallback for %q", c.in)
+			}
+			if len(segs) != len(c.want) {
+				t.Fatalf("Split(%q) = %v, want %d segments", c.in, cmds(segs), len(c.want))
+			}
+			for i, want := range c.want {
+				if segs[i].Swallowed != want {
+					t.Errorf("Split(%q)[%d] (%s).Swallowed = %v, want %v",
+						c.in, i, segs[i].Cmd, segs[i].Swallowed, want)
+				}
+			}
+		})
+	}
+}
+
 func TestSplitCompoundFlag(t *testing.T) {
 	segs, fb := Split("go vet ./... && go test ./...")
 	if fb {

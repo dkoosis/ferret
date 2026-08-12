@@ -13,6 +13,14 @@ import (
 type Segment struct {
 	Cmd string // normalized: base command, or base_subcommand
 	Raw string // printed source of the statement, for exemplars
+	// Swallowed marks a segment sitting in the left arm of an `||` whose
+	// stderr is redirected to /dev/null — `cmd 2>/dev/null || fallback`. Such a
+	// segment can fail without leaving any trace ferret can see: the error text
+	// is discarded and the chain's exit code is the *fallback's*, so the
+	// tool_result carries no is_error flag and internal/event's resolve() marks
+	// the whole call ok. Set by Split so ingest can carry the tell forward
+	// per-segment; the predicate form for a whole command line is Swallows.
+	Swallowed bool
 }
 
 // subcmdTools take a significant first subcommand worth keeping.
@@ -94,7 +102,11 @@ func fromStmt(st *syntax.Stmt, pr *syntax.Printer, depth int) []Segment {
 func fromBinaryCmd(c *syntax.BinaryCmd, pr *syntax.Printer, depth int) []Segment {
 	switch c.Op {
 	case syntax.AndStmt, syntax.OrStmt:
-		return append(fromStmt(c.X, pr, depth+1), fromStmt(c.Y, pr, depth+1)...)
+		left := fromStmt(c.X, pr, depth+1)
+		if c.Op == syntax.OrStmt && silencesStderr(c.X, depth+1) {
+			markSwallowed(left)
+		}
+		return append(left, fromStmt(c.Y, pr, depth+1)...)
 	case syntax.Pipe, syntax.PipeAll:
 		// a pipeline collapses to its first non-trivial command
 		if left := fromStmt(c.X, pr, depth+1); len(left) > 0 {
@@ -158,6 +170,164 @@ func printStmt(st *syntax.Stmt, pr *syntax.Printer) string {
 	var sb strings.Builder
 	_ = pr.Print(&sb, st)
 	return sb.String()
+}
+
+// The SWALLOWED-ERROR tell (ferret-cax) ------------------------------------
+//
+// ferret's misfire signal is downstream of one bit: the tool_result is_error
+// flag that internal/event/build.go's resolve() reads. A guess-chain written
+// as `cmd 2>/dev/null || fallback` defeats that bit twice over — the error
+// text goes to /dev/null, and the chain's exit code is the fallback's, so the
+// shell exits 0 and the whole call records as a success. The failure that
+// motivated the retry is invisible to `ferret misfires`.
+//
+// Recovering it needs no new runtime signal, only the command text: the shape
+// itself is the tell. Both halves are load-bearing and neither alone qualifies
+// — `2>/dev/null` on its own silences the message but the return code still
+// surfaces, and `|| fallback` on its own still prints the error that ends the
+// chain. Only the pair hides a failure completely.
+
+// Swallows reports whether command hides a failure from ferret's is_error
+// signal: it contains an `||` whose LEFT arm redirects stderr to /dev/null.
+// The recognized silencing forms are `2>/dev/null`, `2>>/dev/null`,
+// `&>/dev/null`, `&>>/dev/null`, and `>/dev/null 2>&1` (in that order — the
+// reversed `2>&1 >/dev/null` sends stderr to the *old* stdout and is
+// deliberately not a match). Redirects on the right arm do not count: a
+// swallowed right arm still leaves the left arm's error on the terminal.
+//
+// A command that fails to parse yields false — a swallow is never guessed
+// from raw text, so the resulting count stays a floor rather than an estimate.
+func Swallows(command string) bool {
+	parser := syntax.NewParser(syntax.Variant(syntax.LangBash))
+	file, err := parser.Parse(strings.NewReader(command), "")
+	if err != nil {
+		return false
+	}
+	return anySwallows(file.Stmts, 0)
+}
+
+func anySwallows(sts []*syntax.Stmt, depth int) bool {
+	for _, st := range sts {
+		if swallowsStmt(st, depth) {
+			return true
+		}
+	}
+	return false
+}
+
+// swallowsStmt looks for an OrStmt whose left arm silences stderr, descending
+// through compound commands under the same maxRecurseDepth ceiling fromStmt
+// respects — a nested `a && (b 2>/dev/null || c)` is still a swallow.
+func swallowsStmt(st *syntax.Stmt, depth int) bool {
+	if st == nil || st.Cmd == nil || depth > maxRecurseDepth {
+		return false
+	}
+	if bc, ok := st.Cmd.(*syntax.BinaryCmd); ok && bc.Op == syntax.OrStmt && silencesStderr(bc.X, depth+1) {
+		return true
+	}
+	return anySwallows(childStmts(st.Cmd), depth+1)
+}
+
+// silencesStderr reports whether st — or any statement nested inside it, as in
+// `{ cmd 2>/dev/null; } || fallback` — discards stderr. The redirect can also
+// ride the compound statement itself (`{ cmd; } 2>/dev/null`), which is why
+// st.Redirs is checked before descending.
+func silencesStderr(st *syntax.Stmt, depth int) bool {
+	if st == nil || depth > maxRecurseDepth {
+		return false
+	}
+	if redirsSilenceStderr(st.Redirs) {
+		return true
+	}
+	if st.Cmd == nil {
+		return false
+	}
+	for _, child := range childStmts(st.Cmd) {
+		if silencesStderr(child, depth+1) {
+			return true
+		}
+	}
+	return false
+}
+
+// redirsSilenceStderr scans one statement's redirect list in source order,
+// because order decides the verdict: `>/dev/null 2>&1` points fd 2 at the
+// already-nulled fd 1, while `2>&1 >/dev/null` points it at the terminal fd 1
+// and only then nulls stdout — the error still prints.
+func redirsSilenceStderr(redirs []*syntax.Redirect) bool {
+	stdoutNulled := false
+	for _, r := range redirs {
+		switch {
+		case toDevNull(r) && redirFD(r) == "2":
+			return true // 2>/dev/null, 2>>/dev/null
+		case toDevNullAll(r):
+			return true // &>/dev/null, &>>/dev/null
+		case toDevNull(r) && (redirFD(r) == "" || redirFD(r) == "1"):
+			stdoutNulled = true
+		case stdoutNulled && r.Op == syntax.DplOut && redirFD(r) == "2" && wordLit(r.Word) == "1":
+			return true // >/dev/null 2>&1
+		}
+	}
+	return false
+}
+
+func toDevNull(r *syntax.Redirect) bool {
+	return (r.Op == syntax.RdrOut || r.Op == syntax.AppOut) && wordLit(r.Word) == devNull
+}
+
+func toDevNullAll(r *syntax.Redirect) bool {
+	return (r.Op == syntax.RdrAll || r.Op == syntax.AppAll) && wordLit(r.Word) == devNull
+}
+
+// redirFD is the explicit file descriptor a redirect names ("2" in
+// `2>/dev/null`), or "" when the form leaves it implicit (`>/dev/null`, `&>`).
+func redirFD(r *syntax.Redirect) string {
+	if r.N == nil {
+		return ""
+	}
+	return r.N.Value
+}
+
+const devNull = "/dev/null"
+
+// childStmts lists the statements a compound command owns, covering the same
+// node types fromStmt descends into so the swallow walk and the segment walk
+// never disagree about what "inside this command" means.
+func childStmts(cmd syntax.Command) []*syntax.Stmt {
+	switch c := cmd.(type) {
+	case *syntax.BinaryCmd:
+		return []*syntax.Stmt{c.X, c.Y}
+	case *syntax.Subshell:
+		return c.Stmts
+	case *syntax.Block:
+		return c.Stmts
+	case *syntax.IfClause:
+		return concatStmts(c.Cond, c.Then)
+	case *syntax.WhileClause:
+		return concatStmts(c.Cond, c.Do)
+	case *syntax.ForClause:
+		return c.Do
+	case *syntax.TimeClause:
+		return []*syntax.Stmt{c.Stmt}
+	}
+	return nil
+}
+
+func concatStmts(a, b []*syntax.Stmt) []*syntax.Stmt {
+	out := make([]*syntax.Stmt, 0, len(a)+len(b))
+	out = append(out, a...)
+	return append(out, b...)
+}
+
+// markSwallowed flags every segment Split produced from a swallowing left arm.
+// The whole arm is marked, not just its first command: in
+// `a | b 2>/dev/null || fallback` any of the arm's normalized tokens is a
+// plausible owner of the hidden failure, and over-attributing within one arm
+// is cheaper than dropping the tell.
+func markSwallowed(segs []Segment) {
+	for i := range segs {
+		segs[i].Swallowed = true
+	}
 }
 
 func fallbackSegment(command string) (Segment, bool) {
