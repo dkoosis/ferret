@@ -191,3 +191,83 @@ func TestSplitCompoundFlag(t *testing.T) {
 		t.Fatalf("want 2 segments, got %d", len(segs))
 	}
 }
+
+// TestSplitMarksPipedSegment covers the PIPE-ERASURE tell (ferret-cax item 3
+// escape hatch): a pipeline collapses to its first non-trivial command
+// (fromBinaryCmd's Pipe/PipeAll arm), but that collapse throws away the fact
+// a pipe was ever there — a substitution detector reading only Event.Action
+// cannot tell `rg foo | head` from a bare `rg foo`. Piped captures the shape
+// at Split time, before it is lost.
+func TestSplitMarksPipedSegment(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want []bool // parallel to the returned segments
+	}{
+		{"simple pipe", "rg foo | head", []bool{true}},
+		{"pipe-all shorthand", "rg foo |& head", []bool{true}},
+		{"pipe inside and-chain", "a && b | c", []bool{false, true}},
+		{"trivial left falls through, still marked", "echo x | rg foo", []bool{true}},
+		{"plain command unmarked", "rg foo", []bool{false}},
+		{"and-chain, no pipe, unmarked", "go vet ./... && go test ./...", []bool{false, false}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			segs, fb := Split(c.in)
+			if fb {
+				t.Fatalf("unexpected fallback for %q", c.in)
+			}
+			if len(segs) != len(c.want) {
+				t.Fatalf("Split(%q) = %v, want %d segments", c.in, cmds(segs), len(c.want))
+			}
+			for i, want := range c.want {
+				if segs[i].Piped != want {
+					t.Errorf("Split(%q)[%d] (%s).Piped = %v, want %v",
+						c.in, i, segs[i].Cmd, segs[i].Piped, want)
+				}
+			}
+		})
+	}
+}
+
+// TestArgv covers the shellnorm.Argv helper (ferret-cax item 3): the literal
+// argv of a plain, single, redirect-free command, or plain=false whenever the
+// text carries a shape a substitution detector cannot safely reason about —
+// a redirect, an expansion, or anything that fails to parse.
+func TestArgv(t *testing.T) {
+	cases := []struct {
+		name      string
+		in        string
+		wantArgv  []string
+		wantPlain bool
+	}{
+		{"literal argv", "rg -i foo src/", []string{"rg", "-i", "foo", "src/"}, true},
+		{"single-quoted arg is literal", "sed -n '10,20p' f", []string{"sed", "-n", "10,20p", "f"}, true},
+		{"redirect", "rg foo > out.txt", nil, false},
+		{"append redirect", "rg foo >> out.txt", nil, false},
+		{"param expansion", "cat $F", nil, false},
+		{"command substitution", "cat $(ls)", nil, false},
+		{"unparseable", "cat 'unterminated", nil, false},
+		{"pipe is not a single call", "rg foo | head", nil, false},
+		{"and-chain is not a single call", "rg foo && head", nil, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			argv, plain := Argv(c.in)
+			if plain != c.wantPlain {
+				t.Fatalf("Argv(%q) plain = %v, want %v (argv=%v)", c.in, plain, c.wantPlain, argv)
+			}
+			if !plain {
+				return
+			}
+			if len(argv) != len(c.wantArgv) {
+				t.Fatalf("Argv(%q) = %v, want %v", c.in, argv, c.wantArgv)
+			}
+			for i := range argv {
+				if argv[i] != c.wantArgv[i] {
+					t.Errorf("Argv(%q)[%d] = %q, want %q", c.in, i, argv[i], c.wantArgv[i])
+				}
+			}
+		})
+	}
+}

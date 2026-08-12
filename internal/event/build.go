@@ -239,6 +239,15 @@ func (b *Builder) resolve(st *fileState, blk *transcript.Block, ts time.Time) {
 	if last := evs[n-1]; isSnipe(last) && snipeApprox(blk.Content) {
 		last.Approx = true
 	}
+	// The cwd-reset tell (ferret-cax item 5): the harness's notice that a
+	// session's working directory was reset lands in the tool_result body, so
+	// the same trailing-segment attribution Approx uses applies here — the
+	// notice describes the shell's state after the whole (possibly compound)
+	// call, and the trailing segment is the one that ran last against it.
+	if last := evs[n-1]; last.Kind == KindShell && strings.Contains(string(blk.Content), cwdResetMarker) {
+		last.CwdReset = true
+		b.Stats.CwdResets++
+	}
 	b.joinUsage(evs, ts)
 	attachRetrievalHits(evs, blk.Content)
 	b.resolved[blk.ToolUseID] = struct{}{}
@@ -386,6 +395,7 @@ func (b *Builder) fromToolUse(src transcript.Source, raw *transcript.Raw, blk *t
 			ev.Bytes = len(seg.Raw)
 			ev.Compound = len(segs) > 1
 			ev.Swallow = seg.Swallowed
+			ev.Pipe = seg.Piped
 			ev.Query = trixiCLIQuery(seg.Cmd, seg.Raw)
 			out = append(out, &ev)
 		}
@@ -586,6 +596,16 @@ func trunc(s string, n int) string {
 	}
 	return s[:n]
 }
+
+// cwdResetMarker is the harness's notice, embedded in a tool_result body, that
+// a session's working directory was reset out from under it (ferret-cax item
+// 5). A plain substring match on the raw content is a deliberate cheap floor,
+// same posture as snipeApprox: if the harness rewords the notice the tell
+// silently goes absent rather than wrong. False positives are possible when a
+// command's own OUTPUT happens to quote the phrase (e.g. `grep` over this
+// package's own source) — accepted for an advisory count; see the doc comment
+// on Event.CwdReset.
+const cwdResetMarker = "Shell cwd was reset"
 
 // snipeApproxMarker is the single trailing token snipe appends to a tool_result
 // body when it served via fuzzy/semantic fallback rather than an exact match.
