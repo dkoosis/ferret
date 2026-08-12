@@ -15,17 +15,6 @@ import (
 // the ranking is all this command does; recording a rule as validated is
 // `ferret fixes sub` (internal/fixes) — a separate, dk-approved ledger this
 // command reads nothing from and writes nothing to.
-//
-// Registration is left to the primary (write-set boundary): add
-//
-//	Substitutable SubstitutableCmd `cmd:"" help:"Rank Bash calls a native tool (Grep/Glob/Read) could replace — deterministic, no judge." name:"substitutable"`
-//
-// to the CLI struct in cmd/ferret/main.go, and
-//
-//	case "substitutable":
-//		err = cmdSubstitutable(CLI.Substitutable)
-//
-// to the dispatch switch, mirroring every other subcommand.
 type SubstitutableCmd struct {
 	CommonFlags
 }
@@ -86,9 +75,10 @@ func writeSubstText(w io.Writer, rep mine.SubstReport, limit, maxBytes int) erro
 		"≡ the path. FLOOR semantics: pipe/compound/redirect/expansion/unsupported-flag/",
 		"≡ truncated calls are excluded rather than guessed at (excluded tally below).",
 		"≡ score = calls × sessions, so a habit spread across sessions outranks one",
-		"≡ runaway session. This command only ranks candidates — it does not validate a",
-		"≡ rule or write to the ledger; a dk-approved rewrite is recorded separately via",
-		"≡ `ferret fixes sub` (internal/fixes), which `ferret fixes subs` lists.")
+		"≡ runaway session. Corpora ingested before ferret-cax carry no pipe flag —",
+		"≡ re-ingest for pipe exclusion. This command only ranks candidates — it does not",
+		"≡ validate a rule or write to the ledger; a dk-approved rewrite is recorded",
+		"≡ separately via `ferret fixes sub` (internal/fixes), which `ferret fixes subs` lists.")
 
 	sink.Head("substitutable rows=%d sessions=%d", len(rep.Rows), rep.Sessions)
 	for _, row := range rep.Rows {
