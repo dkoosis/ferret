@@ -96,11 +96,10 @@ func writeMisfiresText(w io.Writer, rep mine.MisfireReport, limit, maxBytes int)
 		"≡ proves a failure would be invisible, never that one happened.")
 
 	sink.Head("misfires rows=%d repairs=%d", len(rep.Rows), len(rep.Repairs))
+	emptyNote(sink, len(rep.Rows), "misfiring commands")
 	for _, row := range rep.Rows {
-		if !sink.Row("%-24s  fails=%-4d sessions=%-4d calls=%-4d fail-rate=%.2f  score=%.0f",
-			row.Key, row.Fails, row.FailSess, row.Calls, row.FailRate, row.Score) {
-			break
-		}
+		sink.Row("%-24s  fails=%-4d sessions=%-4d calls=%-4d fail-rate=%.2f  score=%.0f",
+			row.Key, row.Fails, row.FailSess, row.Calls, row.FailRate, row.Score)
 	}
 
 	writeRepairSection(sink, rep.Repairs)
@@ -122,9 +121,7 @@ func writeRepairSection(sink *out.Sink, repairs []mine.RepairPair) {
 	}
 	sink.Head("repair pairs (failed → fixed):")
 	for _, p := range repairs {
-		if !repairRow(sink, p) {
-			return
-		}
+		repairRow(sink, p)
 	}
 }
 
@@ -136,9 +133,7 @@ func writeSwallowSection(sink *out.Sink, swallowed []mine.SwallowRow) {
 	}
 	sink.Head("swallowed errors (invisible to is_error — floor on hidden misfires):")
 	for _, row := range swallowed {
-		if !swallowRow(sink, row) {
-			return
-		}
+		swallowRow(sink, row)
 	}
 }
 

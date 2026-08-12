@@ -64,6 +64,13 @@ const (
 	keyTruncated = "truncated"
 )
 
+// Exit codes, per the DK-AXI operating contract: a caller distinguishes a
+// mistyped invocation from a run that tried and failed.
+const (
+	exitFailure = 1 // the command ran and could not finish
+	exitUsage   = 2 // the command line itself was wrong (unknown flag, bad value)
+)
+
 // ---- CLI grammar ----
 
 // userHomeDir is indirected through a var so a test can fault-inject a missing
@@ -501,6 +508,17 @@ func main() {
 		),
 		kong.UsageOnError(),
 		kong.ConfigureHelp(kong.HelpOptions{Compact: true}),
+		// DK-AXI operating-contract rule 3: an unknown flag or an unparseable
+		// command line is fatal with a DISTINCT code, so a caller can tell
+		// "you typed it wrong" (2) from "the run failed" (1). kong's own
+		// default here is 80, which collides with nothing but means nothing
+		// either.
+		kong.Exit(func(code int) {
+			if code != 0 {
+				code = exitUsage
+			}
+			os.Exit(code)
+		}),
 	)
 
 	var err error
@@ -589,9 +607,26 @@ func main() {
 		k.Fatalf("unknown command %q", k.Command())
 	}
 	if err != nil {
+		// Diagnostics to stderr, nonzero exit (contract rule 4) — stdout stays
+		// machine-consumable, so a `| jq` on a failed run gets an empty stream
+		// rather than a prose line it can't parse. A usage-shaped error (a bad
+		// flag VALUE, which kong accepts and the command rejects) exits 2 like
+		// a bad flag NAME; anything else is a run that failed.
 		fmt.Fprintln(os.Stderr, "ferret:", err)
-		os.Exit(1)
+		os.Exit(exitCodeFor(err))
 	}
+}
+
+// exitCodeFor maps a command error to the contract's exit codes: the
+// command-line validation sentinels are usage errors, everything else is a
+// failed run.
+func exitCodeFor(err error) int {
+	for _, usage := range []error{errBadFormat, errBadKind, errBadSource, errMaxBytesJSON, errMaxBytesMD, errMinSupport, errMaxGap, errMaxLen, errOrder} {
+		if errors.Is(err, usage) {
+			return exitUsage
+		}
+	}
+	return exitFailure
 }
 
 // ---- shared helpers ----
@@ -763,6 +798,17 @@ const legendMarks = "≡ tok! failed · tok? in failed chain · tok+ collapsed r
 func about(sink *out.Sink, lines ...string) {
 	for _, ln := range lines {
 		sink.Head("%s", ln)
+	}
+}
+
+// emptyNote prints a definitive empty state — the DK-AXI operating contract's
+// "0 results" rule. A table that renders a header and then nothing is
+// ambiguous: a model cannot tell a genuinely empty result from a run that
+// failed silently, so it retries, which is the exact friction ferret exists to
+// find. Says so out loud instead. No-op when there are rows.
+func emptyNote(sink *out.Sink, n int, noun string) {
+	if n == 0 {
+		sink.Head("0 %s", noun)
 	}
 }
 

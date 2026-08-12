@@ -82,10 +82,8 @@ func writeSubstText(w io.Writer, rep mine.SubstReport, limit, maxBytes int) erro
 
 	sink.Head("substitutable rows=%d sessions=%d", len(rep.Rows), rep.Sessions)
 	for _, row := range rep.Rows {
-		if !sink.Row("calls=%-5d sessions=%-4d score=%-8.0f %-6s %-20s  %q",
-			row.Calls, row.Sessions, row.Score, row.Tool, row.Key, row.Exemplar) {
-			break
-		}
+		sink.Row("calls=%-5d sessions=%-4d score=%-8.0f %-6s %-20s  %q",
+			row.Calls, row.Sessions, row.Score, row.Tool, row.Key, row.Exemplar)
 	}
 
 	if len(rep.Excluded) > 0 {

@@ -80,10 +80,9 @@ func cmdGraph() error {
 		"≡ graph: action→action transition counts (what typically follows what).",
 		"≡ --loops adds A⇄B bounce cycles — back-and-forth churn, often friction.")
 	sink.Head("graph lens=%s edges=%d (min-count=%d)", l.Name(), len(edges), cmd.MinCount)
+	emptyNote(sink, len(edges), "edges")
 	for _, e := range edges {
-		if !sink.Row("%6dx  %s → %s", e.Count, corpus.Vocab[e.From], corpus.Vocab[e.To]) {
-			break
-		}
+		sink.Row("%6dx  %s → %s", e.Count, corpus.Vocab[e.From], corpus.Vocab[e.To])
 	}
 	if err := sink.Close(); err != nil {
 		return err

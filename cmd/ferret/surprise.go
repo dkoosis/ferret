@@ -60,15 +60,11 @@ func cmdSurprise() error {
 		l.Name(), cmd.Order, len(scores), mean)
 	sink.Head("most routine:")
 	for _, s := range routine {
-		if !sink.Row("%6.2f bits %5d toks  %s", s.Bits, s.Toks, s.Stream) {
-			break
-		}
+		sink.Row("%6.2f bits %5d toks  %s", s.Bits, s.Toks, s.Stream)
 	}
 	sink.Head("most surprising:")
 	for _, s := range slices.Backward(thrash) {
-		if !sink.Row("%6.2f bits %5d toks  %s", s.Bits, s.Toks, s.Stream) {
-			break
-		}
+		sink.Row("%6.2f bits %5d toks  %s", s.Bits, s.Toks, s.Stream)
 	}
 	return nil
 }

@@ -107,12 +107,10 @@ func cmdRank() error {
 			} else if card.Folded > 0 {
 				fold = fmt.Sprintf(" (+%d folded)", card.Folded)
 			}
-			if !sink.Row("%5ds %4.1fb %6.1f  %s%s  ex: %s",
+			sink.Row("%5ds %4.1fb %6.1f  %s%s  ex: %s",
 				card.Support, card.Bits, card.Score,
 				strings.Join(corpus.Tokens(card.IDs), " ⇝ "), fold,
-				exemplar(corpus, card.ExStream, card.ExSeq)) {
-				break
-			}
+				exemplar(corpus, card.ExStream, card.ExSeq))
 		}
 	}
 	if overflow > 0 {

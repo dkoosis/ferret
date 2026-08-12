@@ -223,6 +223,7 @@ func cmdReport() error {
 	}
 	sink.Head("report lens=%s findings=%d (min-support=%d order=%d)",
 		l.Name(), len(findings), cmd.MinSupport, cmd.Order)
+	emptyNote(sink, len(findings), "findings")
 	if capped {
 		sink.Head("‡ seqs hit the 10000-pattern cap — raise --min-support")
 	}
@@ -234,18 +235,14 @@ func cmdReport() error {
 			row += ann
 		}
 		row += reportDialogueNote(f)
-		if !sink.Row("%s", row) {
-			break
-		}
+		sink.Row("%s", row)
 	}
 	if len(suppressed) > 0 {
 		sink.Head("⊘ suppressed=%d (adjudicated wontfix/watch — not actionable, kept for memory)", len(suppressed))
 		for _, f := range suppressed {
 			e := fixIdx[fixes.MotifKey(corpus.Tokens(f.IDs))]
-			if !sink.Row("⊘ %-8s %s  [%s]", e.Disp(),
-				strings.Join(corpus.Tokens(f.IDs), " ⇝ "), suppressReason(e)) {
-				break
-			}
+			sink.Row("⊘ %-8s %s  [%s]", e.Disp(),
+				strings.Join(corpus.Tokens(f.IDs), " ⇝ "), suppressReason(e))
 		}
 	}
 	// Legal moves, not a plan (DK-AXI rule 11): a motif's burn is gross cost —

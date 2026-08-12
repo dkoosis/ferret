@@ -86,11 +86,10 @@ func writePollingText(w io.Writer, rep mine.PollingReport, limit, maxBytes int) 
 		"≡ Command text is truncated at ingest — two long commands sharing a prefix merge.")
 
 	sink.Head("polling rows=%d sessions=%d", len(rep.Rows), rep.Sessions)
+	emptyNote(sink, len(rep.Rows), "polled commands")
 	for _, row := range rep.Rows {
-		if !sink.Row("max=%-5d repeats=%-6d sessions=%-4d score=%-8.0f %-20s  %q",
-			row.MaxPerSession, row.TotalRepeats, row.Sessions, row.Score, row.Key, row.Command) {
-			break
-		}
+		sink.Row("max=%-5d repeats=%-6d sessions=%-4d score=%-8.0f %-20s  %q",
+			row.MaxPerSession, row.TotalRepeats, row.Sessions, row.Score, row.Key, row.Command)
 	}
 	// Legal moves, not a plan (DK-AXI rule 11): price these repeats against the
 	// other detectors, or see what the key costs per call.

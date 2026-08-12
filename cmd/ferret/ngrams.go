@@ -68,11 +68,10 @@ func cmdNgrams() error {
 		legendMarks)
 	sink.Head("ngrams lens=%s n=%s streams=%d grams=%d (min-count=%d min-sessions=%d)",
 		l.Name(), cmd.N, len(corpus.Streams), len(grams), cmd.MinCount, cmd.MinSessions)
+	emptyNote(sink, len(grams), "grams")
 	for _, g := range grams {
-		if !sink.Row("%5dx/%-4ds %s  ex: %s",
-			g.Count, g.Sessions, strings.Join(corpus.Tokens(g.IDs), " → "), exemplar(corpus, g.ExStream, g.ExSeq)) {
-			break
-		}
+		sink.Row("%5dx/%-4ds %s  ex: %s",
+			g.Count, g.Sessions, strings.Join(corpus.Tokens(g.IDs), " → "), exemplar(corpus, g.ExStream, g.ExSeq))
 	}
 	return nil
 }
