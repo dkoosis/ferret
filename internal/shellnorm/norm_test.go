@@ -248,6 +248,8 @@ func TestArgv(t *testing.T) {
 		{"param expansion", "cat $F", nil, false},
 		{"command substitution", "cat $(ls)", nil, false},
 		{"unparseable", "cat 'unterminated", nil, false},
+		{"env assignment prefix", "RIPGREP_CONFIG_PATH=custom rg foo", nil, false},
+		{"bare assignment", "FOO=1", nil, false},
 		{"pipe is not a single call", "rg foo | head", nil, false},
 		{"and-chain is not a single call", "rg foo && head", nil, false},
 	}

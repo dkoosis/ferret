@@ -192,9 +192,12 @@ type flagSpec struct {
 }
 
 // splitArgs partitions a verb's post-name argv into positionals and
-// flag-values per spec. ok is false the instant an unrecognized flag or a
-// value flag missing its argument appears — the shared default-deny gate
-// every substRule* function builds on.
+// flag-values per spec. ok is false the instant an unrecognized flag, a
+// value flag missing its argument, or a *repeated* value flag appears — the
+// shared default-deny gate every substRule* function builds on. The repeat
+// case matters because a second occurrence usually means the verb is doing
+// something the single-valued native tool cannot: `find -name a -name b` ANDs
+// two globs, which one Glob call has no way to express.
 func splitArgs(args []string, spec flagSpec) (positionals []string, values map[string]string, ok bool) {
 	values = map[string]string{}
 	for i := 0; i < len(args); i++ {
@@ -208,6 +211,9 @@ func splitArgs(args []string, spec flagSpec) (positionals []string, values map[s
 		}
 		if spec.value[a] {
 			if i+1 >= len(args) {
+				return nil, nil, false
+			}
+			if _, dup := values[a]; dup {
 				return nil, nil, false
 			}
 			values[a] = args[i+1]
@@ -286,11 +292,20 @@ func substRuleCat(args []string) (bool, string) {
 
 var nValueAllow = map[string]bool{"-n": true}
 
+// plainCount matches the only `-n` value head/tail take that means a bare line
+// count. A signed value means something else entirely — `head -n -5` prints all
+// but the LAST 5 lines, `tail -n +5` starts AT line 5 — neither of which is the
+// "first/last N lines" shape Read's offset/limit reproduces, so both escape.
+var plainCount = regexp.MustCompile(`^[0-9]+$`)
+
 // substRuleHead/-Tail: `-n COUNT FILE` is the only recognized shape — Read
 // with an offset/limit covers the same "give me N lines of one file" case.
 func substRuleHead(args []string) (bool, string) {
-	pos, _, ok := splitArgs(args, flagSpec{allow: nValueAllow, value: nValueAllow})
+	pos, values, ok := splitArgs(args, flagSpec{allow: nValueAllow, value: nValueAllow})
 	if !ok {
+		return false, reasonUnsupportedFlag
+	}
+	if n, given := values["-n"]; given && !plainCount.MatchString(n) {
 		return false, reasonUnsupportedFlag
 	}
 	if len(pos) != 1 {

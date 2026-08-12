@@ -891,14 +891,17 @@ func TestCwdResetMarksTrailingShellSegment(t *testing.T) {
 // whole tool_result, mirroring Approx's trailing-segment attribution rule.
 func TestCwdResetOnlyTrailingSegmentOfCompound(t *testing.T) {
 	src := writeTranscript(t,
-		toolUse("u1", "t1", "Bash", `{"command":"cd /x && ls"}`),
+		toolUse("u1", "t1", "Bash", `{"command":"ls /x && cat f"}`),
 		toolResultContent("u2", "t1", `"Shell cwd was reset to /x"`),
 	)
 	evs := ingest(t, src)
-	if len(evs) != 1 {
-		t.Fatalf("events = %d, want 1 (cd is trivial, drops out)", len(evs))
+	if len(evs) != 2 {
+		t.Fatalf("events = %d, want 2 (both segments survive shellnorm)", len(evs))
 	}
-	if !evs[len(evs)-1].CwdReset {
+	if evs[0].CwdReset {
+		t.Error("leading segment CwdReset = true, want false")
+	}
+	if !evs[1].CwdReset {
 		t.Error("trailing segment CwdReset = false, want true")
 	}
 }

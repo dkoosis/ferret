@@ -354,7 +354,8 @@ func markPiped(segs []Segment) {
 // redirect-free shell command — the scan internal/mine's substitution
 // detector reads verb/flags/args from. plain is false whenever raw is not
 // exactly that shape: a parse failure, more than one top-level statement, a
-// negated/backgrounded/coprocess statement, any redirect, a compound command
+// negated/backgrounded/coprocess statement, any redirect, a command-local
+// environment assignment (`VAR=x cmd`), a compound command
 // (pipe, &&/||, subshell, block, ...), or an argument that is not a pure
 // literal (a parameter expansion `$VAR`, command substitution `$( )`,
 // arithmetic expansion, process substitution, extended glob, or brace
@@ -378,6 +379,13 @@ func Argv(raw string) (argv []string, plain bool) {
 	}
 	call, ok := st.Cmd.(*syntax.CallExpr)
 	if !ok {
+		return nil, false
+	}
+	// A command-local environment assignment (`RIPGREP_CONFIG_PATH=x rg foo`)
+	// changes what the program does without appearing in argv at all, so the
+	// scan would read as plain while the behavior is not — decline, same
+	// posture as a redirect.
+	if len(call.Assigns) > 0 {
 		return nil, false
 	}
 	argv = make([]string, 0, len(call.Args))
