@@ -53,15 +53,15 @@ type SubstReport struct {
 // across the eight substRule* functions and so the reader has one place to
 // see the full reason set.
 const (
-	reasonPipe              = "pipe"
-	reasonCompound          = "compound"
-	reasonTruncated         = "truncated"
-	reasonRedirect          = "redirect"
-	reasonExpansion         = "expansion"
-	reasonGlob              = "glob"
-	reasonUnparseable       = "unparseable"
-	reasonArity             = "arity"
-	reasonUnsupportedFlag   = "unsupported_flag"
+	reasonPipe               = "pipe"
+	reasonCompound           = "compound"
+	reasonTruncated          = "truncated"
+	reasonRedirect           = "redirect"
+	reasonExpansion          = "expansion"
+	reasonGlob               = "glob"
+	reasonUnparseable        = "unparseable"
+	reasonArity              = "arity"
+	reasonUnsupportedFlag    = "unsupported_flag"
 	reasonRequiredFlagAbsent = "required_flag_absent"
 )
 
