@@ -23,8 +23,39 @@
 # disables golangci-lint's fail-fast internal lock, leaving this wrapper's mkdir
 # mutex as the sole, authoritative serializer (trixi-wudg / rorp Problem B).
 #
-# Bead: trixi-tr1t, trixi-wudg
-# Wired into: make lint / scan / check-pkg / CHECK_CMD / REPORT_CMD (via $(GOLANGCILINT))
+# ---------------------------------------------------------------------------
+# Phantom findings from a stale cache (ferret-b77)
+#
+# golangci-lint keys its analysis cache on file CONTENT, not on path. Copy a
+# tree (a `git worktree add`), lint the copy, delete the copy: the next lint of
+# the original hits those cache entries and replays the issues still carrying
+# the DELETED copy's path. The gate turns red on clean code, exit 1 — byte-for-
+# byte what a real failure looks like — under a wall of runner warnings
+# ("Failed to get line N for file …: no such file or directory") that reads
+# like the actual error. Six recorded recurrences; each cost a re-diagnosis.
+#
+# Deterministic repro (verified 2026-08-13, golangci-lint 2.12.2):
+#
+#   d=$(mktemp -d); export GOLANGCI_LINT_CACHE="$d/cache"
+#   mkdir -p "$d/A" && cd "$d/A" && go mod init phantom
+#   printf 'package main\nimport "os"\nfunc main(){_=os.WriteFile("/tmp/x",nil,0777)}\n' > main.go
+#   printf 'version: "2"\nlinters:\n  default: none\n  enable: [gosec]\n' > .golangci.yml
+#   golangci-lint run ./...            # -> main.go:3:… (gosec), exit 1
+#   cp -r "$d/A" "$d/B"; rm -rf "$d/A"
+#   cd "$d/B" && golangci-lint run ./...  # -> ../A/main.go:3:… — the phantom
+#   golangci-lint cache clean && golangci-lint run ./...  # -> main.go, correct
+#
+# Detection: a finding can only be genuine if golangci-lint parsed the file
+# this run, so a cited path that is absent from disk is proof of a replayed
+# entry. Nothing purpose-built exists upstream — no distinct exit code, no
+# cache-version flag — but the JSON formatter exposes each issue's path
+# machine-readably, so we run the caller's lint with a JSON side-channel and
+# existence-check every cited path. On a hit: one `cache clean` + ONE retry,
+# never a loop. The clean happens while we still hold the mutex, so it cannot
+# yank the cache out from under a concurrent peer.
+#
+# Bead: trixi-tr1t, trixi-wudg, ferret-b77
+# Wired into: make lint (via $(GOLANGCILINT))
 
 set -euo pipefail
 
@@ -106,15 +137,119 @@ until mkdir "$lock_dir" 2>/dev/null; do
 done
 
 # Release on any exit (success, lint findings, signal) so the lock never leaks.
-trap 'rm -rf "$lock_dir"' EXIT
+probe_json=""
+probe_out=""
+probe_err=""
+cleanup() {
+  rm -rf "$lock_dir"
+  if [ -n "$probe_json" ]; then rm -f "$probe_json" "$probe_out" "$probe_err"; fi
+}
+trap cleanup EXIT
 
 # Pass through every arg and preserve golangci-lint's exit code (1 = findings).
-# For `run`, inject --allow-parallel-runners so golangci-lint never fail-fasts on
-# its internal cache lock (this wrapper's mutex is the real serializer). The flag
-# is only valid on `run`, so leave other subcommands (e.g. version) untouched.
-if [ "${1:-}" = "run" ]; then
-  shift
-  golangci-lint run --allow-parallel-runners "$@"
-else
+# Anything but `run` goes straight through: --allow-parallel-runners and the
+# JSON probe are both `run`-only flags.
+if [ "${1:-}" != "run" ]; then
   golangci-lint "$@"
+  exit $?
 fi
+shift
+
+# Decide whether we can attach the phantom probe (see header). Adding
+# --output.json.path SUPPRESSES golangci-lint's default text formatter, so the
+# probe has to re-request text on stdout to keep the caller's output identical.
+# That makes it unsafe to layer onto a caller that picked its own formatters, and
+# --path-prefix would rewrite the very paths we existence-check. In either case
+# we skip detection rather than silently change what the caller sees.
+probe=1
+if [ "${LINT_SELF_HEAL:-1}" != "1" ]; then probe=0; fi
+for a in "$@"; do
+  case "$a" in
+    --output.*|--path-prefix|--path-prefix=*) probe=0 ;;
+  esac
+done
+if [ "$probe" = "1" ]; then
+  if probe_json="$(mktemp "${TMPDIR:-/tmp}/lint-locked.XXXXXX")"; then
+    probe_out="${probe_json}.out"
+    probe_err="${probe_json}.err"
+  else
+    probe_json=""
+    probe=0
+  fi
+fi
+
+rc=0
+run_golangci() {
+  # `set +e` around the call: findings are exit 1 and must not abort us.
+  set +e
+  golangci-lint run --allow-parallel-runners "$@"
+  rc=$?
+  set -e
+}
+
+# The probed run is BUFFERED, not streamed. If it turns out to be a phantom we
+# discard the buffers, and the operator never sees the misleading report or its
+# wall of "no such file or directory" runner warnings — only the two-line
+# explanation and the clean retry. That noise is most of what made this trap
+# expensive to diagnose. A non-phantom run replays both streams verbatim, so
+# ordinary output is unchanged. golangci-lint emits its report at the end
+# anyway, so buffering costs no useful interactivity.
+run_golangci_probed() {
+  set +e
+  golangci-lint run --allow-parallel-runners \
+    --output.text.path=stdout --output.json.path="$probe_json" "$@" \
+    >"$probe_out" 2>"$probe_err"
+  rc=$?
+  set -e
+}
+
+replay_probe_buffers() {
+  cat "$probe_out"
+  cat "$probe_err" >&2
+}
+
+# Cited paths that are absent from disk. Pos.Filename is the only `"Filename":`
+# key in the JSON issue objects — the Go-syntax struct dumps inside
+# Report.Warnings spell it `Filename:\"…\"`, which this pattern cannot match.
+# grep/sed keep the wrapper dependency-free (jq is not guaranteed in CI).
+phantom_paths() {
+  [ -s "$probe_json" ] || return 0
+  grep -o '"Filename":"[^"]*"' "$probe_json" 2>/dev/null \
+    | sed -e 's/^"Filename":"//' -e 's/"$//' \
+    | sort -u \
+    | while IFS= read -r f; do
+        if [ -n "$f" ] && [ ! -e "$f" ]; then printf '%s\n' "$f"; fi
+      done
+}
+
+if [ "$probe" != "1" ]; then
+  run_golangci "$@"
+  exit "$rc"
+fi
+
+run_golangci_probed "$@"
+
+ghosts=""
+if [ "$rc" -ne 0 ]; then ghosts="$(phantom_paths)"; fi
+
+if [ -z "$ghosts" ]; then
+  # Ordinary run — clean, or genuinely red. Hand back exactly what it produced.
+  replay_probe_buffers
+  exit "$rc"
+fi
+
+notify "lint-locked: findings cite $(printf '%s\n' "$ghosts" | wc -l | tr -d ' ') path(s) absent from disk (e.g. $(printf '%s\n' "$ghosts" | head -1))."
+notify "lint-locked: that is golangci-lint replaying cached results recorded under a since-deleted path (a removed worktree/checkout). Remedy: golangci-lint cache clean. Doing it now, retrying ONCE — the report above is discarded as untrustworthy."
+golangci-lint cache clean
+
+# Exactly one retry, on a cold cache. Its exit code is the verdict, whatever it
+# is: a still-red gate stays red. There is no second heal and no loop.
+run_golangci_probed "$@"
+replay_probe_buffers
+
+if [ "$rc" -ne 0 ] && [ -n "$(phantom_paths)" ]; then
+  # Cold cache, still citing missing files — staleness is ruled out.
+  notify "lint-locked: findings STILL cite absent paths after a cache clean. This is NOT stale cache: the gate is genuinely red, or the lint config targets paths that do not exist. Investigate — re-running will not help."
+fi
+
+exit "$rc"
