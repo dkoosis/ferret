@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	detailMax   = 160
+	DetailMax   = 160
 	retryWindow = 120 * time.Second
 )
 
@@ -381,7 +381,7 @@ func (b *Builder) fromToolUse(src transcript.Source, raw *transcript.Raw, blk *t
 			ev := base
 			ev.Kind = KindShell
 			ev.Action = "sh"
-			ev.Detail = trunc(cmd, detailMax)
+			ev.Detail = trunc(cmd, DetailMax)
 			ev.Bytes = len(cmd)
 			ev.Swallow = shellnorm.Swallows(cmd)
 			return []*Event{&ev}
@@ -391,7 +391,7 @@ func (b *Builder) fromToolUse(src transcript.Source, raw *transcript.Raw, blk *t
 			ev := base
 			ev.Kind = KindShell
 			ev.Action = seg.Cmd
-			ev.Detail = trunc(seg.Raw, detailMax)
+			ev.Detail = trunc(seg.Raw, DetailMax)
 			ev.Bytes = len(seg.Raw)
 			ev.Compound = len(segs) > 1
 			ev.Swallow = seg.Swallowed
@@ -573,7 +573,7 @@ var targetKeys = []string{"file_path", "path", "notebook_path", "pattern", "quer
 func target(input map[string]any) string {
 	for _, k := range targetKeys {
 		if v, ok := input[k].(string); ok && v != "" {
-			return trunc(v, detailMax)
+			return trunc(v, DetailMax)
 		}
 	}
 	return ""

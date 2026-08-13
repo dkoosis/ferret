@@ -53,22 +53,23 @@ type SubstReport struct {
 // across the eight substRule* functions and so the reader has one place to
 // see the full reason set.
 const (
-	reasonPipe            = "pipe"
-	reasonCompound        = "compound"
-	reasonTruncated       = "truncated"
-	reasonRedirect        = "redirect"
-	reasonExpansion       = "expansion"
-	reasonGlob            = "glob"
-	reasonUnparseable     = "unparseable"
-	reasonArity           = "arity"
-	reasonUnsupportedFlag = "unsupported_flag"
+	reasonPipe              = "pipe"
+	reasonCompound          = "compound"
+	reasonTruncated         = "truncated"
+	reasonRedirect          = "redirect"
+	reasonExpansion         = "expansion"
+	reasonGlob              = "glob"
+	reasonUnparseable       = "unparseable"
+	reasonArity             = "arity"
+	reasonUnsupportedFlag   = "unsupported_flag"
+	reasonRequiredFlagAbsent = "required_flag_absent"
 )
 
 // substDetailMax mirrors event's ingest-time truncation length
-// (internal/event/build.go's detailMax, unexported). A Detail at or past this
+// (internal/event/build.go's DetailMax, exported). A Detail at or past this
 // length may be missing a flag past the cut — the conservative floor from the
 // bead's Risks: exclude rather than scan a possibly-incomplete command.
-const substDetailMax = 160
+var substDetailMax = event.DetailMax
 
 // substTools is the verb→native-tool table: the only Action values this
 // detector considers candidates. Every other shell verb is skipped, not
@@ -361,7 +362,7 @@ func substRuleSed(args []string) (bool, string) {
 		return false, reasonUnsupportedFlag
 	}
 	if !hasFlag(args, "-n") {
-		return false, reasonUnsupportedFlag
+		return false, reasonRequiredFlagAbsent
 	}
 	if len(pos) != 2 || !sedPrintRange.MatchString(pos[0]) {
 		return false, reasonArity
