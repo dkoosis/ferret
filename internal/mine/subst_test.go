@@ -81,8 +81,10 @@ func TestMineSubstitutions_Hatches(t *testing.T) {
 		// without first knowing the length — only `-n +N` survives.
 		{"tail -n 50 is the last 50 lines", substEv("s1", "tail", "tail -n 50 f", false, false), "unsupported_flag"},
 		{"bare tail is the last 10 lines", substEv("s1", "tail", "tail f", false, false), "unsupported_flag"},
+		{"sed without required -n", substEv("s1", "sed", "sed '10,20p' f", false, false), "required_flag_absent"},
 		{"unquoted glob may expand to many files", substEv("s1", "cat", "cat *.go", false, false), "glob"},
 		{"repeated find -name ANDs two globs", substEv("s1", "find", "find . -name a.go -name b.go", false, false), "unsupported_flag"},
+		{"find -exec unsupported", substEv("s1", "find", "find . -exec cmd \\;", false, false), "unsupported_flag"},
 		{"env assignment prefix", substEv("s1", "rg", "RG_CONFIG=x rg foo", false, false), "unparseable"},
 		{"redirect", substEv("s1", "rg", "rg foo > out.txt", false, false), "redirect"},
 		{"expansion", substEv("s1", "cat", "cat $F", false, false), "expansion"},
