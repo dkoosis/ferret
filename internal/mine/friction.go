@@ -197,7 +197,14 @@ func appendMisfireWaste(rows []WasteRow, mis MisfireReport, price map[string]*Bu
 // Finding.Burn is in TOKENS (finding.go's bytesPerToken divide) while every
 // other column in this table is bytes — the multiply back is the whole reason
 // this cannot be a one-line join.
+//
+// A nil corpus means the motif leg was skipped (frictionMotifs returns
+// (nil, nil) together) — nothing to render a chain from, so bail before the
+// loop rather than trust motifs to be empty too.
 func appendMotifWaste(rows []WasteRow, corpus *Corpus, motifs []*Finding) []WasteRow {
+	if corpus == nil {
+		return rows
+	}
 	for _, f := range motifs {
 		if f.Kind != KindFriction && f.Kind != KindLoop {
 			continue
