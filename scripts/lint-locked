@@ -178,6 +178,56 @@ if [ "$probe" = "1" ]; then
   fi
 fi
 
+# Bases the existence check resolves a reported path against. golangci-lint v2
+# reports issue paths relative to its CONFIG's directory (run.relative-path-mode
+# defaults to `cfg`), which equals our cwd only when the caller ran us from the
+# config's own directory. `make lint` does; `cd sub && ../scripts/lint-locked
+# run -c ../.golangci.yml ../...` does not — there a genuine finding in the
+# parent's main.go is reported as "main.go", absent relative to sub/. So a path
+# counts as absent only when it is absent under EVERY plausible base. Erring
+# toward "present" costs at most a missed heal; erring toward "absent" clears a
+# shared cache and cries phantom on a real failure (codex review, PR #123).
+probe_bases=""
+add_base() {
+  [ -n "$1" ] || return 0
+  [ -d "$1" ] || return 0
+  if [ -z "$probe_bases" ]; then probe_bases="$1"; else probe_bases="$probe_bases
+$1"; fi
+}
+if [ "$probe" = "1" ]; then
+  add_base "."
+  # An explicit -c/--config wins: that file's directory is the base.
+  prev=""
+  for a in "$@"; do
+    case "$prev" in -c|--config) add_base "$(dirname "$a")" ;; esac
+    case "$a" in --config=*) add_base "$(dirname "${a#--config=}")" ;; esac
+    prev="$a"
+  done
+  # Otherwise golangci-lint walks up from cwd for a config; mirror that walk.
+  d="$PWD"
+  while :; do
+    for n in .golangci.yml .golangci.yaml .golangci.toml .golangci.json; do
+      if [ -f "$d/$n" ]; then add_base "$d"; break 2; fi
+    done
+    if [ "$d" = "/" ]; then break; fi
+    d="$(dirname "$d")"
+  done
+fi
+
+path_exists() {
+  case "$1" in
+    /*) [ -e "$1" ]; return $? ;;
+  esac
+  _oldifs="$IFS"
+  IFS='
+'
+  for _b in $probe_bases; do
+    if [ -e "$_b/$1" ]; then IFS="$_oldifs"; return 0; fi
+  done
+  IFS="$_oldifs"
+  return 1
+}
+
 rc=0
 run_golangci() {
   # `set +e` around the call: findings are exit 1 and must not abort us.
@@ -212,13 +262,22 @@ replay_probe_buffers() {
 # key in the JSON issue objects — the Go-syntax struct dumps inside
 # Report.Warnings spell it `Filename:\"…\"`, which this pattern cannot match.
 # grep/sed keep the wrapper dependency-free (jq is not guaranteed in CI).
+#
+# Filenames arrive JSON-ENCODED: Go's encoder HTML-escapes & < > (a real finding
+# in `x&y.go` is emitted as "x&y.go"), and a quote in a name both escapes
+# and truncates the [^"]* match. Undo the three HTML escapes; anything still
+# carrying a backslash is skipped — never flagged — rather than decoded in sed.
+# Same asymmetry as the bases above: a missed heal on an exotic filename is
+# cheap, a false phantom is not (codex review, PR #123).
 phantom_paths() {
   [ -s "$probe_json" ] || return 0
   grep -o '"Filename":"[^"]*"' "$probe_json" 2>/dev/null \
     | sed -e 's/^"Filename":"//' -e 's/"$//' \
+          -e 's/\\u0026/\&/g' -e 's/\\u003c/</g' -e 's/\\u003e/>/g' \
     | sort -u \
     | while IFS= read -r f; do
-        if [ -n "$f" ] && [ ! -e "$f" ]; then printf '%s\n' "$f"; fi
+        case "$f" in *\\*) continue ;; esac
+        if [ -n "$f" ] && ! path_exists "$f"; then printf '%s\n' "$f"; fi
       done
 }
 
