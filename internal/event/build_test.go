@@ -938,3 +938,128 @@ func TestCwdResetAbsentWithoutMarker(t *testing.T) {
 		t.Error("CwdReset = true, want false — no marker present")
 	}
 }
+
+// attachLine builds one harness-injected attachment transcript line.
+func attachLine(uuid, class, payload string) string {
+	return `{"type":"attachment","uuid":"` + uuid + `","sessionId":"s1",` +
+		`"timestamp":"2026-08-13T01:00:00.000Z","isSidechain":false,` +
+		`"attachment":{"type":"` + class + `"` + payload + `}}`
+}
+
+func TestAttachmentsBecomeEvents(t *testing.T) {
+	src := writeTranscript(t,
+		attachLine("a1", "hook_success", `,"content":"hello"`),
+		attachLine("a2", "skill_listing", `,"content":"a very long skill listing"`),
+	)
+	b := NewBuilder()
+	var evs []*Event
+	if err := b.File(src, func(ev *Event) { evs = append(evs, ev) }); err != nil {
+		t.Fatal(err)
+	}
+	stats := b.Stats
+	if len(evs) != 2 {
+		t.Fatalf("events = %d, want 2", len(evs))
+	}
+	for i, want := range []string{"hook_success", "skill_listing"} {
+		if evs[i].Kind != KindAttach {
+			t.Errorf("event %d kind = %q, want %q", i, evs[i].Kind, KindAttach)
+		}
+		if evs[i].Action != want {
+			t.Errorf("event %d action = %q, want %q", i, evs[i].Action, want)
+		}
+	}
+	if stats.Attachments != 2 {
+		t.Errorf("Stats.Attachments = %d, want 2", stats.Attachments)
+	}
+}
+
+// The whole serialized attachment is the charge, not a per-class content field
+// — an allowlist of content keys would score every unrecognized class at zero.
+func TestAttachmentBytesAreWholeSerializedPayload(t *testing.T) {
+	payload := `{"type":"hook_success","content":"hello","command":"make check"}`
+	src := writeTranscript(t, attachLine("a1", "hook_success", `,"content":"hello","command":"make check"`))
+	evs := ingest(t, src)
+	if len(evs) != 1 {
+		t.Fatalf("events = %d, want 1", len(evs))
+	}
+	if evs[0].Bytes != len(payload) {
+		t.Errorf("Bytes = %d, want %d (whole payload, not just content)", evs[0].Bytes, len(payload))
+	}
+	if evs[0].Bytes <= len(`"hello"`) {
+		t.Error("Bytes looks like a content-only charge; metadata must be counted too")
+	}
+}
+
+// A class ferret has never seen must still be measured. This is the regression
+// that keeps a future attachment type from silently costing zero.
+func TestUnknownAttachmentClassStillCounted(t *testing.T) {
+	src := writeTranscript(t, attachLine("a1", "some_future_class_2027", `,"whatever":"payload here"`))
+	evs := ingest(t, src)
+	if len(evs) != 1 {
+		t.Fatalf("events = %d, want 1", len(evs))
+	}
+	if evs[0].Action != "some_future_class_2027" {
+		t.Errorf("action = %q, want the class verbatim", evs[0].Action)
+	}
+	if evs[0].Bytes == 0 {
+		t.Error("Bytes = 0 for an unrecognized class — the invisibility bug this bead fixes")
+	}
+}
+
+func TestAttachmentWithNoClassIsNotDropped(t *testing.T) {
+	line := `{"type":"attachment","uuid":"a1","sessionId":"s1",` +
+		`"timestamp":"2026-08-13T01:00:00.000Z","attachment":{"content":"x"}}`
+	evs := ingest(t, writeTranscript(t, line))
+	if len(evs) != 1 || evs[0].Action != "unknown" {
+		t.Fatalf("events = %d; action = %q, want 1 event actioned \"unknown\"", len(evs), func() string {
+			if len(evs) > 0 {
+				return evs[0].Action
+			}
+			return ""
+		}())
+	}
+}
+
+// Resumed/forked sessions replay history; attachments must dedup by UUID like
+// every other line, or a re-ingest inflates the biggest cost class in the corpus.
+func TestAttachmentsDedupByUUID(t *testing.T) {
+	src := writeTranscript(t,
+		attachLine("dup", "hook_success", `,"content":"x"`),
+		attachLine("dup", "hook_success", `,"content":"x"`),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 1 {
+		t.Errorf("events = %d, want 1 (second is a UUID duplicate)", len(evs))
+	}
+}
+
+// Attachments are not tool calls, so they can be neither unpaired nor retried.
+// Before ferret-rfc's fix, finish() stamped every one StatusNone and bumped
+// Stats.Unpaired — 316,281 false unpaired events on the real corpus, pushing
+// the ingest health line to 65.4% and burying the signal it exists to carry.
+func TestAttachmentsAreNotCountedUnpaired(t *testing.T) {
+	src := writeTranscript(t,
+		attachLine("a1", "hook_success", `,"content":"x"`),
+		attachLine("a2", "skill_listing", `,"content":"y"`),
+		toolUse("u1", "t1", "Grep", `{"pattern":"x"}`), // genuinely unpaired
+	)
+	b := NewBuilder()
+	var evs []*Event
+	if err := b.File(src, func(ev *Event) { evs = append(evs, ev) }); err != nil {
+		t.Fatal(err)
+	}
+	if b.Stats.Unpaired != 1 {
+		t.Errorf("Stats.Unpaired = %d, want 1 — only the Grep is a call with no result", b.Stats.Unpaired)
+	}
+	for _, ev := range evs {
+		if ev.Kind != KindAttach {
+			continue
+		}
+		if ev.Status != "" {
+			t.Errorf("attachment %q status = %q, want empty — it has no call to have a status", ev.Action, ev.Status)
+		}
+		if ev.Retry {
+			t.Errorf("attachment %q marked Retry — there is no call to retry", ev.Action)
+		}
+	}
+}

@@ -97,7 +97,7 @@ func (b *Builder) consumeLine(src transcript.Source, st *fileState, line []byte)
 		return
 	}
 	b.Stats.ByType[probe.Type]++
-	if probe.Type != "assistant" && probe.Type != "user" {
+	if probe.Type != "assistant" && probe.Type != "user" && probe.Type != "attachment" {
 		return
 	}
 	var raw transcript.Raw
@@ -108,16 +108,55 @@ func (b *Builder) consumeLine(src transcript.Source, st *fileState, line []byte)
 	if b.isDuplicate(raw.UUID) {
 		return
 	}
+	ts, _ := time.Parse(time.RFC3339, raw.Timestamp)
+	if probe.Type == "attachment" {
+		b.attachmentLine(src, st, &raw, ts)
+		return
+	}
 	if raw.Message == nil {
 		return
 	}
-	ts, _ := time.Parse(time.RFC3339, raw.Timestamp)
 	switch probe.Type {
 	case "assistant":
 		b.assistantLine(src, st, &raw, ts)
 	case "user":
 		b.userLine(src, st, &raw, ts)
 	}
+}
+
+// attachmentLine records one harness-injected attachment as a KindAttach event.
+//
+// Bytes is the length of the serialized attachment payload — the whole record,
+// not a content field picked per class (transcript.Raw.Attachment explains why
+// an allowlist is the wrong shape here). That is deliberately a slight
+// over-count for classes whose payload carries routing metadata the renderer
+// may drop: hook_success serializes 90.0MB corpus-wide of which 36.2MB is
+// content/stdout/stderr, the rest being hookName, toolUseID and the command
+// string. The bias is toward over-counting because the failure that hid this
+// cost for ferret's whole life was under-counting, and an over-count is visible
+// and correctable where a zero is not.
+func (b *Builder) attachmentLine(src transcript.Source, st *fileState, raw *transcript.Raw, ts time.Time) {
+	if len(raw.Attachment) == 0 {
+		return
+	}
+	var cls transcript.AttachClass
+	if err := json.Unmarshal(raw.Attachment, &cls); err != nil {
+		b.Stats.DecodeErrs++
+		return
+	}
+	class := cls.Type
+	if class == "" {
+		class = "unknown"
+	}
+	st.events = append(st.events, &Event{
+		Seq: st.seq, Time: ts,
+		Project: src.Project, Session: session(src, raw), Agent: src.Agent,
+		Sidechain: raw.IsSidechain,
+		Kind:      KindAttach, Action: class,
+		Bytes:   len(raw.Attachment),
+		Version: raw.Version,
+	})
+	b.Stats.Attachments++
 }
 
 // isDuplicate dedups by message UUID across the whole ingest: resumed and
@@ -334,9 +373,21 @@ func attachCompoundShellHits(evs []*Event, content json.RawMessage) {
 }
 
 // finish resolves unpaired statuses and marks retries, in file order.
+//
+// KindAttach is skipped wholesale (ferret-rfc). StatusNone means "a tool_use
+// that never got its tool_result" — an interruption or compaction — and every
+// such event increments Stats.Unpaired, which mine.Summarize reports as an
+// ingest-health signal. An attachment has no tool_use and no result to be
+// missing, so stamping it StatusNone is not merely cosmetic: it inflated
+// unpaired by the entire attachment population (316,281 events, pushing the
+// health line to 65.4%) and drowned the real signal it exists to carry.
+// Retry attribution is skipped for the same reason — there is no call to retry.
 func finish(events []*Event, stats *Stats) {
 	lastFail := map[string]time.Time{}
 	for _, ev := range events {
+		if ev.Kind == KindAttach {
+			continue
+		}
 		if ev.Kind != KindPrompt && ev.Status == "" {
 			ev.Status = StatusNone // interruption/compaction — not a failure
 			stats.Unpaired++
