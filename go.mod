@@ -2,7 +2,7 @@ module github.com/dkoosis/ferret
 
 go 1.26.3
 
-toolchain go1.26.5
+toolchain go1.26.6
 
 require (
 	github.com/alecthomas/kong v1.15.0
