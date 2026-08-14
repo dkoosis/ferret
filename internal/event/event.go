@@ -86,6 +86,17 @@ const (
 	KindTool   = "tool"
 	KindShell  = "shell"
 	KindPrompt = "prompt"
+	// KindAttach is a harness-injected attachment record — a hook's output, the
+	// skill listing, a CLAUDE.md pull, an agent/tool-registry delta. These enter
+	// the model's context with no tool_use to key on, so before ferret-rfc they
+	// were invisible to every ranking: consumeLine dropped every line that was
+	// not assistant/user, and Stats.ByType counted them without keeping one.
+	//
+	// They are not a rounding error. Measured over the corpus (3,923
+	// transcripts): hook_success 90.0MB across 207,329 records and skill_listing
+	// 82.4MB across 3,617 each rival Read — the top-ranked tool — at 83.6MB;
+	// ~30 classes total ~235MB. Action carries the attachment class.
+	KindAttach = "attach"
 
 	StatusOK    = "ok"
 	StatusFail  = "fail"
@@ -99,6 +110,7 @@ type Stats struct {
 	Lines       int `json:"lines"`
 	Events      int `json:"events"`
 	Prompts     int `json:"prompts"`
+	Attachments int `json:"attachments"` // KindAttach events kept (ferret-rfc)
 	Unpaired    int `json:"unpaired"`
 	Fallback    int `json:"shellFallback"`
 	Deduped     int `json:"deduped"`

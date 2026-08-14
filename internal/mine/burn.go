@@ -174,7 +174,21 @@ func burnLess(a, b *BurnRow) bool {
 // is the sum of its calls' capped previews, so 733 small calls out-render one
 // enormous one. That per-call application is the whole mechanism by which this
 // ranking differs from the byte ranking.
+//
+// KindAttach is exempt from BOTH terms (ferret-rfc). Chrome models the framing
+// of a call — echoed command, preview box, permission line — and an attachment
+// is not a call: it is injected, with no framing to pay for. The preview cap
+// models output folding behind a "show more", and an attachment does not fold
+// either; it enters context whole. Charging a 20.3KB skill_listing the 2048-byte
+// cap would rank it at a tenth of its cost, which is a worse error than the
+// invisibility this bead exists to fix.
+//
+// The tool/shell terms are deliberately left alone here — recalibrating those
+// five constants is ferret-noj's bead, not this one.
 func renderCost(ev *event.Event) int {
+	if ev.Kind == event.KindAttach {
+		return ev.Bytes
+	}
 	return chromePerCall(ev.Kind) + min(ev.Bytes, previewCapBytes)
 }
 
@@ -192,10 +206,16 @@ func chromePerCall(kind string) int {
 
 // burnKey mirrors stats.go's addAction: shell events get an "sh:" prefix on
 // their normalized command so a shell command (e.g. "sh:make") never
-// collides with a same-named tool key.
+// collides with a same-named tool key. Attachment classes take "at:" for the
+// same reason (ferret-rfc) — and because the prefix is what makes a row's
+// nature legible in the ranking: "at:skill_listing" is a config you change
+// once, where "Read" is a call you make less often.
 func burnKey(ev *event.Event) string {
-	if ev.Kind == event.KindShell {
+	switch ev.Kind {
+	case event.KindShell:
 		return "sh:" + ev.Action
+	case event.KindAttach:
+		return "at:" + ev.Action
 	}
 	return ev.Action
 }

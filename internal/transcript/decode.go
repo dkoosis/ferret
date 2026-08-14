@@ -12,8 +12,8 @@ type Probe struct {
 	Type string `json:"type"`
 }
 
-// Raw is the full decode for event types we care about (assistant/user).
-// Every field is optional — the schema drifts across CC versions.
+// Raw is the full decode for event types we care about (assistant/user/
+// attachment). Every field is optional — the schema drifts across CC versions.
 type Raw struct {
 	Type        string `json:"type"`
 	Timestamp   string `json:"timestamp"`
@@ -26,6 +26,21 @@ type Raw struct {
 	Plugin      string `json:"attributionPlugin"`
 	MCPServer   string `json:"attributionMcpServer"`
 	Message     *Msg   `json:"message"`
+	// Attachment is the harness-injected payload on a "attachment" line. Kept
+	// RAW, not decoded into fields, because the classes have no common content
+	// key: hook_success carries content/stdout/stderr, skill_listing content,
+	// edited_text_file snippet, output_style style, diagnostics files,
+	// queued_command prompt, the *_delta classes addedLines/addedBlocks. An
+	// allowlist of per-class keys would silently score every future class at
+	// zero — which is precisely how ~235MB stayed invisible. Measuring the
+	// serialized record needs no per-class knowledge and cannot regress that way.
+	Attachment json.RawMessage `json:"attachment"`
+}
+
+// AttachClass is the cheap decode of an attachment's own discriminator. It is
+// the only field ferret reads out of the payload; the rest is weighed, not read.
+type AttachClass struct {
+	Type string `json:"type"`
 }
 
 type Msg struct {

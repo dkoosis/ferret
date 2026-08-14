@@ -311,3 +311,47 @@ func TestBurn_ReturnsError_When_EventsPathMissing(t *testing.T) {
 		t.Fatal("Burn() error = nil, want non-nil for missing events path")
 	}
 }
+
+// TestBurn_ChargesAttachmentsFullBytes_When_PayloadExceedsPreviewCap pins the
+// ferret-rfc exemption: an attachment does not fold behind a preview, so the
+// 2048-byte cap must not apply to it. A real skill_listing averages 20,321
+// bytes; capping it would rank the corpus's second-largest context injector at
+// roughly a tenth of its cost.
+func TestBurn_ChargesAttachmentsFullBytes_When_PayloadExceedsPreviewCap(t *testing.T) {
+	const big = 20321 // measured mean skill_listing size over 3,617 records
+	path := writeBurnFixture(t, `{"i":1,"s":"s1","k":"attach","act":"skill_listing","b":20321}
+`)
+	res, err := Burn(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(res.Rows))
+	}
+	got := res.Rows[0]
+	if got.Key != "at:skill_listing" {
+		t.Errorf("key = %q, want at:skill_listing (prefixed so a class cannot collide with a tool name)", got.Key)
+	}
+	if got.RenderCost != big {
+		t.Errorf("RenderCost = %d, want %d — attachments are exempt from previewCapBytes and from chrome", got.RenderCost, big)
+	}
+}
+
+// An attachment key must be able to outrank a tool key. Before ferret-rfc no
+// attachment reached Burn at all; with the preview cap applied it still could
+// not win. This is the end-to-end statement of the bug.
+func TestBurn_AttachmentOutranksTool_When_ItCostsMore(t *testing.T) {
+	path := writeBurnFixture(t, `{"i":1,"s":"s1","k":"attach","act":"skill_listing","b":20321}
+{"i":2,"s":"s1","k":"tool","act":"Read","b":9000}
+`)
+	res, err := Burn(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(res.Rows))
+	}
+	if res.Rows[0].Key != "at:skill_listing" {
+		t.Errorf("top key = %q, want at:skill_listing — a 20KB injection must outrank a 9KB Read that folds at 2048", res.Rows[0].Key)
+	}
+}
