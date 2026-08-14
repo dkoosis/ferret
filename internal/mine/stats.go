@@ -80,7 +80,12 @@ func (sm *summarizer) addBucket(ev *event.Event) {
 	case event.StatusCFail:
 		b.CFails++
 	case event.StatusNone:
-		if ev.Kind != event.KindPrompt {
+		// KindAttach is excluded alongside KindPrompt: neither is a tool_use, so
+		// neither can be missing a tool_result. build.go's finish() no longer
+		// stamps attachments at all, but a corpus ingested before ferret-rfc's
+		// fix still carries st:"none" on its attach rows — this guard keeps a
+		// stale artifact from reporting a 65% unpaired rate it never had.
+		if ev.Kind != event.KindPrompt && ev.Kind != event.KindAttach {
 			b.Unpaired++
 		}
 	}

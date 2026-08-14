@@ -1032,3 +1032,34 @@ func TestAttachmentsDedupByUUID(t *testing.T) {
 		t.Errorf("events = %d, want 1 (second is a UUID duplicate)", len(evs))
 	}
 }
+
+// Attachments are not tool calls, so they can be neither unpaired nor retried.
+// Before ferret-rfc's fix, finish() stamped every one StatusNone and bumped
+// Stats.Unpaired — 316,281 false unpaired events on the real corpus, pushing
+// the ingest health line to 65.4% and burying the signal it exists to carry.
+func TestAttachmentsAreNotCountedUnpaired(t *testing.T) {
+	src := writeTranscript(t,
+		attachLine("a1", "hook_success", `,"content":"x"`),
+		attachLine("a2", "skill_listing", `,"content":"y"`),
+		toolUse("u1", "t1", "Grep", `{"pattern":"x"}`), // genuinely unpaired
+	)
+	b := NewBuilder()
+	var evs []*Event
+	if err := b.File(src, func(ev *Event) { evs = append(evs, ev) }); err != nil {
+		t.Fatal(err)
+	}
+	if b.Stats.Unpaired != 1 {
+		t.Errorf("Stats.Unpaired = %d, want 1 — only the Grep is a call with no result", b.Stats.Unpaired)
+	}
+	for _, ev := range evs {
+		if ev.Kind != KindAttach {
+			continue
+		}
+		if ev.Status != "" {
+			t.Errorf("attachment %q status = %q, want empty — it has no call to have a status", ev.Action, ev.Status)
+		}
+		if ev.Retry {
+			t.Errorf("attachment %q marked Retry — there is no call to retry", ev.Action)
+		}
+	}
+}
