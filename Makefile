@@ -12,7 +12,7 @@ SHELL := /bin/bash
 include .sandbox/lib/Makefile.doctor.mk
 include .sandbox/lib/Makefile.cross.mk
 
-.PHONY: help check audit vet lint test race build vuln dupe nilcheck fuzz pack-drift install deploy clean corpus
+.PHONY: help check audit vet lint test race build selfcheck vuln dupe nilcheck fuzz install deploy clean corpus
 
 # Serialize golangci-lint through the machine-global mkdir mutex (see script
 # header — golangci-lint's cache lock fails exit-3 on contention instead of
@@ -29,7 +29,7 @@ help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z0-9_.-]+:.*?## / { printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 	@printf '\n'
 
-check: vet lint test build ## Fast validation: vet + lint + test + build
+check: vet lint test build selfcheck ## Fast validation: vet + lint + test + build + conform
 	@echo "=== check pass ==="
 
 FUZZTIME ?= 30s
@@ -52,15 +52,13 @@ test: ## Run tests with coverage
 race: ## Run tests with race detector (fresh run)
 	go test -race -count=1 -cover ./...
 
+# Fleet gate (sd-th5.22): conform pinned as a go.mod tool dependency
+# (go.sum-verified); bumping the pin is a deliberate PR.
+selfcheck: ## Run conform (fleet SDLC checker) against this repo
+	go tool conform
+
 build: ## Compile everything
 	go build ./...
-
-# bugclasses pack (ccp-sbp): fail if .golangci-rules/bugclasses.go has drifted
-# from the upstream cc-plugins pack. Network-soft — an unreachable upstream
-# (cc-plugins is private) warns and passes, so this never breaks an offline
-# build; a real content/version mismatch fails loudly.
-pack-drift: ## Check bugclasses rules haven't drifted from upstream
-	scripts/check-pack-drift.sh .golangci-rules/bugclasses.go
 
 # CORPUS_OUT/N/SEED override the defaults: make corpus N=60 OUT=/tmp/big
 CORPUS_OUT ?= /tmp/ferret-corpus
