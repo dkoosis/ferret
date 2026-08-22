@@ -75,8 +75,16 @@ corpus: ## Generate a synthetic transcript corpus + ingest it
 vuln: ## Scan for known vulnerabilities
 	govulncheck ./...
 
-dupe: ## Check for code duplication (jscpd)
-	TMP_JSCPD=$$(mktemp -d); jscpd . --gitignore --output $$TMP_JSCPD; rm -rf $$TMP_JSCPD
+# jscpd is an OPTIONAL_TOOL (.sandbox/project.conf): skip, never fail, when it
+# is absent — same contract as nilcheck. Without this an unguarded failure here
+# would abort audit before vuln, which is exactly the masking the reorder above
+# is meant to end.
+dupe: ## Check for code duplication (jscpd; skips if not installed)
+	@if ! command -v jscpd >/dev/null 2>&1; then \
+		echo "dupe: jscpd not installed — skipping (install: npm i -g jscpd)"; \
+	else \
+		TMP_JSCPD=$$(mktemp -d); jscpd . --gitignore --output $$TMP_JSCPD; rm -rf $$TMP_JSCPD; \
+	fi
 
 nilcheck: ## Run nilaway (skips if not installed)
 	@if ! command -v nilaway >/dev/null 2>&1; then \
