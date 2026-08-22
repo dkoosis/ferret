@@ -78,9 +78,9 @@ dupe: ## Check for code duplication (jscpd)
 nilcheck: ## Run nilaway (skips if not installed)
 	@if ! command -v nilaway >/dev/null 2>&1; then \
 		echo "nilcheck: nilaway not installed — skipping (install: go install go.uber.org/nilaway/cmd/nilaway@latest)"; \
-		exit 0; \
+	else \
+		nilaway -include-pkgs=github.com/dkoosis/ferret ./...; \
 	fi
-	nilaway -include-pkgs=github.com/dkoosis/ferret ./...
 
 ## doctor target provided by .sandbox/lib/Makefile.doctor.mk (project.conf-driven)
 ## cross / cross-amd64 / cross-arm64 provided by .sandbox/lib/Makefile.cross.mk
