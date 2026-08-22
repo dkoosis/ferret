@@ -8,7 +8,7 @@ import (
 // Waste merge (ferret-q6y) — the combined friction op behind `ferret friction`.
 //
 // ferret's four friction detectors each answer a different question in a
-// different unit: burn ranks GROSS render cost per normalized command
+// different unit: burn ranks GROSS context bytes per normalized command
 // (burn.go), misfires rank failed calls (misfire.go), polling ranks
 // exact-duplicate commands inside one session (polling.go), and the motif
 // findings rank recurring sequences (finding.go). Reading them meant running
@@ -18,14 +18,14 @@ import (
 // command that had to run is not waste. The currency here is the cost of the
 // calls that SHOULDN'T HAVE HAPPENED:
 //
-//	poll    (repeats beyond the first per session) × the key's render-per-call
-//	misfire (calls that failed)                    × the key's render-per-call
+//	poll    (repeats beyond the first per session) × the key's bytes-per-call
+//	misfire (calls that failed)                    × the key's bytes-per-call
 //	motif   (occurrences beyond the first per session) — its share of the
 //	        motif's measured burn
 //
 // One theory across all three: the first occurrence bought information; the
 // rest is the toll for not having fixed it. burn's own rows contribute no
-// waste of their own — a key's RenderCost and RenderPerCall ride along on
+// waste of their own — a key's GrossBytes and BytesPerCall ride along on
 // every row as CONTEXT (and supply the per-call price the other two multiply
 // by), which is the join burn.go's Key column was already designed for.
 //
@@ -56,20 +56,21 @@ type WasteRow struct {
 	Key    string      `json:"key"`    // normalized command key ("sh:git_status", "Read") or the motif's token chain
 	Source WasteSource `json:"source"` // poll | misfire | motif
 
-	// WastedBytes is the estimate this table ranks on: rendered bytes spent on
-	// occurrences that bought nothing. Modeled, not measured — it inherits
-	// burn.go's render-cost model and its caveats.
+	// WastedBytes is the estimate this table ranks on: context bytes spent on
+	// occurrences that bought nothing. An estimate, not a measurement — the
+	// per-call price is measured (burn.go), but which occurrences "bought
+	// nothing" is the detectors' judgment.
 	WastedBytes int `json:"wastedBytes"`
 	// Occurrences is the count WastedBytes was charged for: redundant repeats,
 	// failed calls, or redundant motif occurrences.
 	Occurrences int `json:"occurrences"`
 	Sessions    int `json:"sessions"` // distinct sessions the waste spreads across
 
-	// RenderCost / RenderPerCall are the key's GROSS cost, joined from the burn
+	// GrossBytes / BytesPerCall are the key's GROSS cost, joined from the burn
 	// table — context, never the rank key. Zero when the key has no burn row
 	// (a motif chain, which is not a single command key).
-	RenderCost    int     `json:"renderCost,omitempty"`
-	RenderPerCall float64 `json:"renderPerCall,omitempty"`
+	GrossBytes   int     `json:"grossBytes,omitempty"`
+	BytesPerCall float64 `json:"bytesPerCall,omitempty"`
 
 	// Detail is the raw command text for a poll row, empty otherwise — a poll's
 	// unit is the exact text, not the normalized key (polling.go).
@@ -89,8 +90,8 @@ type WasteReport struct {
 	// the same calls a third time. Deduplicating is not available at this
 	// grain — the detectors hand over aggregates, not events — so the honest
 	// move is to label the sum and publish the per-source split beside it.
-	// Never render this as a percentage of TotalRender: overlapping charges
-	// can exceed the rendered total they would be a fraction of.
+	// Never render this as a percentage of TotalBytes: overlapping charges
+	// can exceed the corpus total they would be a fraction of.
 	TotalWasted int `json:"totalWasted"`
 	// BySource splits TotalWasted per detector. Within one source the rows ARE
 	// disjoint (one row per key, or per command text for polling), so each
@@ -98,9 +99,9 @@ type WasteReport struct {
 	// the sum, is what the renderers lead with.
 	BySource map[WasteSource]int `json:"bySource,omitempty"`
 
-	TotalRender int `json:"totalRender"` // summed RenderCost over the whole corpus — context, not a denominator for TotalWasted
-	Events      int `json:"events"`
-	Sessions    int `json:"sessions"`
+	TotalBytes int `json:"totalBytes"` // summed GrossBytes over the whole corpus — context, not a denominator for TotalWasted
+	Events     int `json:"events"`
+	Sessions   int `json:"sessions"`
 }
 
 // MergeWaste joins the four detectors' reports into one waste-ranked table.
@@ -113,7 +114,7 @@ func MergeWaste(burn *BurnResult, mis MisfireReport, poll PollingReport, corpus 
 	price := priceIndex(burn)
 	rep := WasteReport{Events: burn.Events, Sessions: burn.Sessions}
 	for i := range burn.Rows {
-		rep.TotalRender += burn.Rows[i].RenderCost
+		rep.TotalBytes += burn.Rows[i].OutBytes
 	}
 
 	rows := make([]WasteRow, 0, len(poll.Rows)+len(mis.Rows)+len(motifs))
@@ -171,7 +172,7 @@ func appendPollWaste(rows []WasteRow, poll PollingReport, price map[string]*Burn
 
 // appendMisfireWaste charges each key for the calls that failed. cfail rides
 // in Fails alongside fail (misfire.go) — a call inside a failed compound chain
-// cost the reader its render either way.
+// put its bytes in the request either way.
 func appendMisfireWaste(rows []WasteRow, mis MisfireReport, price map[string]*BurnRow) []WasteRow {
 	for _, m := range mis.Rows {
 		if m.Fails <= 0 {
@@ -235,9 +236,9 @@ func applyPrice(row *WasteRow, price map[string]*BurnRow, n float64) {
 	if !ok {
 		return
 	}
-	row.RenderCost = b.RenderCost
-	row.RenderPerCall = b.RenderPerCall
-	row.WastedBytes = int(n * b.RenderPerCall)
+	row.GrossBytes = b.OutBytes
+	row.BytesPerCall = b.BytesPerCall
+	row.WastedBytes = int(n * b.BytesPerCall)
 }
 
 // wasteLess is the row ordering: estimated waste descending, then spread

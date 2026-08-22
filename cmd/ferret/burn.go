@@ -14,7 +14,7 @@ import (
 //
 //	Burn struct {
 //	    CommonFlags
-//	} `cmd:"" help:"Ranked corpus-wide render burn per normalized command."`
+//	} `cmd:"" help:"Ranked corpus-wide context burn per normalized command."`
 //
 // and dispatches alongside the other subcommands' switch arm:
 //
@@ -25,12 +25,11 @@ type BurnCmd struct {
 }
 
 // cmdBurn renders `ferret burn`: rows are normalized commands (shellnorm key
-// for shell, tool name for tool), ranked by each row's TOTAL modeled render
-// cost across the whole ingested corpus — the sum of its per-call charges, not
-// its returned bytes (ferret-cax). Charging per call is what separates this
-// ordering from the byte ordering: many small calls out-render one huge one.
-// The output-byte columns stay alongside so the
-// old ordering stays readable in the same table. Mirrors cmdSummary's shape
+// for shell, tool name for tool, at:class for attachments), ranked by each
+// row's TOTAL measured context bytes across the whole ingested corpus —
+// tool_use input plus tool_result content, summed over every call (ferret-noj).
+// Summing over calls is what prices repetition: many small calls out-burn one
+// huge one without any modeled per-call constant. Mirrors cmdSummary's shape
 // (fromCommonFlags → ensureData → mine.* → text/json render).
 func cmdBurn(cmd *BurnCmd) error {
 	c, err := fromCommonFlags(cmd.CommonFlags)
@@ -77,16 +76,15 @@ func writeBurnText(w io.Writer, res *mine.BurnResult, limit, maxBytes int) error
 	defer sink.Close()
 	about(sink,
 		"≡ burn: ranked context cost per normalized command across the whole corpus — the tune-up list.",
-		"≡ rend = modeled rendered cost, the ranking key: per-call chrome (shell ≈6 lines of command echo + preview frame + permission line; native tools ≈1 collapsed line) + each call's preview-capped output share. A model, not a measurement (ccp-3s1c).",
-		"≡ out-bytes = event.Bytes (tool_use input + tool_result content); kept beside rend because they disagree — a cheap-output, high-count command is near-zero on bytes and a top burner on rend.",
-		"≡ shell rows are shellnorm-normalized (sh:git_commit, ...), tool rows keyed by tool name.")
+		"≡ bytes = event.Bytes (tool_use input + tool_result content) summed over every call — measured, not modeled. This is what enters the request body, so it is what ranks (ferret-noj).",
+		"≡ bytes/call is the per-call toll a \"should I stop running this?\" decision turns on; the two columns disagree when a cheap command is called constantly.",
+		"≡ shell rows are shellnorm-normalized (sh:git_commit, ...), tool rows keyed by tool name, attachment classes by at:class.")
 	sink.Head("burn events=%d sessions=%d rows=%d", res.Events, res.Sessions, len(res.Rows))
 	emptyNote(sink, len(res.Rows), "commands")
 	for i := range res.Rows {
 		r := &res.Rows[i] // index-range: BurnRow carries a map field, value-range trips rangeValCopy
-		sink.Row("%10s rend  %8s/call  %10s out  %6d calls  %8s/call  %4d sess  %s",
-			humanBytes(r.RenderCost), humanBytes(int(r.RenderPerCall)),
-			humanBytes(r.OutBytes), r.Calls, humanBytes(int(r.BytesPerCall)), r.Sessions, r.Key)
+		sink.Row("%10s bytes  %8s/call  %6d calls  %4d sess  %s",
+			humanBytes(r.OutBytes), humanBytes(int(r.BytesPerCall)), r.Calls, r.Sessions, r.Key)
 	}
 	// Legal moves, not a plan (DK-AXI rule 11): gross cost is not waste — the
 	// merged view says how much of it bought nothing.

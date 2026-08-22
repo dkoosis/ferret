@@ -16,7 +16,7 @@ func readyStatus() status {
 		BuiltAt:  time.Date(2026, 8, 11, 21, 43, 39, 0, time.UTC),
 		Events:   149060,
 		Sessions: 1416,
-		Waste:    2000, Render: 9000,
+		Waste:    2000, Gross: 9000,
 		Top: []mine.WasteRow{
 			{Key: "SendMessage", Source: mine.WasteFail, WastedBytes: 1200, Occurrences: 684},
 			{Key: "sh:git_status", Source: mine.WasteRepeat, WastedBytes: 800, Occurrences: 1348},

@@ -4,14 +4,14 @@ import (
 	"testing"
 )
 
-// burnFixture builds a BurnResult with one row per (key, renderCost, calls),
+// burnFixture builds a BurnResult with one row per (key, bytes, calls),
 // which is all MergeWaste reads from the burn table: the per-call price and
 // the gross cost it carries onto each row.
 func burnFixture(rows ...BurnRow) *BurnResult {
 	res := &BurnResult{Events: 100, Sessions: 10}
 	for _, r := range rows {
 		if r.Calls > 0 {
-			r.RenderPerCall = float64(r.RenderCost) / float64(r.Calls)
+			r.BytesPerCall = float64(r.OutBytes) / float64(r.Calls)
 		}
 		res.Rows = append(res.Rows, r)
 	}
@@ -32,7 +32,7 @@ func motifCorpus(t *testing.T) motifFixture {
 }
 
 func TestMergeWaste_ChargesRepeatsBeyondFirstPerSession_When_CommandIsPolled(t *testing.T) {
-	burn := burnFixture(BurnRow{Key: "sh:git_status", RenderCost: 1000, Calls: 10})
+	burn := burnFixture(BurnRow{Key: "sh:git_status", OutBytes: 1000, Calls: 10})
 	poll := PollingReport{Sessions: 4, Rows: []PollingRow{
 		// 12 runs over 3 polling sessions → 9 runs bought nothing, at 100/call.
 		{Command: "git status --short", Key: "sh:git_status", TotalRepeats: 12, Sessions: 3},
@@ -53,8 +53,8 @@ func TestMergeWaste_ChargesRepeatsBeyondFirstPerSession_When_CommandIsPolled(t *
 	if got.Source != WasteRepeat {
 		t.Errorf("source = %q, want %q", got.Source, WasteRepeat)
 	}
-	if got.RenderCost != 1000 {
-		t.Errorf("renderCost = %d, want the key's gross 1000 carried as context", got.RenderCost)
+	if got.GrossBytes != 1000 {
+		t.Errorf("grossBytes = %d, want the key's gross 1000 carried as context", got.GrossBytes)
 	}
 	if got.Detail != "git status --short" {
 		t.Errorf("detail = %q, want the raw command text", got.Detail)
@@ -62,7 +62,7 @@ func TestMergeWaste_ChargesRepeatsBeyondFirstPerSession_When_CommandIsPolled(t *
 }
 
 func TestMergeWaste_ChargesEveryFailedCall_When_KeyMisfires(t *testing.T) {
-	burn := burnFixture(BurnRow{Key: "Edit", RenderCost: 2000, Calls: 20})
+	burn := burnFixture(BurnRow{Key: "Edit", OutBytes: 2000, Calls: 20})
 	mis := MisfireReport{Rows: []MisfireRow{{Key: "Edit", Fails: 5, FailSess: 2, Calls: 20}}}
 
 	rep := MergeWaste(burn, mis, PollingReport{}, nil, nil)
@@ -83,7 +83,7 @@ func TestMergeWaste_ChargesEveryFailedCall_When_KeyMisfires(t *testing.T) {
 // rule three times, and a row whose key fails to find its burn entry silently
 // prices at zero. One shell key must resolve identically from all three.
 func TestMergeWaste_JoinsEveryDetectorOnOneKeySpace_When_KeyIsShell(t *testing.T) {
-	burn := burnFixture(BurnRow{Key: "sh:jq", RenderCost: 800, Calls: 8})
+	burn := burnFixture(BurnRow{Key: "sh:jq", OutBytes: 800, Calls: 8})
 	mis := MisfireReport{Rows: []MisfireRow{{Key: "sh:jq", Fails: 2, FailSess: 2, Calls: 8}}}
 	poll := PollingReport{Rows: []PollingRow{{Command: "jq '.[0]'", Key: "sh:jq", TotalRepeats: 5, Sessions: 1}}}
 
@@ -93,8 +93,8 @@ func TestMergeWaste_JoinsEveryDetectorOnOneKeySpace_When_KeyIsShell(t *testing.T
 		t.Fatalf("rows = %d, want 2 (one per detector, same key); got %+v", len(rep.Rows), rep.Rows)
 	}
 	for _, r := range rep.Rows {
-		if r.RenderPerCall != 100 {
-			t.Errorf("%s row priced at %v/call, want 100 — the burn join missed", r.Source, r.RenderPerCall)
+		if r.BytesPerCall != 100 {
+			t.Errorf("%s row priced at %v/call, want 100 — the burn join missed", r.Source, r.BytesPerCall)
 		}
 	}
 }
@@ -117,9 +117,9 @@ func TestMergeWaste_DropsRow_When_KeyHasNoBurnEntry(t *testing.T) {
 
 func TestMergeWaste_RanksByWasteThenSpread_When_RowsTie(t *testing.T) {
 	burn := burnFixture(
-		BurnRow{Key: "sh:a", RenderCost: 1000, Calls: 10}, // 100/call
-		BurnRow{Key: "sh:b", RenderCost: 1000, Calls: 10}, // 100/call
-		BurnRow{Key: "sh:c", RenderCost: 5000, Calls: 10}, // 500/call
+		BurnRow{Key: "sh:a", OutBytes: 1000, Calls: 10}, // 100/call
+		BurnRow{Key: "sh:b", OutBytes: 1000, Calls: 10}, // 100/call
+		BurnRow{Key: "sh:c", OutBytes: 5000, Calls: 10}, // 500/call
 	)
 	mis := MisfireReport{Rows: []MisfireRow{
 		{Key: "sh:a", Fails: 2, FailSess: 1, Calls: 10}, // 200 waste, 1 session
@@ -142,14 +142,14 @@ func TestMergeWaste_RanksByWasteThenSpread_When_RowsTie(t *testing.T) {
 
 func TestMergeWaste_ReportsCorpusTotals_When_BurnTableIsPopulated(t *testing.T) {
 	burn := burnFixture(
-		BurnRow{Key: "sh:a", RenderCost: 1000, Calls: 10},
-		BurnRow{Key: "sh:b", RenderCost: 2500, Calls: 10},
+		BurnRow{Key: "sh:a", OutBytes: 1000, Calls: 10},
+		BurnRow{Key: "sh:b", OutBytes: 2500, Calls: 10},
 	)
 
 	rep := MergeWaste(burn, MisfireReport{}, PollingReport{}, nil, nil)
 
-	if rep.TotalRender != 3500 {
-		t.Errorf("totalRender = %d, want 3500 (the corpus denominator)", rep.TotalRender)
+	if rep.TotalBytes != 3500 {
+		t.Errorf("TotalBytes = %d, want 3500 (the corpus denominator)", rep.TotalBytes)
 	}
 	if rep.Events != 100 || rep.Sessions != 10 {
 		t.Errorf("events/sessions = %d/%d, want 100/10 carried from the burn result", rep.Events, rep.Sessions)
@@ -160,7 +160,7 @@ func TestMergeWaste_ExcludesSwallowedRows_When_SwallowTableIsPopulated(t *testin
 	// A swallow count is a FLOOR on hidden failures, not a count of them
 	// (misfire.go) — pricing it would manufacture a number the corpus cannot
 	// support, so the swallow table contributes nothing here.
-	burn := burnFixture(BurnRow{Key: "sh:guess", RenderCost: 1000, Calls: 10})
+	burn := burnFixture(BurnRow{Key: "sh:guess", OutBytes: 1000, Calls: 10})
 	mis := MisfireReport{Swallowed: []SwallowRow{{Key: "sh:guess", Swallows: 9, SwallowSess: 3, Calls: 10}}}
 
 	rep := MergeWaste(burn, mis, PollingReport{}, nil, nil)
