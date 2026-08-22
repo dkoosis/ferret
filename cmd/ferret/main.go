@@ -329,6 +329,8 @@ var CLI struct {
 
 	Polling PollingCmd `cmd:"" help:"Rank exact-duplicate commands repeated within a session." name:"polling"`
 
+	Parallel ParallelCmd `cmd:"" help:"Rank context spend by how many threads ran at once — session overlap vs subagent fan-out." name:"parallel"`
+
 	Substitutable SubstitutableCmd `cmd:"" help:"Rank Bash calls a native tool (Grep/Glob/Read) could replace — deterministic, no judge." name:"substitutable"`
 
 	Retrieval struct {
@@ -586,6 +588,8 @@ func main() {
 		err = cmdMisfires(CLI.Misfires)
 	case "polling":
 		err = cmdPolling(CLI.Polling)
+	case "parallel":
+		err = cmdParallel(&CLI.Parallel)
 	case "substitutable":
 		err = cmdSubstitutable(CLI.Substitutable)
 	case "retrieval":
