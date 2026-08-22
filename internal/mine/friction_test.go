@@ -149,7 +149,7 @@ func TestMergeWaste_ReportsCorpusTotals_When_BurnTableIsPopulated(t *testing.T) 
 	rep := MergeWaste(burn, MisfireReport{}, PollingReport{}, nil, nil)
 
 	if rep.TotalBytes != 3500 {
-		t.Errorf("totalRender = %d, want 3500 (the corpus denominator)", rep.TotalBytes)
+		t.Errorf("TotalBytes = %d, want 3500 (the corpus denominator)", rep.TotalBytes)
 	}
 	if rep.Events != 100 || rep.Sessions != 10 {
 		t.Errorf("events/sessions = %d/%d, want 100/10 carried from the burn result", rep.Events, rep.Sessions)
