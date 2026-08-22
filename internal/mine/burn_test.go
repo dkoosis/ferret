@@ -19,20 +19,20 @@ func writeBurnFixture(t *testing.T, lines string) string {
 	return path
 }
 
-// TestBurn_RanksByRenderCostDescending_When_MultipleKeysPresent pins the
-// ferret-cax ranking flip and the reason for it: rows sort by modeled render
-// cost, so the high-count/low-byte shell key outranks the low-count/high-byte
-// tool key — the exact inversion the ccp-3s1c measurement demanded, and the
-// exact case the old total-OutBytes ranking got backwards.
+// TestBurn_RanksByContextBytesDescending_When_MultipleKeysPresent pins the
+// ferret-noj ranking: rows sort by measured context bytes, so the key that put
+// more into the request body leads — no chrome constant, no preview cap, no
+// modeled term of any kind between the corpus and the order.
 //
-// Fixture arithmetic, spelled out because the flip is the whole point:
+// Fixture arithmetic, spelled out:
 //
-//	Read          2 tool calls, 150 out-bytes → 2*80 chrome + 150 = 310 rend
-//	sh:git_commit 3 shell calls, 35 out-bytes → 3*480 chrome + 35 = 1475 rend
+//	Read          2 tool calls,  150 bytes
+//	sh:git_commit 3 shell calls,  35 bytes
 //
-// Read wins on bytes 150→35; sh:git_commit wins on render 1475→310, and
-// render is what ranks.
-func TestBurn_RanksByRenderCostDescending_When_MultipleKeysPresent(t *testing.T) {
+// Under the retired ferret-cax render model sh:git_commit won this comparison
+// 1475 -> 310, purely on 3 x 480 bytes of fabricated shell chrome. Chrome never
+// entered the request, so Read leads now.
+func TestBurn_RanksByContextBytesDescending_When_MultipleKeysPresent(t *testing.T) {
 	lines := `{"i":1,"p":"proj","s":"s1","k":"tool","act":"Read","b":100}
 {"i":2,"p":"proj","s":"s1","k":"tool","act":"Read","b":50}
 {"i":3,"p":"proj","s":"s2","k":"shell","act":"git_commit","b":10}
@@ -49,84 +49,110 @@ func TestBurn_RanksByRenderCostDescending_When_MultipleKeysPresent(t *testing.T)
 	if len(res.Rows) != 2 {
 		t.Fatalf("len(Rows) = %d, want 2 (Read, sh:git_commit): %+v", len(res.Rows), res.Rows)
 	}
-	if res.Rows[0].Key != "sh:git_commit" {
-		t.Errorf("Rows[0].Key = %q, want %q (higher render cost ranks first)", res.Rows[0].Key, "sh:git_commit")
+	if res.Rows[0].Key != "Read" {
+		t.Errorf("Rows[0].Key = %q, want %q (more context bytes ranks first — shell chrome is not a cost)", res.Rows[0].Key, "Read")
 	}
-	if res.Rows[1].Key != "Read" {
-		t.Errorf("Rows[1].Key = %q, want %q", res.Rows[1].Key, "Read")
+	if res.Rows[1].Key != "sh:git_commit" {
+		t.Errorf("Rows[1].Key = %q, want %q", res.Rows[1].Key, "sh:git_commit")
 	}
-	// The byte ordering must remain *readable* even though it no longer ranks:
-	// the row that lost the ranking still carries the larger OutBytes.
-	if res.Rows[1].OutBytes <= res.Rows[0].OutBytes {
-		t.Errorf("expected the lower-ranked row to still show more out-bytes (byte columns stay visible): %+v", res.Rows)
+	// A shell call is priced exactly like a tool call: its bytes, nothing added.
+	if res.Rows[1].OutBytes != 35 {
+		t.Errorf("sh:git_commit OutBytes = %d, want 35 — no per-call chrome constant survives", res.Rows[1].OutBytes)
 	}
 }
 
-// TestBurn_ComputesRenderCost_When_KindAndBytesVary is the cost-model table:
-// per-kind chrome constants, the per-call preview cap, and the per-call
-// division into RenderPerCall. Each case is one key's worth of events so the
-// expected arithmetic stays inspectable.
-func TestBurn_ComputesRenderCost_When_KindAndBytesVary(t *testing.T) {
+// TestBurn_ChargesMeasuredBytes_When_KindAndVolumeVary is the cost table. It
+// asserts the PER-TOOL result caps that were actually measured, rather than the
+// single global 2048-byte cap ferret-cax applied to every key alike.
+//
+// The caps below are properties of the HARNESS, observed in the corpus, not
+// dials in this file. The harness truncates tool_result before the transcript
+// records it, so the recorded bytes are already post-cap: burn must charge them
+// whole. Re-applying a cap here would charge the same truncation twice, and no
+// single value could be right anyway — Bash and Read cap three orders of
+// magnitude apart.
+func TestBurn_ChargesMeasuredBytes_When_KindAndVolumeVary(t *testing.T) {
 	const (
-		toolChrome  = toolChromeLines * renderedLineBytes  // 80
-		shellChrome = shellChromeLines * renderedLineBytes // 480
+		// bashResultCap is the Bash tool_result ceiling: 30,000 characters.
+		// Max observed 29,723 over 60,550 calls, zero at or above 30,000
+		// (3,923-transcript corpus, ferret-noj).
+		bashResultCap = 30000
+		// bashResultMax is the largest Bash result the corpus actually holds.
+		bashResultMax = 29723
+		// readResultMax is the largest Read result observed over 13,236 calls
+		// (89,352 B / 1,672 lines). Read is NOT capped in practice — the
+		// 2,000-line default never bound — which is why one global cap was
+		// always wrong.
+		readResultMax = 89352
+		// retiredGlobalCap is ferret-cax's previewCapBytes. It discarded 53% of
+		// real bytes; every case below must exceed it and still be charged whole.
+		retiredGlobalCap = 2048
 	)
 	tests := []struct {
 		name          string
 		lines         string
 		key           string
-		wantRender    int
-		wantPerCall   float64
 		wantOutBytes  int
+		wantPerCall   float64
 		wantCallCount int
 	}{
 		{
-			name:          "tool call pays one collapsed line of chrome",
-			lines:         `{"i":1,"p":"proj","s":"s1","k":"tool","act":"Read","b":100}`,
-			key:           "Read",
-			wantRender:    toolChrome + 100,
-			wantPerCall:   toolChrome + 100,
-			wantOutBytes:  100,
-			wantCallCount: 1,
-		},
-		{
-			name:          "shell call pays the full command-echo-plus-classifier chrome",
+			name:          "a shell call is charged its bytes and no chrome",
 			lines:         `{"i":1,"p":"proj","s":"s1","k":"shell","act":"git_status","b":100}`,
 			key:           "sh:git_status",
-			wantRender:    shellChrome + 100,
-			wantPerCall:   shellChrome + 100,
 			wantOutBytes:  100,
+			wantPerCall:   100,
 			wantCallCount: 1,
 		},
 		{
-			name:          "output past the preview cap is collapsed, not charged",
-			lines:         `{"i":1,"p":"proj","s":"s1","k":"tool","act":"Read","b":999999}`,
+			name:          "a tool call is charged its bytes and no chrome",
+			lines:         `{"i":1,"p":"proj","s":"s1","k":"tool","act":"Read","b":100}`,
 			key:           "Read",
-			wantRender:    toolChrome + previewCapBytes,
-			wantPerCall:   toolChrome + previewCapBytes,
-			wantOutBytes:  999999,
+			wantOutBytes:  100,
+			wantPerCall:   100,
 			wantCallCount: 1,
 		},
 		{
-			name: "the preview cap applies per call, never to the summed total",
-			lines: `{"i":1,"p":"proj","s":"s1","k":"tool","act":"Read","b":999999}
-{"i":2,"p":"proj","s":"s1","k":"tool","act":"Read","b":999999}`,
+			name:          "a Bash result at its measured cap is charged whole, not clipped to the retired global cap",
+			lines:         `{"i":1,"p":"proj","s":"s1","k":"shell","act":"git_log","b":29723}`,
+			key:           "sh:git_log",
+			wantOutBytes:  bashResultMax,
+			wantPerCall:   bashResultMax,
+			wantCallCount: 1,
+		},
+		{
+			name:          "a Read result far past Bash's cap is charged whole — Read is uncapped in practice",
+			lines:         `{"i":1,"p":"proj","s":"s1","k":"tool","act":"Read","b":89352}`,
 			key:           "Read",
-			wantRender:    2 * (toolChrome + previewCapBytes),
-			wantPerCall:   toolChrome + previewCapBytes,
-			wantOutBytes:  1999998,
+			wantOutBytes:  readResultMax,
+			wantPerCall:   readResultMax,
+			wantCallCount: 1,
+		},
+		{
+			name: "repetition is priced by summing calls, never by a per-call constant",
+			lines: `{"i":1,"p":"proj","s":"s1","k":"tool","act":"Read","b":89352}
+{"i":2,"p":"proj","s":"s1","k":"tool","act":"Read","b":89352}`,
+			key:           "Read",
+			wantOutBytes:  2 * readResultMax,
+			wantPerCall:   readResultMax,
 			wantCallCount: 2,
 		},
 		{
-			name: "a zero-output shell call still costs its chrome",
+			name: "a zero-output shell call costs nothing — chrome was fabricated burn",
 			lines: `{"i":1,"p":"proj","s":"s1","k":"shell","act":"git_status"}
 {"i":2,"p":"proj","s":"s1","k":"shell","act":"git_status"}`,
 			key:           "sh:git_status",
-			wantRender:    2 * shellChrome,
-			wantPerCall:   shellChrome,
 			wantOutBytes:  0,
+			wantPerCall:   0,
 			wantCallCount: 2,
 		},
+	}
+
+	// Guard the guard: the caps must stay ordered the way the corpus measured
+	// them, or the cases above stop proving that no single cap fits.
+	if retiredGlobalCap >= bashResultMax || bashResultMax >= bashResultCap || bashResultCap >= readResultMax {
+		t.Fatalf("measured caps out of order: global=%d bashMax=%d bashCap=%d readMax=%d",
+			retiredGlobalCap, bashResultMax, bashResultCap, readResultMax)
 	}
 
 	for _, tt := range tests {
@@ -136,14 +162,11 @@ func TestBurn_ComputesRenderCost_When_KindAndBytesVary(t *testing.T) {
 				t.Fatal(err)
 			}
 			row := findBurnRow(t, res, tt.key)
-			if row.RenderCost != tt.wantRender {
-				t.Errorf("RenderCost = %d, want %d", row.RenderCost, tt.wantRender)
-			}
-			if row.RenderPerCall != tt.wantPerCall {
-				t.Errorf("RenderPerCall = %v, want %v", row.RenderPerCall, tt.wantPerCall)
-			}
 			if row.OutBytes != tt.wantOutBytes {
-				t.Errorf("OutBytes = %d, want %d (byte accounting must be untouched by the model)", row.OutBytes, tt.wantOutBytes)
+				t.Errorf("OutBytes = %d, want %d", row.OutBytes, tt.wantOutBytes)
+			}
+			if row.BytesPerCall != tt.wantPerCall {
+				t.Errorf("BytesPerCall = %v, want %v", row.BytesPerCall, tt.wantPerCall)
 			}
 			if row.Calls != tt.wantCallCount {
 				t.Errorf("Calls = %d, want %d", row.Calls, tt.wantCallCount)
@@ -152,13 +175,9 @@ func TestBurn_ComputesRenderCost_When_KindAndBytesVary(t *testing.T) {
 	}
 }
 
-// TestBurn_BreaksRenderTiesOnBytesThenKey_When_CostsMatch pins the two-deep
-// tie-break that keeps repeated runs byte-stable: equal render cost falls to
-// out-bytes descending, and an equal-on-both pair falls to key ascending.
-func TestBurn_BreaksRenderTiesOnBytesThenKey_When_CostsMatch(t *testing.T) {
-	// Three tool keys, one call each. alpha/beta are identical on both cost
-	// columns (key breaks the tie); gamma matches their render cost but is
-	// capped, so it carries far more out-bytes and must outrank both.
+// TestBurn_BreaksByteTiesOnKey_When_CostsMatch pins the tie-break that keeps
+// repeated runs byte-stable: equal context bytes falls to key ascending.
+func TestBurn_BreaksByteTiesOnKey_When_CostsMatch(t *testing.T) {
 	lines := `{"i":1,"p":"proj","s":"s1","k":"tool","act":"beta","b":2048}
 {"i":2,"p":"proj","s":"s1","k":"tool","act":"alpha","b":2048}
 {"i":3,"p":"proj","s":"s1","k":"tool","act":"gamma","b":900000}
@@ -174,7 +193,7 @@ func TestBurn_BreaksRenderTiesOnBytesThenKey_When_CostsMatch(t *testing.T) {
 	want := []string{"gamma", "alpha", "beta"}
 	for i := range want {
 		if i >= len(got) || got[i] != want[i] {
-			t.Fatalf("row order = %v, want %v (render tie → out-bytes desc → key asc)", got, want)
+			t.Fatalf("row order = %v, want %v (bytes desc → key asc)", got, want)
 		}
 	}
 }
@@ -292,7 +311,7 @@ func TestBurn_RoundTripsThroughJSON_When_ResultMarshaled(t *testing.T) {
 	for i := range res.Rows {
 		if got.Rows[i].Key != res.Rows[i].Key || got.Rows[i].OutBytes != res.Rows[i].OutBytes ||
 			got.Rows[i].Calls != res.Rows[i].Calls || got.Rows[i].Sessions != res.Rows[i].Sessions ||
-			got.Rows[i].RenderCost != res.Rows[i].RenderCost || got.Rows[i].RenderPerCall != res.Rows[i].RenderPerCall {
+			got.Rows[i].BytesPerCall != res.Rows[i].BytesPerCall {
 			t.Errorf("round-tripped Rows[%d] = %+v, want %+v", i, got.Rows[i], res.Rows[i])
 		}
 	}
@@ -312,12 +331,12 @@ func TestBurn_ReturnsError_When_EventsPathMissing(t *testing.T) {
 	}
 }
 
-// TestBurn_ChargesAttachmentsFullBytes_When_PayloadExceedsPreviewCap pins the
-// ferret-rfc exemption: an attachment does not fold behind a preview, so the
-// 2048-byte cap must not apply to it. A real skill_listing averages 20,321
-// bytes; capping it would rank the corpus's second-largest context injector at
-// roughly a tenth of its cost.
-func TestBurn_ChargesAttachmentsFullBytes_When_PayloadExceedsPreviewCap(t *testing.T) {
+// TestBurn_ChargesAttachmentsFullBytes_When_PayloadIsLarge pins the ferret-rfc
+// coverage: an attachment enters context whole, so it is charged whole. Under
+// ferret-cax this needed an explicit exemption from the 2048-byte preview cap;
+// ferret-noj deleted the cap for every kind, so the exemption is now the rule
+// and this test guards against a cap creeping back in.
+func TestBurn_ChargesAttachmentsFullBytes_When_PayloadIsLarge(t *testing.T) {
 	const big = 20321 // measured mean skill_listing size over 3,617 records
 	path := writeBurnFixture(t, `{"i":1,"s":"s1","k":"attach","act":"skill_listing","b":20321}
 `)
@@ -332,8 +351,8 @@ func TestBurn_ChargesAttachmentsFullBytes_When_PayloadExceedsPreviewCap(t *testi
 	if got.Key != "at:skill_listing" {
 		t.Errorf("key = %q, want at:skill_listing (prefixed so a class cannot collide with a tool name)", got.Key)
 	}
-	if got.RenderCost != big {
-		t.Errorf("RenderCost = %d, want %d — attachments are exempt from previewCapBytes and from chrome", got.RenderCost, big)
+	if got.OutBytes != big {
+		t.Errorf("OutBytes = %d, want %d — an attachment is charged the bytes it injected", got.OutBytes, big)
 	}
 }
 

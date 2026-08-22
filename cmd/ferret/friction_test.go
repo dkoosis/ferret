@@ -15,13 +15,13 @@ import (
 // internal/mine/friction_test.go; these pin the CLI render layer.
 func wasteReport() mine.WasteReport {
 	return mine.WasteReport{
-		Events: 40, Sessions: 6, TotalWasted: 1900, TotalRender: 9000,
+		Events: 40, Sessions: 6, TotalWasted: 1900, TotalBytes: 9000,
 		BySource: map[mine.WasteSource]int{mine.WasteRepeat: 1200, mine.WasteFail: 500, mine.WasteMotif: 200},
 		Rows: []mine.WasteRow{
 			{Key: "sh:git_status", Source: mine.WasteRepeat, WastedBytes: 1200, Occurrences: 9,
-				Sessions: 3, RenderCost: 4000, RenderPerCall: 133, Detail: "git status --short"},
+				Sessions: 3, GrossBytes: 4000, BytesPerCall: 133, Detail: "git status --short"},
 			{Key: "Edit", Source: mine.WasteFail, WastedBytes: 500, Occurrences: 5,
-				Sessions: 2, RenderCost: 5000, RenderPerCall: 100},
+				Sessions: 2, GrossBytes: 5000, BytesPerCall: 100},
 			{Key: "Read ⇝ Edit", Source: mine.WasteMotif, WastedBytes: 200, Occurrences: 4, Sessions: 2},
 		},
 	}
@@ -60,14 +60,14 @@ func TestWriteFrictionText_RanksWasteFirstInTheEyePath_When_RowsAreMixedSources(
 // The header carries the corpus size for scale — a waste figure with nothing
 // beside it can't tell a reader whether it's worth a fix. It is context, not a
 // denominator: see the upper-bound test below.
-func TestWriteFrictionText_ReportsRenderedTotalForScale_When_CorpusIsScored(t *testing.T) {
+func TestWriteFrictionText_ReportsGrossTotalForScale_When_CorpusIsScored(t *testing.T) {
 	var buf bytes.Buffer
 	if err := writeFrictionText(&buf, wasteReport(), 0, 0); err != nil {
 		t.Fatalf("writeFrictionText: %v", err)
 	}
 	hdr := frictionRowsOut(t, buf.String())
-	if !strings.Contains(hdr, "rendered=8.8KB") {
-		t.Errorf("header missing the corpus rendered total\n---\n%s", hdr)
+	if !strings.Contains(hdr, "gross=8.8KB") {
+		t.Errorf("header missing the corpus gross total\n---\n%s", hdr)
 	}
 }
 
@@ -146,13 +146,13 @@ func TestFilterWasteReport_ReDerivesTotals_When_SourceIsSet(t *testing.T) {
 	if got.BySource[mine.WasteFail] != 0 || got.BySource[mine.WasteRepeat] != 1200 {
 		t.Errorf("bySource = %v, want only the poll subtotal", got.BySource)
 	}
-	if got.TotalRender != 9000 {
-		t.Errorf("totalRender = %d, want the corpus denominator untouched", got.TotalRender)
+	if got.TotalBytes != 9000 {
+		t.Errorf("totalBytes = %d, want the corpus denominator untouched", got.TotalBytes)
 	}
 }
 
 // The detectors overlap, so the sum is an upper bound. The header must not
-// present it as a share of the rendered total, and must show the split that IS
+// present it as a share of the corpus total, and must show the split that IS
 // sound.
 func TestWriteFrictionText_LabelsWasteAsUpperBoundWithSplit_When_SourcesOverlap(t *testing.T) {
 	var buf bytes.Buffer
@@ -164,7 +164,7 @@ func TestWriteFrictionText_LabelsWasteAsUpperBoundWithSplit_When_SourcesOverlap(
 		t.Errorf("total must be marked an upper bound\n---\n%s", hdr)
 	}
 	if strings.Contains(hdr, "waste=1.9KB of") {
-		t.Errorf("total must not read as a fraction of the rendered corpus\n---\n%s", hdr)
+		t.Errorf("total must not read as a fraction of the corpus total\n---\n%s", hdr)
 	}
 	for _, want := range []string{"poll 1.2KB", "misfire 500B", "motif 200B"} {
 		if !strings.Contains(hdr, want) {

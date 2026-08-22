@@ -65,7 +65,7 @@ type status struct {
 	Events   int             `json:"events,omitempty"`
 	Sessions int             `json:"sessions,omitempty"`
 	Waste    int             `json:"wasteBytes,omitempty"`
-	Render   int             `json:"renderBytes,omitempty"`
+	Gross    int             `json:"grossBytes,omitempty"`
 	Top      []mine.WasteRow `json:"top,omitempty"`
 }
 
@@ -90,7 +90,7 @@ func readStatus(c *common) status {
 		return st
 	}
 	st.Events, st.Sessions = rep.Events, rep.Sessions
-	st.Waste, st.Render = rep.TotalWasted, rep.TotalRender
+	st.Waste, st.Gross = rep.TotalWasted, rep.TotalBytes
 	st.Top = rep.Rows
 	if len(st.Top) > statusTop {
 		st.Top = st.Top[:statusTop]
@@ -127,9 +127,9 @@ func writeStatusText(w io.Writer, st status, maxBytes int) error {
 	sink.Head("ferret %s · %d events · %d sessions · built %s%s",
 		st.Data, st.Events, st.Sessions, st.BuiltAt.Format(time.RFC3339), staleMark(st))
 	// waste≤: the detectors overlap, so the sum is an upper bound, never a
-	// share of the rendered total (internal/mine/friction.go's WasteReport).
-	sink.Head("waste≤%s of %s rendered — top %d:",
-		humanBytes(st.Waste), humanBytes(st.Render), len(st.Top))
+	// share of the corpus total (internal/mine/friction.go's WasteReport).
+	sink.Head("waste≤%s of %s context bytes — top %d:",
+		humanBytes(st.Waste), humanBytes(st.Gross), len(st.Top))
 	// Rows go through Row, not Head, so --max-bytes actually caps this command
 	// (contract: a hard output budget that some lines ignore is not a budget).
 	for i := range st.Top {

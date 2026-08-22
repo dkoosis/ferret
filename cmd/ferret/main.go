@@ -323,7 +323,7 @@ var CLI struct {
 
 	Friction FrictionCmd `cmd:"" help:"One ranked table of estimated wasted bytes — polling, misfires and motif findings merged, priced by burn." name:"friction"`
 
-	Burn BurnCmd `cmd:"" help:"Ranked corpus-wide render-cost burn per normalized command (the tune-up list)."`
+	Burn BurnCmd `cmd:"" help:"Ranked corpus-wide context-byte burn per normalized command (the tune-up list)."`
 
 	Misfires MisfiresCmd `cmd:"" help:"Rank repeated command misfires + repair pairs corpus-wide."`
 
@@ -507,7 +507,7 @@ func main() {
 				"  ferret gates    [--data DIR] [--format text|json]   (overlap ratio ω over review-gate rejections)\n"+
 				"  ferret status   [--data DIR] [--format text|json]   (corpus health + heaviest waste — what bare `ferret` runs)\n"+
 				"  ferret friction [--data DIR] [--source poll|misfire|motif] [--no-motifs] [--format text|json]   (ONE waste-ranked table: polling + misfires + motifs, priced by burn)\n"+
-				"  ferret burn     [--data DIR] [--format text|json]   (ranked render-cost burn per normalized command)\n"+
+				"  ferret burn     [--data DIR] [--format text|json]   (ranked context-byte burn per normalized command)\n"+
 				"  ferret misfires [--data DIR] [--format text|json]   (repeated command failures + repair pairs)\n"+
 				"  ferret polling  [--data DIR] [--format text|json]   (exact-duplicate commands repeated within a session)\n"+
 				"  ferret retrieval  [--session PREFIX] [--format text|json]   (get_nug search quality: RU + Q/R/C)\n"+

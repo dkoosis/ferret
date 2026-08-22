@@ -121,7 +121,7 @@ func validateWasteSource(src string) error {
 // reporting misfire waste. Per-source subtotals are re-derived too, so the
 // breakdown always describes the rows on screen.
 //
-// TotalRender is left alone on purpose: it is the corpus denominator, not a
+// TotalBytes is left alone on purpose: it is the corpus denominator, not a
 // property of the selected rows.
 func filterWasteReport(rep mine.WasteReport, src mine.WasteSource) mine.WasteReport {
 	kept := rep.Rows[:0]
@@ -155,7 +155,7 @@ func writeFrictionJSON(w io.Writer, rep mine.WasteReport, limit int) error {
 		keyRows:       rows,
 		"totalWasted": rep.TotalWasted,
 		"bySource":    rep.BySource,
-		"totalRender": rep.TotalRender,
+		"totalBytes":  rep.TotalBytes,
 		"events":      rep.Events,
 		keySessions:   rep.Sessions,
 		keyTotal:      total,
@@ -171,21 +171,22 @@ func writeFrictionText(w io.Writer, rep mine.WasteReport, limit, maxBytes int) e
 	defer sink.Close()
 	about(sink,
 		"≡ friction: the four detectors (polling, misfires, motif findings, burn) merged into one",
-		"≡ ranking. waste = modeled rendered bytes spent on calls that bought nothing: repeats past",
+		"≡ ranking. waste = context bytes spent on calls that bought nothing: repeats past",
 		"≡ the first per session (poll), calls that failed (misfire), motif occurrences past the",
 		"≡ first per session (motif). burn contributes no rows of its own — it prices the others,",
-		"≡ and each row carries its key's GROSS cost beside the waste. A model, not a measurement",
-		"≡ (ccp-3s1c); swallowed-error rows are excluded because a swallow count is a floor, not a count.",
+		"≡ and each row carries its key's GROSS bytes beside the waste. The price is measured; which",
+		"≡ occurrences bought nothing is the detectors' judgment. Swallowed-error rows are excluded",
+		"≡ because a swallow count is a floor, not a count.",
 		"≡ The per-source subtotals are sound; their SUM is an upper bound, because the detectors",
 		"≡ overlap (one failing repeated command is charged by both poll and misfire, and a motif",
-		"≡ can charge the same calls again). ✗ read it as a share of the rendered total.")
+		"≡ can charge the same calls again). ✗ read it as a share of the corpus total.")
 	// Legal moves, not a plan (DK-AXI rule 11): each detector's own command
 	// holds the detail this table summarizes. Head-style so the hints survive
 	// row truncation — the truncated case is when a reader most needs them.
 	sink.NextHead("ferret polling", "ferret misfires", "ferret report --kind friction", "ferret burn")
-	sink.Head("friction rows=%d waste≤%s [%s]  rendered=%s  events=%d sessions=%d",
+	sink.Head("friction rows=%d waste≤%s [%s]  gross=%s  events=%d sessions=%d",
 		len(rep.Rows), humanBytes(rep.TotalWasted), wasteSplit(rep),
-		humanBytes(rep.TotalRender), rep.Events, rep.Sessions)
+		humanBytes(rep.TotalBytes), rep.Events, rep.Sessions)
 	if len(rep.Rows) == 0 {
 		sink.Head("0 rows — no estimable waste in this corpus")
 		return nil
@@ -198,7 +199,7 @@ func writeFrictionText(w io.Writer, rep mine.WasteReport, limit, maxBytes int) e
 	for i := range rep.Rows {
 		r := &rep.Rows[i]
 		sink.Row("%10s waste  %5dx  %4d sess  %10s gross  %-8s %s%s",
-			humanBytes(r.WastedBytes), r.Occurrences, r.Sessions, humanBytes(r.RenderCost),
+			humanBytes(r.WastedBytes), r.Occurrences, r.Sessions, humanBytes(r.GrossBytes),
 			r.Source, r.Key, detailSuffix(r.Detail))
 	}
 	return nil

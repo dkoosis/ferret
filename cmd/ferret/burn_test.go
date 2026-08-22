@@ -14,19 +14,17 @@ import (
 // cost) is pinned in internal/mine/burn_test.go; these tests pin the CLI
 // render layer.
 //
-// Rows are in miner order, which since ferret-cax is render-cost descending:
-// the 3-call shell key leads on 1475 modeled rendered bytes despite carrying
-// only 35 out-bytes, and the 2-call tool key trails on 310 rend despite
-// carrying 150 out-bytes. The writer must print that order verbatim.
+// Rows are in miner order, which since ferret-noj is context-bytes descending:
+// the 2-call tool key leads on 150 bytes and the 3-call shell key trails on 35.
+// The writer must print that order verbatim — no re-sorting in the render
+// layer, which is what makes the miner the single home of the ranking.
 func burnResult() *mine.BurnResult {
 	return &mine.BurnResult{
 		Events:   5,
 		Sessions: 3,
 		Rows: []mine.BurnRow{
-			{Key: "sh:git_commit", OutBytes: 35, Calls: 3, BytesPerCall: 35.0 / 3.0, Sessions: 2,
-				RenderCost: 1475, RenderPerCall: 1475.0 / 3.0},
-			{Key: "Read", OutBytes: 150, Calls: 2, BytesPerCall: 75, Sessions: 1,
-				RenderCost: 310, RenderPerCall: 155},
+			{Key: "Read", OutBytes: 150, Calls: 2, BytesPerCall: 75, Sessions: 1},
+			{Key: "sh:git_commit", OutBytes: 35, Calls: 3, BytesPerCall: 35.0 / 3.0, Sessions: 2},
 		},
 	}
 }
@@ -60,29 +58,29 @@ func TestWriteBurnText_RendersRankedRows_When_ResultHasRows(t *testing.T) {
 	rowsOut := burnRowsOut(t, out)
 	gitIdx := strings.Index(rowsOut, "sh:git_commit")
 	readIdx := strings.Index(rowsOut, "Read")
-	if gitIdx < 0 || readIdx < 0 || gitIdx > readIdx {
-		t.Errorf("expected sh:git_commit row before Read row (render-cost rank order)\n---\n%s", rowsOut)
+	if gitIdx < 0 || readIdx < 0 || readIdx > gitIdx {
+		t.Errorf("expected Read row before sh:git_commit row (context-byte rank order)\n---\n%s", rowsOut)
 	}
 }
 
-// TestWriteBurnText_ShowsRenderAndByteColumns_When_ResultHasRows pins the
-// both-orderings-readable requirement: the ranking column is labeled and the
-// out-byte columns survive beside it, so a reader can see that the row leading
-// on render is not the row leading on bytes.
-func TestWriteBurnText_ShowsRenderAndByteColumns_When_ResultHasRows(t *testing.T) {
+// TestWriteBurnText_ShowsByteAndPerCallColumns_When_ResultHasRows pins the
+// columns a tune-up decision reads: the gross byte total that ranks, and the
+// per-call toll that says whether the fix is "call it less" or "make each call
+// cheaper". Those two disagree whenever a cheap command is called constantly.
+func TestWriteBurnText_ShowsByteAndPerCallColumns_When_ResultHasRows(t *testing.T) {
 	var buf bytes.Buffer
 	if err := writeBurnText(&buf, burnResult(), 0, 0); err != nil {
 		t.Fatalf("writeBurnText: %v", err)
 	}
 	rowsOut := burnRowsOut(t, buf.String())
-	for _, want := range []string{"rend", "out", "calls", "sess"} {
+	for _, want := range []string{"bytes", "/call", "calls", "sess"} {
 		if !strings.Contains(rowsOut, want) {
 			t.Errorf("rendered rows missing %q column label\n---\n%s", want, rowsOut)
 		}
 	}
-	// The leading row's render total (1475 → 1.4KB) and the trailing row's
-	// larger out-byte total (150 → 150B) must both be legible in one table.
-	for _, want := range []string{"1.4KB", "150B"} {
+	// The leading row's gross total (150B) and the trailing row's much smaller
+	// one (35B) must both be legible in one table.
+	for _, want := range []string{"150B", "35B"} {
 		if !strings.Contains(rowsOut, want) {
 			t.Errorf("rendered rows missing value %q\n---\n%s", want, rowsOut)
 		}
@@ -91,8 +89,8 @@ func TestWriteBurnText_ShowsRenderAndByteColumns_When_ResultHasRows(t *testing.T
 
 // TestWriteBurnText_RespectsLimit_When_LimitBelowRowCount pins that --limit
 // caps rendered rows and the sink reports the truncation. The surviving row is
-// the top-ranked one (sh:git_commit), so the cap drops Read — the limit-cap
-// discipline rides on the miner's order, unchanged by ferret-cax.
+// the top-ranked one (Read), so the cap drops sh:git_commit — the limit-cap
+// discipline rides on the miner's order, which it never re-derives.
 func TestWriteBurnText_RespectsLimit_When_LimitBelowRowCount(t *testing.T) {
 	var buf bytes.Buffer
 	if err := writeBurnText(&buf, burnResult(), 1, 0); err != nil {
@@ -100,11 +98,11 @@ func TestWriteBurnText_RespectsLimit_When_LimitBelowRowCount(t *testing.T) {
 	}
 	out := buf.String()
 	rowsOut := burnRowsOut(t, out)
-	if strings.Contains(rowsOut, "Read") {
-		t.Errorf("expected Read row suppressed by --limit=1\n---\n%s", rowsOut)
+	if strings.Contains(rowsOut, "sh:git_commit") {
+		t.Errorf("expected sh:git_commit row suppressed by --limit=1\n---\n%s", rowsOut)
 	}
-	if !strings.Contains(rowsOut, "sh:git_commit") {
-		t.Errorf("expected top-ranked sh:git_commit row to survive --limit=1\n---\n%s", rowsOut)
+	if !strings.Contains(rowsOut, "Read") {
+		t.Errorf("expected top-ranked Read row to survive --limit=1\n---\n%s", rowsOut)
 	}
 	if !strings.Contains(out, "more") {
 		t.Errorf("expected truncation notice from out.Sink\n---\n%s", out)
@@ -142,18 +140,18 @@ func TestWriteBurnJSON_RoundTrips_When_ResultEncoded(t *testing.T) {
 	if !ok {
 		t.Fatalf("rows[0] is not an object: %v", rows[0])
 	}
-	for _, col := range []string{"key", "outBytes", "calls", "bytesPerCall", "sessions", "renderCost", "renderPerCall"} {
+	for _, col := range []string{"key", "outBytes", "calls", "bytesPerCall", "sessions"} {
 		if _, ok := row[col]; !ok {
 			t.Errorf("row missing column %q: %v", col, row)
 		}
 	}
-	// The one surviving row under limit=1 is the render-cost leader, not the
-	// out-byte leader — the JSON cap consumes the miner's order as-is.
-	if key, _ := row["key"].(string); key != "sh:git_commit" {
-		t.Errorf(`rows[0]["key"] = %v, want "sh:git_commit" (render-cost rank leader)`, row["key"])
+	// The one surviving row under limit=1 is the miner's rank leader — the JSON
+	// cap consumes the miner's order as-is rather than re-deriving it.
+	if key, _ := row["key"].(string); key != "Read" {
+		t.Errorf(`rows[0]["key"] = %v, want "Read" (context-byte rank leader)`, row["key"])
 	}
-	if rc, ok := row["renderCost"].(float64); !ok || rc != 1475 {
-		t.Errorf(`rows[0]["renderCost"] = %v, want 1475`, row["renderCost"])
+	if b, ok := row["outBytes"].(float64); !ok || b != 150 {
+		t.Errorf(`rows[0]["outBytes"] = %v, want 150`, row["outBytes"])
 	}
 }
 
