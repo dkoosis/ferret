@@ -59,11 +59,6 @@
 
 set -euo pipefail
 
-# Prefer the repository's pinned sandbox binary over an unrelated executable
-# earlier on PATH. Codex images prepend mise-managed tools to PATH, so copying
-# the pinned binary to /usr/local/bin during setup does not necessarily make it
-# the binary this wrapper executes. Local development and CI still fall back to
-# PATH when the platform-specific sandbox binary is absent.
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 repo_dir="$(cd "$script_dir/.." && pwd)"
 case "$(uname -m)" in
@@ -72,13 +67,6 @@ case "$(uname -m)" in
   *) sandbox_arch="" ;;
 esac
 bundled_lint="$repo_dir/.sandbox/bin/linux-$sandbox_arch/golangci-lint"
-if [ -n "${GOLANGCILINT_BIN:-}" ]; then
-  lint_bin="$GOLANGCILINT_BIN"
-elif [ -n "$sandbox_arch" ] && [ -x "$bundled_lint" ]; then
-  lint_bin="$bundled_lint"
-else
-  lint_bin="golangci-lint"
-fi
 
 # Key the mutex to the cache golangci-lint actually contends on. The dir only
 # needs to be a stable machine-global path; resolve it cheaply without spawning
@@ -129,6 +117,51 @@ notify() {
   { echo "$*" >/dev/tty; } 2>/dev/null || echo "$*" >&2
 }
 
+# ---------------------------------------------------------------------------
+# Which golangci-lint actually runs (ferret sandbox self-audit, 2026-08-22)
+#
+# The PIN is the gate; whichever binary sits earliest on PATH is not. The Codex
+# image prepends mise-managed tool dirs, so `golangci-lint` there resolved to
+# 2.1.6 (built with Go 1.24), which refuses to lint a Go 1.26 module — a hard
+# `make check` failure with nothing wrong in the tree. Copying the pinned binary
+# to /usr/local/bin at setup does not win that race.
+#
+# So: check what we resolved against the pin, and when it does not match, run
+# the pinned module through `go run` (the ../itzy model) — version correctness
+# then never depends on PATH order, on any platform, including a dev Mac where
+# no linux prebuilt exists.
+#
+# Order: $GOLANGCILINT_BIN (explicit override, unchecked) > committed sandbox
+# prebuilt > PATH binary whose version matches the pin > `go run <pkg>@<pin>`.
+lint_cmd=()
+resolve_lint_cmd() {
+  local pin="" path_ver=""
+  pin="$(sed -n 's/^GOLANGCI_LINT_VERSION=//p' "$repo_dir/.sandbox/project.conf" 2>/dev/null | head -1)" || pin=""
+
+  if [ -n "${GOLANGCILINT_BIN:-}" ]; then
+    lint_cmd=("$GOLANGCILINT_BIN")
+    return
+  fi
+  if [ -n "$sandbox_arch" ] && [ -x "$bundled_lint" ]; then
+    lint_cmd=("$bundled_lint")
+    return
+  fi
+  # No pin to compare against: PATH is all we have, and a missing project.conf
+  # must not turn linting into a network fetch.
+  if [ -z "$pin" ]; then
+    lint_cmd=(golangci-lint)
+    return
+  fi
+  path_ver="$(golangci-lint --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" || path_ver=""
+  if [ -n "$path_ver" ] && [ "$path_ver" = "${pin#v}" ]; then
+    lint_cmd=(golangci-lint)
+    return
+  fi
+  notify "lint-locked: PATH golangci-lint is ${path_ver:-absent}, repo pins ${pin} — running \`go run ...@${pin}\` instead."
+  lint_cmd=(go run "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${pin}")
+}
+resolve_lint_cmd
+
 waited=0
 until mkdir "$lock_dir" 2>/dev/null; do
   # Stale-lock recovery: a crashed holder leaves the dir forever. Reclaim it
@@ -171,7 +204,7 @@ trap cleanup EXIT
 # Anything but `run` goes straight through: --allow-parallel-runners and the
 # JSON probe are both `run`-only flags.
 if [ "${1:-}" != "run" ]; then
-  "$lint_bin" "$@"
+  "${lint_cmd[@]}" "$@"
   exit $?
 fi
 shift
@@ -253,7 +286,7 @@ rc=0
 run_golangci() {
   # `set +e` around the call: findings are exit 1 and must not abort us.
   set +e
-  "$lint_bin" run --allow-parallel-runners "$@"
+  "${lint_cmd[@]}" run --allow-parallel-runners "$@"
   rc=$?
   set -e
 }
@@ -267,7 +300,7 @@ run_golangci() {
 # anyway, so buffering costs no useful interactivity.
 run_golangci_probed() {
   set +e
-  "$lint_bin" run --allow-parallel-runners \
+  "${lint_cmd[@]}" run --allow-parallel-runners \
     --output.text.path=stdout --output.json.path="$probe_json" "$@" \
     >"$probe_out" 2>"$probe_err"
   rc=$?
@@ -320,7 +353,7 @@ fi
 
 notify "lint-locked: findings cite $(printf '%s\n' "$ghosts" | wc -l | tr -d ' ') path(s) absent from disk (e.g. $(printf '%s\n' "$ghosts" | head -1))."
 notify "lint-locked: that is golangci-lint replaying cached results recorded under a since-deleted path (a removed worktree/checkout). Remedy: golangci-lint cache clean. Doing it now, retrying ONCE — the report above is discarded as untrustworthy."
-"$lint_bin" cache clean
+"${lint_cmd[@]}" cache clean
 
 # Exactly one retry, on a cold cache. Its exit code is the verdict, whatever it
 # is: a still-red gate stays red. There is no second heal and no loop.

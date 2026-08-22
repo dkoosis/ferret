@@ -1,6 +1,6 @@
 # Ferret Makefile — strict QA gates, pattern from ~/Projects/trixi.
 #
-# Primary: check (vet+lint+test+build) | audit (check+race+vuln+dupe+nilcheck)
+# Primary: check (vet+lint+test+build) | audit (check+race+fuzz+dupe+nilcheck+vuln)
 
 .DEFAULT_GOAL := check
 
@@ -22,7 +22,7 @@ GOLANGCILINT := bash scripts/lint-locked
 help: ## Show this help
 	@printf '\n\033[1mFour verbs. Identical in every dkoosis repo.\033[0m\n\n'
 	@printf '  \033[36mcheck \033[0m  fast gate — vet + lint + test + build. Pre-commit; required in CI.\n'
-	@printf '  \033[36maudit \033[0m  check, plus race + fuzz + vuln + dupe + nilcheck. Before you ask for review.\n'
+	@printf '  \033[36maudit \033[0m  check, plus race + fuzz + dupe + nilcheck + vuln. Before you ask for review.\n'
 	@printf '  \033[36mdeploy\033[0m  build + install this tool locally.\n'
 	@printf '  \033[36mhelp  \033[0m  this text.\n\n'
 	@printf 'Everything below is an internal step of one of those four. Call the verbs.\n\n'
@@ -36,7 +36,10 @@ FUZZTIME ?= 30s
 fuzz: ## Fuzz the parsers (FUZZTIME=30s)
 	go test -run '^$$' -fuzz '^FuzzSplit$$' -fuzztime=$(FUZZTIME) ./internal/shellnorm
 
-audit: check race fuzz vuln dupe nilcheck ## Exhaustive validation
+# vuln runs LAST: govulncheck needs vuln.go.dev, and a sandbox that blocks that
+# egress used to abort audit before dupe/nilcheck ever ran (sandbox self-audit,
+# 2026-08-22). Network-independent gates now all report before the network one.
+audit: check race fuzz dupe nilcheck vuln ## Exhaustive validation
 	@echo "=== audit pass ==="
 
 vet: ## Run go vet
