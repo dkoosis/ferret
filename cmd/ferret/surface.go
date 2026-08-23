@@ -158,6 +158,27 @@ func escalatedToModel(cmd string) bool {
 	return false
 }
 
+// emitPromptOnly reports whether the invoked command's own --emit-prompt flag
+// is set, for the three commands that ship one. Each assembles and prints its
+// prompt, then returns before touching the analyst — a genuinely offline,
+// zero-cost dry run that predates this guard (adjudicate.go:82,
+// overinitiative.go:285, retrieval_hop1.go:48). guardOffline must not block
+// it: a shell profile that sets FERRET_OFFLINE=1 to prevent an accidental
+// paid call should not also disable the flag documented as "no API key
+// needed".
+func emitPromptOnly(cmd string) bool {
+	switch cmd {
+	case "adjudicate":
+		return CLI.Adjudicate.EmitPrompt
+	case "over-initiative":
+		return CLI.OverInitiative.EmitPrompt
+	case "retrieval":
+		return CLI.Retrieval.EmitPrompt
+	default:
+		return false
+	}
+}
+
 // guardOffline refuses a model-backed command before it does any work.
 //
 // This is a USAGE error, not a run failure: the command was well-formed and the
@@ -170,6 +191,9 @@ func guardOffline(cmd string) error {
 		return nil
 	}
 	if !s.callsModel(escalatedToModel(cmd)) {
+		return nil
+	}
+	if emitPromptOnly(cmd) {
 		return nil
 	}
 	if !CLI.Offline && !analyst.EnvOfflineSet() {
