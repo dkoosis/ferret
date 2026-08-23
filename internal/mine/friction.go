@@ -114,7 +114,7 @@ func MergeWaste(burn *BurnResult, mis MisfireReport, poll PollingReport, corpus 
 	price := priceIndex(burn)
 	rep := WasteReport{Events: burn.Events, Sessions: burn.Sessions}
 	for i := range burn.Rows {
-		rep.TotalBytes += burn.Rows[i].OutBytes
+		rep.TotalBytes += burn.Rows[i].Bytes
 	}
 
 	rows := make([]WasteRow, 0, len(poll.Rows)+len(mis.Rows)+len(motifs))
@@ -236,7 +236,7 @@ func applyPrice(row *WasteRow, price map[string]*BurnRow, n float64) {
 	if !ok {
 		return
 	}
-	row.GrossBytes = b.OutBytes
+	row.GrossBytes = b.Bytes
 	row.BytesPerCall = b.BytesPerCall
 	row.WastedBytes = int(n * b.BytesPerCall)
 }

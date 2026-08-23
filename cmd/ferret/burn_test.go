@@ -23,8 +23,8 @@ func burnResult() *mine.BurnResult {
 		Events:   5,
 		Sessions: 3,
 		Rows: []mine.BurnRow{
-			{Key: "Read", OutBytes: 150, Calls: 2, BytesPerCall: 75, Sessions: 1},
-			{Key: "sh:git_commit", OutBytes: 35, Calls: 3, BytesPerCall: 35.0 / 3.0, Sessions: 2},
+			{Key: "Read", Bytes: 150, Calls: 2, BytesPerCall: 75, Sessions: 1},
+			{Key: "sh:git_commit", Bytes: 35, Calls: 3, BytesPerCall: 35.0 / 3.0, Sessions: 2},
 		},
 	}
 }
@@ -140,7 +140,7 @@ func TestWriteBurnJSON_RoundTrips_When_ResultEncoded(t *testing.T) {
 	if !ok {
 		t.Fatalf("rows[0] is not an object: %v", rows[0])
 	}
-	for _, col := range []string{"key", "outBytes", "calls", "bytesPerCall", "sessions"} {
+	for _, col := range []string{"key", "bytes", "calls", "bytesPerCall", "sessions"} {
 		if _, ok := row[col]; !ok {
 			t.Errorf("row missing column %q: %v", col, row)
 		}
@@ -150,8 +150,8 @@ func TestWriteBurnJSON_RoundTrips_When_ResultEncoded(t *testing.T) {
 	if key, _ := row["key"].(string); key != "Read" {
 		t.Errorf(`rows[0]["key"] = %v, want "Read" (context-byte rank leader)`, row["key"])
 	}
-	if b, ok := row["outBytes"].(float64); !ok || b != 150 {
-		t.Errorf(`rows[0]["outBytes"] = %v, want 150`, row["outBytes"])
+	if b, ok := row["bytes"].(float64); !ok || b != 150 {
+		t.Errorf(`rows[0]["bytes"] = %v, want 150`, row["bytes"])
 	}
 }
 

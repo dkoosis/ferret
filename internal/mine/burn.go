@@ -15,8 +15,8 @@ import (
 // (chrome, folds, wrapping, terminal width) is a display artifact with no
 // context cost and is out of scope (ferret-noj, dk 2026-08-14).
 type BurnRow struct {
-	Key          string  `json:"key"`      // shellnorm/tool key: "sh:git_commit", "Read", "at:skill_listing", ...
-	OutBytes     int     `json:"outBytes"` // summed per-event measured context bytes — the ranking key
+	Key          string  `json:"key"`   // shellnorm/tool key: "sh:git_commit", "Read", "at:skill_listing", ...
+	Bytes        int     `json:"bytes"` // summed per-event measured context bytes (InBytes+OutBytes) — the ranking key
 	Calls        int     `json:"calls"`
 	BytesPerCall float64 `json:"bytesPerCall"` // the per-call toll a "should I stop running this?" decision turns on
 	Sessions     int     `json:"sessions"`
@@ -63,8 +63,8 @@ type BurnResult struct {
 //
 // There are no calibrated constants left in this file. The cost of an event is
 // the bytes it put in the request, which internal/event/build.go already
-// accounts in Event.Bytes; splitting that into input vs. output halves is
-// ferret-e4g's bead, not a constant to fit.
+// accounts in Event.Bytes — the input/output split (Event.InBytes/OutBytes,
+// ferret-e4g) lives one level down; this table still ranks on the sum.
 //
 // The key is the event's Action field, which ingestion (internal/event/build.go
 // fromToolUse) already normalizes: a shell segment carries its shellnorm.Split
@@ -73,7 +73,7 @@ type BurnResult struct {
 // including its "sh:" prefix so a shell command never collides with a
 // same-named tool.
 //
-// Rows sort by OutBytes descending, then Key ascending — a two-deep tie-break
+// Rows sort by Bytes descending, then Key ascending — a two-deep tie-break
 // so repeated runs are byte-stable even when two keys cost the same.
 func Burn(eventsPath string) (*BurnResult, error) {
 	rows := map[string]*BurnRow{}
@@ -94,7 +94,7 @@ func Burn(eventsPath string) (*BurnResult, error) {
 			rows[key] = r
 		}
 		r.Calls++
-		r.OutBytes += ev.Bytes
+		r.Bytes += ev.Bytes
 		r.sessions[ev.Session] = struct{}{}
 		return nil
 	})
@@ -107,7 +107,7 @@ func Burn(eventsPath string) (*BurnResult, error) {
 	for _, r := range rows {
 		r.Sessions = len(r.sessions)
 		if r.Calls > 0 {
-			r.BytesPerCall = float64(r.OutBytes) / float64(r.Calls)
+			r.BytesPerCall = float64(r.Bytes) / float64(r.Calls)
 		}
 		res.Rows = append(res.Rows, *r)
 	}
@@ -122,8 +122,8 @@ func Burn(eventsPath string) (*BurnResult, error) {
 // Pointer receivers, not values: BurnRow carries a map field, and a
 // value-range/value-param over it trips rangeValCopy on a hot struct.
 func burnLess(a, b *BurnRow) bool {
-	if a.OutBytes != b.OutBytes {
-		return a.OutBytes > b.OutBytes
+	if a.Bytes != b.Bytes {
+		return a.Bytes > b.Bytes
 	}
 	return a.Key < b.Key
 }

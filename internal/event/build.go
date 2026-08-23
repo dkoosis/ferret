@@ -161,12 +161,15 @@ func (b *Builder) attachmentLine(src transcript.Source, st *fileState, raw *tran
 	if class == "" {
 		class = "unknown"
 	}
+	// An attachment has no tool_use to pair against, so there is no separate
+	// input half to measure — book the whole payload as OutBytes (event.go).
+	n := len(raw.Attachment)
 	st.events = append(st.events, &Event{
 		Seq: st.seq, Time: ts,
 		Project: src.Project, Session: session(src, raw), Agent: src.Agent,
 		Sidechain: raw.IsSidechain,
 		Kind:      KindAttach, Action: class,
-		Bytes:   len(raw.Attachment),
+		Bytes: n, OutBytes: n,
 		Version: raw.Version,
 	})
 	b.Stats.Attachments++
@@ -316,10 +319,11 @@ func (b *Builder) resolve(st *fileState, blk *transcript.Block, ts time.Time) {
 	ct, haveCT := st.callTime[blk.ToolUseID]
 	for i, ev := range evs {
 		ev.Status = status
-		ev.Bytes += share
+		ev.OutBytes += share
 		if i < rem {
-			ev.Bytes++
+			ev.OutBytes++
 		}
+		ev.Bytes = ev.InBytes + ev.OutBytes
 		if haveCT && !ts.IsZero() {
 			ev.DurMS = ts.Sub(ct).Milliseconds()
 		}
@@ -488,7 +492,8 @@ func (b *Builder) fromToolUse(src transcript.Source, raw *transcript.Raw, blk *t
 			ev.Kind = KindShell
 			ev.Action = "sh"
 			ev.Detail = trunc(cmd, DetailMax)
-			ev.Bytes = len(cmd)
+			ev.InBytes = len(cmd)
+			ev.Bytes = ev.InBytes // no tool_result share applied yet; resolve() adds it
 			ev.Swallow = shellnorm.Swallows(cmd)
 			return []*Event{&ev}
 		}
@@ -498,7 +503,10 @@ func (b *Builder) fromToolUse(src transcript.Source, raw *transcript.Raw, blk *t
 			ev.Kind = KindShell
 			ev.Action = seg.Cmd
 			ev.Detail = trunc(seg.Raw, DetailMax)
-			ev.Bytes = len(seg.Raw)
+			// Shell input is the segment's own text — there is no separate
+			// envelope the way a tool call's blk.Input is one (event.go InBytes).
+			ev.InBytes = len(seg.Raw)
+			ev.Bytes = ev.InBytes // no tool_result share applied yet; resolve() adds it
 			ev.Compound = len(segs) > 1
 			ev.Swallow = seg.Swallowed
 			ev.Pipe = seg.Piped
@@ -512,7 +520,10 @@ func (b *Builder) fromToolUse(src transcript.Source, raw *transcript.Raw, blk *t
 	ev.Kind = KindTool
 	ev.Action = blk.Name
 	ev.Target = target(input)
-	ev.Bytes = len(blk.Input)
+	// A non-Bash tool's input is the whole JSON envelope, unlike a shell
+	// segment's bare command text (event.go InBytes).
+	ev.InBytes = len(blk.Input)
+	ev.Bytes = ev.InBytes // no tool_result share applied yet; resolve() adds it
 	ev.Query = getNugQuery(blk.Name, input)
 	return []*Event{&ev}
 }

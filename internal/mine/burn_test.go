@@ -56,8 +56,8 @@ func TestBurn_RanksByContextBytesDescending_When_MultipleKeysPresent(t *testing.
 		t.Errorf("Rows[1].Key = %q, want %q", res.Rows[1].Key, "sh:git_commit")
 	}
 	// A shell call is priced exactly like a tool call: its bytes, nothing added.
-	if res.Rows[1].OutBytes != 35 {
-		t.Errorf("sh:git_commit OutBytes = %d, want 35 — no per-call chrome constant survives", res.Rows[1].OutBytes)
+	if res.Rows[1].Bytes != 35 {
+		t.Errorf("sh:git_commit Bytes = %d, want 35 — no per-call chrome constant survives", res.Rows[1].Bytes)
 	}
 }
 
@@ -162,8 +162,8 @@ func TestBurn_ChargesMeasuredBytes_When_KindAndVolumeVary(t *testing.T) {
 				t.Fatal(err)
 			}
 			row := findBurnRow(t, res, tt.key)
-			if row.OutBytes != tt.wantOutBytes {
-				t.Errorf("OutBytes = %d, want %d", row.OutBytes, tt.wantOutBytes)
+			if row.Bytes != tt.wantOutBytes {
+				t.Errorf("Bytes = %d, want %d", row.Bytes, tt.wantOutBytes)
 			}
 			if row.BytesPerCall != tt.wantPerCall {
 				t.Errorf("BytesPerCall = %v, want %v", row.BytesPerCall, tt.wantPerCall)
@@ -242,11 +242,11 @@ func TestBurn_AggregatesCallsBytesPerCallAndSessions_When_KeyRecursAcrossSession
 		t.Fatalf("missing expected rows: %+v", res.Rows)
 	}
 
-	if read.Calls != 2 || read.OutBytes != 150 || read.BytesPerCall != 75 || read.Sessions != 1 {
-		t.Errorf("Read row = %+v, want calls=2 outBytes=150 bytesPerCall=75 sessions=1", *read)
+	if read.Calls != 2 || read.Bytes != 150 || read.BytesPerCall != 75 || read.Sessions != 1 {
+		t.Errorf("Read row = %+v, want calls=2 bytes=150 bytesPerCall=75 sessions=1", *read)
 	}
-	if gitCommit.Calls != 3 || gitCommit.OutBytes != 35 || gitCommit.Sessions != 2 {
-		t.Errorf("sh:git_commit row = %+v, want calls=3 outBytes=35 sessions=2", *gitCommit)
+	if gitCommit.Calls != 3 || gitCommit.Bytes != 35 || gitCommit.Sessions != 2 {
+		t.Errorf("sh:git_commit row = %+v, want calls=3 bytes=35 sessions=2", *gitCommit)
 	}
 	wantBPC := 35.0 / 3.0
 	if gitCommit.BytesPerCall != wantBPC {
@@ -309,7 +309,7 @@ func TestBurn_RoundTripsThroughJSON_When_ResultMarshaled(t *testing.T) {
 		t.Fatalf("round-tripped Rows len = %d, want %d", len(got.Rows), len(res.Rows))
 	}
 	for i := range res.Rows {
-		if got.Rows[i].Key != res.Rows[i].Key || got.Rows[i].OutBytes != res.Rows[i].OutBytes ||
+		if got.Rows[i].Key != res.Rows[i].Key || got.Rows[i].Bytes != res.Rows[i].Bytes ||
 			got.Rows[i].Calls != res.Rows[i].Calls || got.Rows[i].Sessions != res.Rows[i].Sessions ||
 			got.Rows[i].BytesPerCall != res.Rows[i].BytesPerCall {
 			t.Errorf("round-tripped Rows[%d] = %+v, want %+v", i, got.Rows[i], res.Rows[i])
@@ -351,8 +351,8 @@ func TestBurn_ChargesAttachmentsFullBytes_When_PayloadIsLarge(t *testing.T) {
 	if got.Key != "at:skill_listing" {
 		t.Errorf("key = %q, want at:skill_listing (prefixed so a class cannot collide with a tool name)", got.Key)
 	}
-	if got.OutBytes != big {
-		t.Errorf("OutBytes = %d, want %d — an attachment is charged the bytes it injected", got.OutBytes, big)
+	if got.Bytes != big {
+		t.Errorf("Bytes = %d, want %d — an attachment is charged the bytes it injected", got.Bytes, big)
 	}
 }
 

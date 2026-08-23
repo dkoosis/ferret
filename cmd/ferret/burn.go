@@ -84,7 +84,7 @@ func writeBurnText(w io.Writer, res *mine.BurnResult, limit, maxBytes int) error
 	for i := range res.Rows {
 		r := &res.Rows[i] // index-range: BurnRow carries a map field, value-range trips rangeValCopy
 		sink.Row("%10s bytes  %8s/call  %6d calls  %4d sess  %s",
-			humanBytes(r.OutBytes), humanBytes(int(r.BytesPerCall)), r.Calls, r.Sessions, r.Key)
+			humanBytes(r.Bytes), humanBytes(int(r.BytesPerCall)), r.Calls, r.Sessions, r.Key)
 	}
 	// Legal moves, not a plan (DK-AXI rule 11): gross cost is not waste — the
 	// merged view says how much of it bought nothing.
