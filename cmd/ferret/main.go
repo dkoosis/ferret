@@ -32,6 +32,10 @@ var (
 	errMaxLen       = usage("--max-len must be ≥ 1")
 	errOrder        = usage("--order must be ≥ 1")
 	errBadSource    = usage("bad --source")
+
+	// errCorpusEra is a static sentinel so callers can errors.Is it; the version
+	// numbers ride in a wrap, not in a fresh error type.
+	errCorpusEra = errors.New("corpus was built by a different ferret era")
 )
 
 // usageError marks a sentinel as a complaint about the COMMAND LINE rather
@@ -329,6 +333,8 @@ var CLI struct {
 
 	Polling PollingCmd `cmd:"" help:"Rank exact-duplicate commands repeated within a session." name:"polling"`
 
+	Usage UsageCmd `cmd:"" help:"The API token ledger read back from transcripts — measured spend, reconcilable against /usage." name:"usage"`
+
 	Parallel ParallelCmd `cmd:"" help:"Rank context spend by how many threads ran at once — session overlap vs subagent fan-out." name:"parallel"`
 
 	Substitutable SubstitutableCmd `cmd:"" help:"Rank Bash calls a native tool (Grep/Glob/Read) could replace — deterministic, no judge." name:"substitutable"`
@@ -588,6 +594,8 @@ func main() {
 		err = cmdMisfires(CLI.Misfires)
 	case "polling":
 		err = cmdPolling(CLI.Polling)
+	case "usage":
+		err = cmdUsage(&CLI.Usage)
 	case "parallel":
 		err = cmdParallel(&CLI.Parallel)
 	case "substitutable":
@@ -731,14 +739,14 @@ func readManifest(path string) (event.Manifest, bool) {
 	return m, true
 }
 
-// errCorpusEra reports a corpus this build cannot compare against its own
+// eraRefusal reports a corpus this build cannot compare against its own
 // numbers. It is a hard stop, deliberately, and NOT the auto-ingest path that
 // a missing corpus takes: a version mismatch is a state the caller must see,
 // because the alternative — quietly mining an older era's artifact — produces
 // numbers that look fine and mean nothing next to today's (ferret-4wc).
-func errCorpusEra(m *event.Manifest) error {
-	return fmt.Errorf("corpus schema v%d, this ferret reads v%d — the artifact predates a change that makes its numbers incomparable; rebuild with 'ferret ingest'",
-		m.SchemaVersion, event.SchemaVersion)
+func eraRefusal(m *event.Manifest) error {
+	return fmt.Errorf("%w: corpus schema v%d, this ferret reads v%d — the artifact predates a change that makes its numbers incomparable; rebuild with 'ferret ingest'",
+		errCorpusEra, m.SchemaVersion, event.SchemaVersion)
 }
 
 // ensureData runs a default ingest when the artifact is missing or incomplete.
@@ -759,7 +767,7 @@ func (c *common) ensureData() error {
 	if manifestComplete(manifestPath) {
 		// manifest present, non-empty, valid JSON → ingest completed
 		if m, ok := readManifest(manifestPath); ok && !m.Compatible() {
-			return errCorpusEra(&m)
+			return eraRefusal(&m)
 		}
 		if stale, builtAt, newest := corpusStale(manifestPath); stale {
 			fmt.Fprintf(os.Stderr,

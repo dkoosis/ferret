@@ -46,6 +46,33 @@ type AttachClass struct {
 type Msg struct {
 	Role    string `json:"role"`
 	Content Blocks `json:"content"`
+	// ID is the API response id. It is NOT unique per line: one response is
+	// written across several assistant lines (one per content block), each
+	// repeating the SAME usage. Measured on a live transcript: 94 usage-bearing
+	// lines carried only 61 distinct ids, with every repeat byte-identical.
+	// Summing per line therefore over-counts spend by ~54%, and the message id
+	// is the only key that collapses it — the per-line uuid differs.
+	ID    string `json:"id"`
+	Model string `json:"model"`
+	Usage *Usage `json:"usage"`
+}
+
+// Usage is the API's own token ledger for one call — the harness wrote it, so
+// it is measured spend rather than anything ferret inferred.
+type Usage struct {
+	Input      int `json:"input_tokens"`
+	CacheWrite int `json:"cache_creation_input_tokens"`
+	CacheRead  int `json:"cache_read_input_tokens"`
+	Output     int `json:"output_tokens"`
+	Details    *struct {
+		Thinking int `json:"thinking_tokens"`
+	} `json:"output_tokens_details"`
+	// CacheCreation splits the write by TTL. A 5-minute write that expires
+	// before its next read is a full-price write that bought nothing.
+	CacheCreation *struct {
+		Ephemeral1h int `json:"ephemeral_1h_input_tokens"`
+		Ephemeral5m int `json:"ephemeral_5m_input_tokens"`
+	} `json:"cache_creation"`
 }
 
 // Blocks tolerates both string content and []Block content.

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dkoosis/ferret/internal/apiusage"
 	"github.com/dkoosis/ferret/internal/event"
 	"github.com/dkoosis/ferret/internal/shellnorm"
 	"github.com/dkoosis/ferret/internal/snipeusage"
@@ -122,6 +123,14 @@ func ingest(dataDir, root, project, snipeUsageGlob string, dryRun bool) error {
 	// treated as partial — no manifest gets sealed over a truncated artifact.
 	var emitErr error
 	emit := func(*event.Event) {}
+	// The API token ledger accumulates in memory and publishes once, after the
+	// events artifact seals. Ordering matters: usage.jsonl must never be newer
+	// than the events.jsonl it describes, or a crash between the two leaves a
+	// ledger that looks current beside a corpus that is not.
+	var ledger []apiusage.Row
+	if !dryRun {
+		b.SetLedger(func(r *apiusage.Row) { ledger = append(ledger, *r) })
+	}
 	var w eventSink
 	if !dryRun {
 		if err := os.MkdirAll(dataDir, 0o755); err != nil {
@@ -183,6 +192,9 @@ func ingest(dataDir, root, project, snipeUsageGlob string, dryRun bool) error {
 			},
 			Stats: b.Stats,
 		}
+		if err := apiusage.Write(filepath.Join(dataDir, apiusage.Artifact), ledger); err != nil {
+			return err
+		}
 		if err := event.WriteManifest(filepath.Join(dataDir, "manifest.json"), m); err != nil {
 			return err
 		}
@@ -193,6 +205,9 @@ func ingest(dataDir, root, project, snipeUsageGlob string, dryRun bool) error {
 		st.Files, st.Lines, st.Events, st.Prompts, time.Since(start).Round(time.Millisecond))
 	fmt.Printf("health unpaired=%.1f%% shell-fallback=%d deduped=%d decode-errs=%d\n",
 		pct(st.Unpaired, st.Events), st.Fallback, st.Deduped, st.DecodeErrs)
+	if st.APICalls > 0 {
+		fmt.Printf("api-ledger calls=%d duplicate-lines-collapsed=%d\n", st.APICalls, st.APIDupes)
+	}
 	if st.UsageSources > 0 {
 		fmt.Printf("usage sources=%d records=%d joined=%d\n", st.UsageSources, st.UsageRecords, st.UsageJoined)
 	}

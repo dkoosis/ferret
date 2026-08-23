@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/dkoosis/ferret/internal/apiusage"
 	"github.com/dkoosis/ferret/internal/shellnorm"
 	"github.com/dkoosis/ferret/internal/snipeusage"
 	"github.com/dkoosis/ferret/internal/transcript"
@@ -26,11 +27,23 @@ type Builder struct {
 	resolved map[string]struct{} // tool_use ids whose result we've applied, across the ingest
 	Stats    *Stats
 	usage    *snipeusage.Index // nil unless SetUsage is called — no-op guard everywhere it's read
+	// ledger receives one row per distinct API call; nil unless SetLedger is
+	// called, so ingest paths that do not want the token ledger pay nothing.
+	ledger func(*apiusage.Row)
+	// msgSeen dedups the API ledger by message id, corpus-wide. It must span
+	// the whole ingest, not one file: a resumed or forked session copies its
+	// history into a new transcript, so the same call reappears in another file
+	// and would be billed twice.
+	msgSeen map[uint64]struct{}
 }
 
 func NewBuilder() *Builder {
-	return &Builder{seen: map[uint64]struct{}{}, resolved: map[string]struct{}{}, Stats: NewStats()}
+	return &Builder{seen: map[uint64]struct{}{}, resolved: map[string]struct{}{}, Stats: NewStats(), msgSeen: map[uint64]struct{}{}}
 }
+
+// SetLedger wires the API token-ledger sink. Optional: unset (the default)
+// leaves ingest behavior-identical, emitting events and no ledger.
+func (b *Builder) SetLedger(fn func(*apiusage.Row)) { b.ledger = fn }
 
 // SetUsage wires a session+action+time-joined snipe usage.jsonl Index into
 // the builder, so resolve() can enrich every isSnipe Event it emits with
@@ -178,8 +191,50 @@ func (b *Builder) isDuplicate(uuid string) bool {
 	return false
 }
 
+// ledgerLine records one API call's token usage, deduped by message id.
+//
+// The dedup is not an optimization. One API response is written to the
+// transcript as several assistant lines — one per content block — each carrying
+// a byte-identical copy of the same usage. Billing every line inflates measured
+// spend by roughly half (94 usage-bearing lines / 61 distinct calls on a live
+// transcript). The per-line uuid differs, so isDuplicate cannot see it; only
+// the message id collapses the copies.
+func (b *Builder) ledgerLine(src transcript.Source, raw *transcript.Raw, ts time.Time) {
+	if b.ledger == nil || raw.Message == nil || raw.Message.Usage == nil {
+		return
+	}
+	u := raw.Message.Usage
+	if id := raw.Message.ID; id != "" {
+		h := fnv.New64a()
+		_, _ = h.Write([]byte(id))
+		k := h.Sum64()
+		if _, dup := b.msgSeen[k]; dup {
+			b.Stats.APIDupes++
+			return
+		}
+		b.msgSeen[k] = struct{}{}
+	}
+	row := &apiusage.Row{
+		Session: session(src, raw), Agent: src.Agent, Time: ts,
+		Model:      raw.Message.Model,
+		Input:      u.Input,
+		CacheWrite: u.CacheWrite,
+		CacheRead:  u.CacheRead,
+		Output:     u.Output,
+	}
+	if u.Details != nil {
+		row.Thinking = u.Details.Thinking
+	}
+	if u.CacheCreation != nil {
+		row.Write1h, row.Write5m = u.CacheCreation.Ephemeral1h, u.CacheCreation.Ephemeral5m
+	}
+	b.Stats.APICalls++
+	b.ledger(row)
+}
+
 // assistantLine extracts tool_use blocks and parks them pending a status.
 func (b *Builder) assistantLine(src transcript.Source, st *fileState, raw *transcript.Raw, ts time.Time) {
+	b.ledgerLine(src, raw, ts)
 	for i := range raw.Message.Content {
 		blk := &raw.Message.Content[i]
 		if blk.Type != "tool_use" {
