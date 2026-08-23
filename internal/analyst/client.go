@@ -94,6 +94,14 @@ type Config struct {
 	// HTTPClient is a test seam: inject a stub transport (a hanging or erroring
 	// Do) to exercise the deadline path without a live API. nil = SDK default.
 	HTTPClient option.HTTPClient
+	// Offline refuses the call before the request is built (--offline). The
+	// FERRET_OFFLINE environment variable does the same process-wide; either is
+	// sufficient. See offline.go (ferret-wvo).
+	Offline bool
+	// Reporter, when set, receives the model+size notice before the call and
+	// the token/cost footer after it, so a paid call is never silent. nil =
+	// silent, which is what tests and library callers want.
+	Reporter Reporter
 }
 
 // ErrNoAPIKey signals the run cannot proceed because no credential is set. The
@@ -153,6 +161,12 @@ func usageFrom(u anthropic.Usage) Usage {
 // relevance, coverage) — the modes differ only in prompt assembly and response
 // parsing, not in how the model is called.
 func complete(ctx context.Context, cfg Config, system, user string) (model, text string, usage Usage, err error) {
+	// Offline first: refuse before resolving a credential, so the kill-switch
+	// works identically on a machine that has a key and one that does not
+	// (ferret-wvo).
+	if cfg.offline() {
+		return "", "", Usage{}, ErrOffline
+	}
 	key, err := resolveKey(cfg)
 	if err != nil {
 		return "", "", Usage{}, err
@@ -176,6 +190,13 @@ func complete(ctx context.Context, cfg Config, system, user string) (model, text
 	}
 	client := anthropic.NewClient(opts...)
 
+	// Announce the call before making it: what model, how much prompt. The
+	// notice goes to the Reporter (stderr in the CLI), never stdout, so a
+	// --format json payload stays machine-readable.
+	if cfg.Reporter != nil {
+		cfg.Reporter.Preflight(cfg.model(), len(system)+len(user))
+	}
+
 	adaptive := anthropic.ThinkingConfigAdaptiveParam{}
 	resp, err := client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     cfg.model(),
@@ -196,7 +217,14 @@ func complete(ctx context.Context, cfg Config, system, user string) (model, text
 	// (adjudicate, propose, relevance, coverage) reports the paid call hit the
 	// %d-token cap rather than silently discarding it as malformed (ferret-e6s).
 	if resp.StopReason == anthropic.StopReasonMaxTokens {
-		return "", "", usageFrom(resp.Usage), fmt.Errorf("%w (cap=%d)", ErrTruncatedResponse, maxTokens)
+		// A truncated response was still billed, so it still gets a footer —
+		// a silent paid call is exactly what the notice exists to prevent.
+		tu := usageFrom(resp.Usage)
+		if cfg.Reporter != nil {
+			usd, priced := CostUSD(resp.Model, tu)
+			cfg.Reporter.Complete(resp.Model, tu, usd, priced)
+		}
+		return "", "", tu, fmt.Errorf("%w (cap=%d)", ErrTruncatedResponse, maxTokens)
 	}
 
 	// Thinking blocks precede the text block; collect the text content.
@@ -206,5 +234,12 @@ func complete(ctx context.Context, cfg Config, system, user string) (model, text
 			b.WriteString(tb.Text)
 		}
 	}
-	return resp.Model, b.String(), usageFrom(resp.Usage), nil
+	u := usageFrom(resp.Usage)
+	// Footer: what the call actually cost, priced from the same table
+	// `ferret usage` reports the corpus with.
+	if cfg.Reporter != nil {
+		usd, priced := CostUSD(resp.Model, u)
+		cfg.Reporter.Complete(resp.Model, u, usd, priced)
+	}
+	return resp.Model, b.String(), u, nil
 }

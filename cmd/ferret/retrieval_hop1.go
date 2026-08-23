@@ -54,7 +54,7 @@ func runRetrievalHop1(c *common, eps []score.Episode) error {
 	// model, so requiring a key upfront would fail runs that cost nothing. Each
 	// escalating episode's own call surfaces ErrNoAPIKey through the normal
 	// continue-on-error per-episode path if no key is set.
-	cfg := analyst.Config{Model: cmd.Model, Timeout: cmd.Timeout}
+	cfg := newAnalystConfig(cmd.Model, cmd.Timeout)
 	ctx, stop := analystContext()
 	defer stop()
 
