@@ -5,14 +5,36 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/dkoosis/ferret/internal/event"
+	"github.com/dkoosis/ferret/internal/shellnorm"
 	"github.com/dkoosis/ferret/internal/snipeusage"
 	"github.com/dkoosis/ferret/internal/transcript"
 )
+
+// buildRevision returns the VCS commit this binary was built from, so a corpus
+// records which ferret measured it. `go build` stamps this into the build info
+// automatically inside a git checkout; a build from a source archive has no
+// revision to stamp, which reads as "unknown" rather than a fabricated value.
+func buildRevision() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	for _, s := range info.Settings {
+		if s.Key == "vcs.revision" {
+			if len(s.Value) > 12 {
+				return s.Value[:12]
+			}
+			return s.Value
+		}
+	}
+	return "unknown"
+}
 
 // ---- ingest ----
 
@@ -150,7 +172,17 @@ func ingest(dataDir, root, project, snipeUsageGlob string, dryRun bool) error {
 			// later mine runs on silently-truncated data.
 			return cerr
 		}
-		m := &event.Manifest{CreatedAt: time.Now(), Root: root, Stats: b.Stats}
+		m := &event.Manifest{
+			SchemaVersion: event.SchemaVersion,
+			CreatedAt:     time.Now(),
+			Root:          root,
+			Provenance: event.Provenance{
+				Ferret:     buildRevision(),
+				Normalizer: shellnorm.Version,
+				Flags:      event.Flags{Project: project, SnipeUsage: snipeUsageGlob},
+			},
+			Stats: b.Stats,
+		}
 		if err := event.WriteManifest(filepath.Join(dataDir, "manifest.json"), m); err != nil {
 			return err
 		}
