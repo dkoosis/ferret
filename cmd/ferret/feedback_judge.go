@@ -168,7 +168,7 @@ func cmdFeedbackJudge() error {
 		return err
 	}
 
-	cfg := analyst.Config{Model: cmd.Model, Timeout: cmd.Timeout}
+	cfg := newAnalystConfig(cmd.Model, cmd.Timeout)
 	ctx, stop := analystContext()
 	defer stop()
 	rng := rand.New(rand.NewSource(time.Now().UnixNano())) //nolint:gosec // shuffle blinding, not security

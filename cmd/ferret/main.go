@@ -152,8 +152,21 @@ func validateFormat(format string) error {
 // (ferret-9l1). A non-nil error means neither ctx nor stop is usable; ctx is
 // nil and stop is nil in that case, so a caller must check err before deferring
 // stop.
+// newAnalystConfig builds the analyst config every model-backed command shares:
+// the operator's --offline choice and the stderr call-cost notice, so no ferret
+// command can make a paid API call silently (ferret-wvo). The env kill-switch
+// is read inside the analyst package, not copied here.
+func newAnalystConfig(model string, timeout time.Duration) analyst.Config {
+	return analyst.Config{
+		Model:    model,
+		Timeout:  timeout,
+		Offline:  CLI.Offline,
+		Reporter: analyst.StderrReporter{W: os.Stderr},
+	}
+}
+
 func newAnalystRun(model string, timeout time.Duration) (ctx context.Context, cfg analyst.Config, stop func(), err error) {
-	cfg = analyst.Config{Model: model, Timeout: timeout}
+	cfg = newAnalystConfig(model, timeout)
 	ok, err := cfg.HasAPIKey()
 	if err != nil {
 		return nil, analyst.Config{}, nil, err
@@ -198,6 +211,11 @@ type LensFlags struct {
 
 // CLI is the root grammar parsed by kong.
 var CLI struct {
+	// Offline refuses every model-backed command before it runs (ferret-wvo).
+	// FERRET_OFFLINE does the same, so a shell profile can make a machine
+	// incapable of an accidental paid call without touching any command.
+	Offline bool `help:"Refuse any command that would call the Anthropic API (see the [model] labels in this list)." env:"FERRET_OFFLINE" name:"offline"`
+
 	Ingest struct {
 		Data       string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
 		Root       string `help:"Transcript root (dir or .jsonl file)." name:"root"`
@@ -489,46 +507,11 @@ func main() {
 		CLI.Ingest.Data = data
 	}
 
-	k := kong.Parse(&CLI,
+	parser := kong.Must(&CLI,
 		kong.Name("ferret"),
 		kong.Description(
 			"Mine Claude Code transcripts for repeated behavior:\n"+
 				"scriptable routines, friction loops, and noisy context.\n\n"+
-				"  ferret ingest   [--root DIR] [--project SUBSTR] [--dry-run] [--snipe-usage GLOB]\n"+
-				"  ferret summary  [--by corpus|project|session]\n"+
-				"  ferret ngrams   [--lens tool] [--n 2-5] [--min-count 5] [--min-sessions 3]\n"+
-				"  ferret seqs     [--lens tool] [--min-support 20] [--max-gap 3] [--max-len 5]\n"+
-				"  ferret rank     [--lens tool] [--min-support 20] [--order 3] [--top 10]\n"+
-				"  ferret report   [--lens tool] [--kind routine|friction|loop|noise] [--since-fixes] [--format json|md]\n"+
-				"  ferret surprise [--lens tool] [--order 3] [--min-toks 20]\n"+
-				"  ferret graph    [--lens tool] [--min-count 20] [--format text|json|mermaid|dot|sankey] [--loops]\n"+
-				"  ferret tokens   --session PREFIX [--lens tool]\n"+
-				"  ferret spine    --session PREFIX [--root DIR]\n"+
-				"  ferret segments --session PREFIX [--root DIR] [--format text|json]\n"+
-				"  ferret dialogue --session PREFIX [--root DIR] [--format text|json]\n"+
-				"  ferret search   QUERY [--root DIR] [--limit 20] [--context 2] [--format text|json]   (literal substring; case-sensitive)\n"+
-				"  ferret candidates [--session PREFIX | (corpus) --min-sessions 2] [--root DIR] [--top 10] [--format text|json]\n"+
-				"  ferret conformance [--spec FILE] [--format text|json]   (reads stdin if no --spec)\n"+
-				"  ferret landmark  [--spec FILE | --session PREFIX [--root DIR]] [--data DIR] [--format text|json]   (milestone progress; spec reads stdin if no --spec)\n"+
-				"  ferret gates    [--data DIR] [--format text|json]   (overlap ratio ω over review-gate rejections)\n"+
-				"  ferret status   [--data DIR] [--format text|json]   (corpus health + heaviest waste — what bare `ferret` runs)\n"+
-				"  ferret friction [--data DIR] [--source poll|misfire|motif] [--no-motifs] [--format text|json]   (ONE waste-ranked table: polling + misfires + motifs, priced by burn)\n"+
-				"  ferret burn     [--data DIR] [--format text|json]   (ranked context-byte burn per normalized command)\n"+
-				"  ferret misfires [--data DIR] [--format text|json]   (repeated command failures + repair pairs)\n"+
-				"  ferret polling  [--data DIR] [--format text|json]   (exact-duplicate commands repeated within a session)\n"+
-				"  ferret retrieval  [--session PREFIX] [--format text|json]   (get_nug search quality: RU + Q/R/C)\n"+
-				"  ferret quality    [--session PREFIX] [--format text|json]   (per-task axes; corpus pass^k consistency)\n"+
-				"  ferret adjudicate  --session PREFIX [--model ID] [--emit-prompt] [--propose] [--top 10] [--format text|json]\n"+
-				"  ferret feedback prep  --session PREFIX   (tail the live retrieval feed for a settled kind:search event)\n"+
-				"  ferret feedback judge --session PREFIX --search-event ID   ([{id,text}] candidates on stdin)\n"+
-				"  ferret feedback check --session PREFIX   (UserPromptSubmit side: budget-check + read the banked ask)\n"+
-				"  ferret feedback answer --session PREFIX   (one turn later: recognize y/n/s, classify valence, write the label; prompt on stdin)\n"+
-				"  ferret fixes add  --motif \"Edit!,Read\" --fix \"hookify read-before-edit\" [--note ...]\n"+
-				"  ferret fixes list [--format json]\n"+
-				"  ferret reach    [--since Y-M-D] [--until Y-M-D] [--project SUBSTR] [--format text|json|md]   (recall-opportunity reach-rate)\n"+
-				"  ferret recurrence [--signatures FILE] [--format text|json]   (flag 2nd+ occurrence of a known friction signature)\n"+
-				"  ferret emit     [--root DIR] [--window 8] [--order 3] [--min-bits N] [--dry-run] [--format text|json]   (candidate spool rows → ~/.ferret/spool)\n\n"+
-				"common: --data DIR (default ~/.ferret)  --format text|json  --limit N (negative = unlimited)  --max-bytes N\n"+
 				"lenses: coarse | tool | target | exact",
 		),
 		kong.UsageOnError(),
@@ -545,6 +528,23 @@ func main() {
 			os.Exit(code)
 		}),
 	)
+
+	// Stamp each command's surface label into the grammar BEFORE parsing, so
+	// `ferret --help` and `ferret <cmd> --help` both show whether a command is
+	// local, model-backed, or hook-invoked (ferret-wvo).
+	labelCommandHelp(parser.Model)
+
+	k, perr := parser.Parse(os.Args[1:])
+	parser.FatalIfErrorf(perr)
+
+	cmdPath := normalizeCommand(k.Command())
+	// Refuse a model-backed command under --offline / FERRET_OFFLINE before it
+	// reads a corpus or assembles a prompt: the point of the guard is that no
+	// work — and no call — happens.
+	if gerr := guardOffline(cmdPath); gerr != nil {
+		fmt.Fprintln(os.Stderr, "ferret:", gerr)
+		os.Exit(exitUsage)
+	}
 
 	var err error
 	switch k.Command() {
