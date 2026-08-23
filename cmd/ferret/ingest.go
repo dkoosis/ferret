@@ -176,6 +176,19 @@ func ingest(dataDir, root, project, snipeUsageGlob string, dryRun bool) error {
 			w.Abort()
 			return emitErr
 		}
+		// Invalidate the previous generation BEFORE publishing any replacement.
+		// The manifest is the completeness sentinel for the whole data dir, not
+		// for events.jsonl alone: without this, a failure after events.jsonl is
+		// renamed but before usage.jsonl and the manifest are rewritten leaves a
+		// new events file beside an old ledger under a manifest that still reads
+		// complete — and every later command silently mixes two ingest runs.
+		// Removing it first means any mid-publish failure reads as "no corpus",
+		// which ensureData repairs by re-ingesting.
+		manifestPath := filepath.Join(dataDir, "manifest.json")
+		if rerr := os.Remove(manifestPath); rerr != nil && !os.IsNotExist(rerr) {
+			w.Abort()
+			return rerr
+		}
 		if cerr := w.Close(); cerr != nil {
 			// Close failed: the atomic Writer never sealed events.jsonl, so no
 			// later mine runs on silently-truncated data.
@@ -195,7 +208,7 @@ func ingest(dataDir, root, project, snipeUsageGlob string, dryRun bool) error {
 		if err := apiusage.Write(filepath.Join(dataDir, apiusage.Artifact), ledger); err != nil {
 			return err
 		}
-		if err := event.WriteManifest(filepath.Join(dataDir, "manifest.json"), m); err != nil {
+		if err := event.WriteManifest(manifestPath, m); err != nil {
 			return err
 		}
 	}

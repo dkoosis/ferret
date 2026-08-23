@@ -2,14 +2,17 @@ package apiusage
 
 import "sort"
 
-// SessionRow is one session's ledger, ranked by weighted cost — the "which
-// sessions actually cost money" list. Agent rows fold into their session: a
-// subagent's spend is spend the session incurred.
+// SessionRow is one session's ledger, ranked by dollars — the "which sessions
+// actually cost money" list. Agent rows fold into their session: a subagent's
+// spend is spend the session incurred.
+//
+// Cost lives in Totals.USD, accumulated per row at that row's model price, so a
+// session mixing Opus and Haiku ranks on what it actually cost rather than on a
+// pooled token count that treats the two as interchangeable.
 type SessionRow struct {
-	Session  string  `json:"session"`
-	Totals   Totals  `json:"totals"`
-	Weighted float64 `json:"weighted"`
-	Agents   int     `json:"agents"` // distinct agent ids seen, main thread included
+	Session string `json:"session"`
+	Totals  Totals `json:"totals"`
+	Agents  int    `json:"agents"` // distinct agent ids seen, main thread included
 
 	agents map[string]struct{}
 }
@@ -23,13 +26,12 @@ type Report struct {
 	Rows     []SessionRow `json:"rows"`
 }
 
-// ModelRow is per-model spend. Models differ in price per token, so a weighted
-// figure that pools them is only as good as the assumption that the mix held —
-// the split is here so that assumption is visible rather than buried.
+// ModelRow is per-model spend. Models differ in base price by 10x, so the split
+// is what makes a pooled dollar figure auditable — and it names any model whose
+// price is missing rather than letting its calls vanish into a total.
 type ModelRow struct {
-	Model    string  `json:"model"`
-	Totals   Totals  `json:"totals"`
-	Weighted float64 `json:"weighted"`
+	Model  string `json:"model"`
+	Totals Totals `json:"totals"`
 }
 
 // Aggregate reads the ledger artifact and folds it into the corpus report.
@@ -47,7 +49,6 @@ func Aggregate(path string) (*Report, error) {
 			sessions[r.Session] = s
 		}
 		s.Totals.Add(r)
-		s.Weighted += r.Weighted()
 		s.agents[r.Agent] = struct{}{}
 
 		m, ok := models[r.Model]
@@ -56,7 +57,6 @@ func Aggregate(path string) (*Report, error) {
 			models[r.Model] = m
 		}
 		m.Totals.Add(r)
-		m.Weighted += r.Weighted()
 		return nil
 	})
 	if err != nil {
@@ -70,8 +70,8 @@ func Aggregate(path string) (*Report, error) {
 		rep.Rows = append(rep.Rows, *s)
 	}
 	sort.Slice(rep.Rows, func(i, j int) bool {
-		if rep.Rows[i].Weighted != rep.Rows[j].Weighted {
-			return rep.Rows[i].Weighted > rep.Rows[j].Weighted
+		if rep.Rows[i].Totals.USD != rep.Rows[j].Totals.USD {
+			return rep.Rows[i].Totals.USD > rep.Rows[j].Totals.USD
 		}
 		return rep.Rows[i].Session < rep.Rows[j].Session
 	})
@@ -81,16 +81,16 @@ func Aggregate(path string) (*Report, error) {
 		rep.Models = append(rep.Models, *m)
 	}
 	sort.Slice(rep.Models, func(i, j int) bool {
-		if rep.Models[i].Weighted != rep.Models[j].Weighted {
-			return rep.Models[i].Weighted > rep.Models[j].Weighted
+		if rep.Models[i].Totals.USD != rep.Models[j].Totals.USD {
+			return rep.Models[i].Totals.USD > rep.Models[j].Totals.USD
 		}
 		return rep.Models[i].Model < rep.Models[j].Model
 	})
 	return rep, nil
 }
 
-// Share is one bucket's percentage of a weighted total — the column that
-// reorders the picture, because the buckets differ in price by ~50x end to end.
+// Share is one bucket's percentage of a total — the column that reorders the
+// picture, because the buckets differ in price by ~50x within a model.
 func Share(part, whole float64) float64 {
 	if whole <= 0 {
 		return 0

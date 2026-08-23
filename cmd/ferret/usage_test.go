@@ -11,13 +11,27 @@ import (
 // usageReport builds a report whose token ranking and cost ranking disagree —
 // the condition the render must make visible.
 func usageReport() *apiusage.Report {
+	var opus, sonnet apiusage.Totals
+	opus.Add(&apiusage.Row{Model: "claude-opus-5", CacheWrite: 150000, Write1h: 150000, CacheRead: 1500000, Output: 15000})
+	opus.Add(&apiusage.Row{Model: "claude-opus-5", CacheWrite: 50000, Write1h: 50000, CacheRead: 500000, Output: 5000, Thinking: 5000})
+	sonnet.Add(&apiusage.Row{Model: "claude-sonnet-5", Input: 1000, CacheRead: 100000})
+
+	var all apiusage.Totals
+	all.Add(&apiusage.Row{Model: "claude-opus-5", CacheWrite: 150000, Write1h: 150000, CacheRead: 1500000, Output: 15000})
+	all.Add(&apiusage.Row{Model: "claude-opus-5", CacheWrite: 50000, Write1h: 50000, CacheRead: 500000, Output: 5000, Thinking: 5000})
+	all.Add(&apiusage.Row{Model: "claude-sonnet-5", Input: 1000, CacheRead: 100000})
+	all.Add(&apiusage.Row{Model: "<synthetic>", Output: 40})
+
 	return &apiusage.Report{
-		Totals:   apiusage.Totals{Calls: 3, Input: 1000, CacheWrite: 200000, CacheRead: 2000000, Output: 20000, Thinking: 5000, Write1h: 150000, Write5m: 50000},
+		Totals:   all,
 		Sessions: 2,
-		Models:   []apiusage.ModelRow{{Model: "claude-opus-5", Totals: apiusage.Totals{Calls: 3}, Weighted: 100}},
+		Models: []apiusage.ModelRow{
+			{Model: "claude-opus-5", Totals: opus},
+			{Model: "claude-sonnet-5", Totals: sonnet},
+		},
 		Rows: []apiusage.SessionRow{
-			{Session: "aaaaaaaa-1111", Totals: apiusage.Totals{Calls: 2, CacheWrite: 150000, CacheRead: 1500000, Output: 15000}, Weighted: 412500, Agents: 3},
-			{Session: "bbbbbbbb-2222", Totals: apiusage.Totals{Calls: 1, CacheWrite: 50000, CacheRead: 500000, Output: 5000}, Weighted: 137500, Agents: 1},
+			{Session: "aaaaaaaa-1111", Totals: opus, Agents: 3},
+			{Session: "bbbbbbbb-2222", Totals: sonnet, Agents: 1},
 		},
 	}
 }
@@ -25,6 +39,8 @@ func usageReport() *apiusage.Report {
 // TestWriteUsageText_ShowsTokenAndCostViews_When_TheyDisagree pins the whole
 // point of the report: cache-read dominates the token count while cache-write
 // and output take a far larger share once priced, so both columns must render.
+// It also pins the two review findings from PR #134 — the per-model split and
+// the named unpriced bucket.
 func TestWriteUsageText_ShowsTokenAndCostViews_When_TheyDisagree(t *testing.T) {
 	var buf bytes.Buffer
 	if err := writeUsageText(&buf, usageReport(), 0, 0); err != nil {
@@ -32,10 +48,13 @@ func TestWriteUsageText_ShowsTokenAndCostViews_When_TheyDisagree(t *testing.T) {
 	}
 	out := buf.String()
 	for _, want := range []string{
-		"calls=3", "sessions=2", "%tokens", "%weighted",
+		"calls=4", "sessions=2", "%tokens", "%spend",
 		"input", "cache-write", "cache-read", "output",
 		"reads per written token", "thinking=25.0% of output",
-		"/usage", // the reconciliation instruction must be on the page
+		"claude-opus-5", "claude-sonnet-5", // per-model split makes the pooled dollar figure auditable
+		"unpriced: 1 calls", // an unpriced model is named, never absorbed
+		apiusage.PricedAt,   // a spend figure with undated prices invites silent staleness
+		"/usage",            // the reconciliation instruction must be on the page
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q\n---\n%s", want, out)
@@ -82,6 +101,18 @@ func TestHumanCount_ScalesToTokenMagnitudes(t *testing.T) {
 	for in, want := range cases {
 		if got := humanCount(in); got != want {
 			t.Errorf("humanCount(%d) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestHumanUSD_KeepsCentsOnlyWhereTheyMatter pins the money renderer: cents
+// under $100, whole dollars above, so a corpus total does not print six
+// meaningless digits.
+func TestHumanUSD_KeepsCentsOnlyWhereTheyMatter(t *testing.T) {
+	cases := map[float64]string{0: "$0.00", 6.25: "$6.25", 99.994: "$99.99", 1234.56: "$1235"}
+	for in, want := range cases {
+		if got := humanUSD(in); got != want {
+			t.Errorf("humanUSD(%v) = %q, want %q", in, got, want)
 		}
 	}
 }

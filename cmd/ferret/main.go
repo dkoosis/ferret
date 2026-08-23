@@ -335,8 +335,6 @@ var CLI struct {
 
 	Usage UsageCmd `cmd:"" help:"The API token ledger read back from transcripts — measured spend, reconcilable against /usage." name:"usage"`
 
-	Parallel ParallelCmd `cmd:"" help:"Rank context spend by how many threads ran at once — session overlap vs subagent fan-out." name:"parallel"`
-
 	Substitutable SubstitutableCmd `cmd:"" help:"Rank Bash calls a native tool (Grep/Glob/Read) could replace — deterministic, no judge." name:"substitutable"`
 
 	Retrieval struct {
@@ -596,8 +594,6 @@ func main() {
 		err = cmdPolling(CLI.Polling)
 	case "usage":
 		err = cmdUsage(&CLI.Usage)
-	case "parallel":
-		err = cmdParallel(&CLI.Parallel)
 	case "substitutable":
 		err = cmdSubstitutable(CLI.Substitutable)
 	case "retrieval":

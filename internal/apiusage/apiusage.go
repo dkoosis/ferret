@@ -11,14 +11,17 @@
 // own telemetry) and from the lens "tokens" of internal/lens.
 package apiusage
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Row is one API call's ledger line. Short JSON keys: an artifact holds one row
 // per assistant turn across the whole corpus.
 //
 // Tokens are counted in four disjoint buckets and MUST NOT be summed into a
-// single "total" without weighting — they are priced differently by roughly an
-// order of magnitude end to end (see Weights). Thinking is a SUBSET of Output,
+// single "total" without pricing — they differ in price by up to 50x within one
+// model, and by another 10x across models. Thinking is a SUBSET of Output,
 // reported separately, and double-counts if added to it.
 type Row struct {
 	Session string    `json:"s"`
@@ -32,41 +35,92 @@ type Row struct {
 	Output     int `json:"out,omitempty"` // output_tokens, thinking included
 	Thinking   int `json:"th,omitempty"`  // subset of Output
 
-	// Write1h/Write5m split cache writes by TTL. A 5-minute write that expires
-	// before its next read is a full-price write that bought nothing, so the
-	// split is the difference between a cache that pays for itself and one that
-	// does not.
+	// Write1h/Write5m split CacheWrite by TTL, and the split is not cosmetic:
+	// a 1-hour write costs 2x base input where a 5-minute write costs 1.25x.
+	// Pricing the pooled bucket at one rate understates a corpus that mostly
+	// writes 1-hour entries by ~60% of its write cost.
 	Write1h int `json:"w1h,omitempty"`
 	Write5m int `json:"w5m,omitempty"`
 }
 
-// Weights are the published per-token price ratios, relative to one uncached
-// input token, used to turn four incomparable token counts into one comparable
-// number.
+// Multipliers on a model's base input price, published by the API and identical
+// across models — only the base price differs, which is what priceFor supplies.
 //
-// These are NOT fitted constants: they are the API's own posted multipliers,
-// and they are the reason a token count alone misleads. Cache write is 4.6% of
-// dk's tokens and roughly a third of the bill; output is ~0.4% of tokens and
-// over a tenth of it. VERIFY against current pricing before trusting a
-// weighted figure — a ratio change here reorders the ranking, which is exactly
-// why the raw buckets are reported alongside it and never replaced by it.
+// Break-even follows from them: a 5-minute entry pays for itself on the second
+// read (1.25 + 0.1 vs 2.0 uncached), a 1-hour entry on the third.
 const (
-	WeightInput      = 1.0
-	WeightCacheWrite = 1.25
-	WeightCacheRead  = 0.1
-	WeightOutput     = 5.0
+	MulCacheRead = 0.1
+	MulWrite5m   = 1.25
+	MulWrite1h   = 2.0
 )
 
-// Weighted is the row's cost in input-token-equivalents. Thinking is excluded
-// because it is already inside Output.
-func (r *Row) Weighted() float64 {
-	return WeightInput*float64(r.Input) +
-		WeightCacheWrite*float64(r.CacheWrite) +
-		WeightCacheRead*float64(r.CacheRead) +
-		WeightOutput*float64(r.Output)
+// PricedAt is when the price table below was last read from Anthropic's posted
+// pricing. Printed with every report: a spend figure whose prices are undated
+// invites exactly the silent staleness this package exists to prevent.
+const PricedAt = "2026-06-24"
+
+// Price is one model's posted rate in USD per million tokens. Cache terms are
+// not listed because they are fixed multiples of Input (see the constants
+// above); Output is listed because it is a posted price, not a derived one.
+type Price struct {
+	Input  float64
+	Output float64
 }
 
-// Totals accumulates rows into one bucket set.
+// prices is the posted table. Keys are model-id prefixes: a transcript may
+// carry a dated variant (claude-haiku-4-5-20251001), so lookup is by longest
+// matching prefix rather than exact equality.
+//
+// A model absent here is NOT priced at a guess — its calls land in Unpriced and
+// are reported, because a fabricated price is indistinguishable from a measured
+// one once it reaches a total. "<synthetic>" turns (harness-generated, never
+// billed) fall out through the same door.
+var prices = map[string]Price{
+	"claude-fable-5":    {Input: 10, Output: 50},
+	"claude-mythos-5":   {Input: 10, Output: 50},
+	"claude-opus-5":     {Input: 5, Output: 25},
+	"claude-opus-4-8":   {Input: 5, Output: 25},
+	"claude-opus-4-7":   {Input: 5, Output: 25},
+	"claude-opus-4-6":   {Input: 5, Output: 25},
+	"claude-sonnet-5":   {Input: 3, Output: 15},
+	"claude-sonnet-4-6": {Input: 3, Output: 15},
+	"claude-haiku-4-5":  {Input: 1, Output: 5},
+}
+
+// priceFor resolves a model id to its posted price by longest prefix match.
+func priceFor(model string) (Price, bool) {
+	best, bestLen, found := Price{}, 0, false
+	for k, p := range prices {
+		if strings.HasPrefix(model, k) && len(k) > bestLen {
+			best, bestLen, found = p, len(k), true
+		}
+	}
+	return best, found
+}
+
+// Cost prices one call in USD, or reports that its model is unknown.
+//
+// Cache writes are split by TTL. A write with no TTL split (an older transcript
+// schema) is charged the 5-minute rate: the conservative direction, since the
+// alternative inflates a number this package exists to keep honest.
+func (r *Row) Cost() (float64, bool) {
+	p, ok := priceFor(r.Model)
+	if !ok {
+		return 0, false
+	}
+	// max(…, 0): a split wider than the bucket means a schema we misread — the
+	// remainder is never negative.
+	unsplit := max(r.CacheWrite-r.Write1h-r.Write5m, 0)
+	inputUnits := float64(r.Input) +
+		MulCacheRead*float64(r.CacheRead) +
+		MulWrite1h*float64(r.Write1h) +
+		MulWrite5m*float64(r.Write5m+unsplit)
+	return (inputUnits*p.Input + float64(r.Output)*p.Output) / 1e6, true
+}
+
+// Totals accumulates rows into one bucket set, with cost accumulated per row
+// rather than derived at the end: cost depends on the model, and a pooled
+// bucket has already lost which model it came from.
 type Totals struct {
 	Calls      int   `json:"calls"`
 	Input      int64 `json:"input"`
@@ -76,6 +130,14 @@ type Totals struct {
 	Thinking   int64 `json:"thinking"`
 	Write1h    int64 `json:"write1h"`
 	Write5m    int64 `json:"write5m"`
+
+	USD         float64 `json:"usd"`
+	USDInput    float64 `json:"usdInput"`
+	USDWrite    float64 `json:"usdCacheWrite"`
+	USDRead     float64 `json:"usdCacheRead"`
+	USDOutput   float64 `json:"usdOutput"`
+	Unpriced    int     `json:"unpriced"` // calls whose model has no posted price
+	UnpricedTok int64   `json:"unpricedTokens"`
 }
 
 // Add folds one row in.
@@ -88,24 +150,28 @@ func (t *Totals) Add(r *Row) {
 	t.Thinking += int64(r.Thinking)
 	t.Write1h += int64(r.Write1h)
 	t.Write5m += int64(r.Write5m)
+
+	p, ok := priceFor(r.Model)
+	if !ok {
+		t.Unpriced++
+		t.UnpricedTok += int64(r.Input+r.CacheWrite+r.CacheRead) + int64(r.Output)
+		return
+	}
+	unsplit := max(r.CacheWrite-r.Write1h-r.Write5m, 0)
+	t.USDInput += float64(r.Input) * p.Input / 1e6
+	t.USDRead += MulCacheRead * float64(r.CacheRead) * p.Input / 1e6
+	t.USDWrite += (MulWrite1h*float64(r.Write1h) + MulWrite5m*float64(r.Write5m+unsplit)) * p.Input / 1e6
+	t.USDOutput += float64(r.Output) * p.Output / 1e6
+	t.USD = t.USDInput + t.USDRead + t.USDWrite + t.USDOutput
 }
 
 // Tokens is the raw token count — the number a token budget is denominated in,
 // and the wrong number to rank cost by.
 func (t *Totals) Tokens() int64 { return t.Input + t.CacheWrite + t.CacheRead + t.Output }
 
-// Weighted is the price-weighted cost in input-token-equivalents.
-func (t *Totals) Weighted() float64 {
-	return WeightInput*float64(t.Input) +
-		WeightCacheWrite*float64(t.CacheWrite) +
-		WeightCacheRead*float64(t.CacheRead) +
-		WeightOutput*float64(t.Output)
-}
-
 // ReadPerWrite is how many cached tokens each written token was read back for —
-// the cache-efficiency number. Below ~1.25 the cache is losing money outright;
-// dk's corpus ran ~20 at the 2026-08-13 diagnostic, which is why chasing hit
-// rate was the wrong move and cutting rebuilds was the right one.
+// the cache-efficiency number. Below the write multiplier the cache is losing
+// money outright.
 func (t *Totals) ReadPerWrite() float64 {
 	if t.CacheWrite == 0 {
 		return 0
