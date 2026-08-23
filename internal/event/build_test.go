@@ -107,6 +107,44 @@ func TestBurnBytesCaptureInputPlusResult(t *testing.T) {
 	if evs[0].Bytes != want {
 		t.Errorf("Bytes = %d, want %d (input %d + result %d)", evs[0].Bytes, want, len(input), len(content))
 	}
+	// ferret-e4g: the two halves that make up Bytes are individually visible.
+	if evs[0].InBytes != len(input) {
+		t.Errorf("InBytes = %d, want %d (tool_use input)", evs[0].InBytes, len(input))
+	}
+	if evs[0].OutBytes != len(content) {
+		t.Errorf("OutBytes = %d, want %d (tool_result content)", evs[0].OutBytes, len(content))
+	}
+}
+
+// TestBurnBytesInputOnly_When_ResultNeverArrives is the bead's original
+// motivating shape (ferret-e4g): a call with a large input and no paired
+// tool_result — interrupted, or the corpus was truncated mid-run — must not
+// have its input charged as if it were output. Before the split, an
+// oversized tool_use with no result silently looked identical to a small
+// call, because Bytes alone can't distinguish "large input, no output" from
+// "no input, large output".
+func TestBurnBytesInputOnly_When_ResultNeverArrives(t *testing.T) {
+	input := `{"pattern":"` + strings.Repeat("x", 500) + `"}` // oversized input
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Grep", input), // never resolved
+	)
+	evs := ingest(t, src)
+	if len(evs) != 1 {
+		t.Fatalf("events = %d, want 1", len(evs))
+	}
+	ev := evs[0]
+	if ev.Status != StatusNone {
+		t.Fatalf("status = %q, want %q (unpaired)", ev.Status, StatusNone)
+	}
+	if ev.InBytes == 0 {
+		t.Error("InBytes = 0, want > 0 (the tool_use input was captured)")
+	}
+	if ev.OutBytes != 0 {
+		t.Errorf("OutBytes = %d, want 0 (no tool_result ever arrived)", ev.OutBytes)
+	}
+	if ev.Bytes != ev.InBytes {
+		t.Errorf("Bytes = %d, want %d (== InBytes, no output half)", ev.Bytes, ev.InBytes)
+	}
 }
 
 // TestGetNugQueryEpisodeCapture is the Decision-0 contract (ferret-sq.d0): a
@@ -167,6 +205,14 @@ func TestBurnBytesSplitAcrossCompoundSegments(t *testing.T) {
 		if ev.Bytes <= len(content)/2 {
 			t.Errorf("segment %q Bytes = %d, want > %d (seg input + result share)", ev.Action, ev.Bytes, len(content)/2)
 		}
+		// ferret-e4g: InBytes is the segment's own text; OutBytes is its share
+		// of the result, and together they must still sum to Bytes.
+		if ev.InBytes != len(ev.Detail) {
+			t.Errorf("segment %q InBytes = %d, want %d (seg text)", ev.Action, ev.InBytes, len(ev.Detail))
+		}
+		if ev.InBytes+ev.OutBytes != ev.Bytes {
+			t.Errorf("segment %q InBytes+OutBytes = %d, want Bytes %d", ev.Action, ev.InBytes+ev.OutBytes, ev.Bytes)
+		}
 	}
 }
 
@@ -182,13 +228,19 @@ func TestBurnBytesConservedAcrossCompoundSegments(t *testing.T) {
 	if len(evs) != 3 {
 		t.Fatalf("events = %d, want 3", len(evs))
 	}
-	var resultBytes int
+	var resultBytes, outBytes int
 	for _, ev := range evs {
 		// each segment's bytes = its own command-segment len + a share of the payload
 		resultBytes += ev.Bytes - len(ev.Detail)
+		outBytes += ev.OutBytes
 	}
 	if resultBytes != len(content) {
 		t.Errorf("result bytes distributed = %d, want %d (remainder dropped)", resultBytes, len(content))
+	}
+	// ferret-e4g: the remainder-carry is an output-side concern only — it must
+	// land wholly on OutBytes, never leak into InBytes.
+	if outBytes != len(content) {
+		t.Errorf("OutBytes distributed = %d, want %d (remainder must land on OutBytes, not InBytes)", outBytes, len(content))
 	}
 }
 
@@ -987,6 +1039,14 @@ func TestAttachmentBytesAreWholeSerializedPayload(t *testing.T) {
 	}
 	if evs[0].Bytes <= len(`"hello"`) {
 		t.Error("Bytes looks like a content-only charge; metadata must be counted too")
+	}
+	// ferret-e4g: an attachment has no tool_use to pair against, so it is
+	// booked wholly as output, not split.
+	if evs[0].InBytes != 0 {
+		t.Errorf("InBytes = %d, want 0 (an attachment has no input half)", evs[0].InBytes)
+	}
+	if evs[0].OutBytes != len(payload) {
+		t.Errorf("OutBytes = %d, want %d (whole payload)", evs[0].OutBytes, len(payload))
 	}
 }
 

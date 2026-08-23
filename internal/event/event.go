@@ -52,11 +52,27 @@ type Event struct {
 	CandidateCount int      `json:"cc,omitempty"`
 	TriedRungs     []string `json:"tr,omitempty"`
 	IndexState     string   `json:"ix,omitempty"`
-	Bytes          int      `json:"b,omitempty"` // measured context cost: tool_use input + tool_result content
-	Skill          string   `json:"skill,omitempty"`
-	Plugin         string   `json:"plug,omitempty"`
-	MCP            string   `json:"mcp,omitempty"`
-	Version        string   `json:"v,omitempty"`
+	// Bytes is the measured context cost — InBytes + OutBytes — and stays the
+	// ranking key every consumer (burn, stream, finding) already sorts on
+	// (ferret-e4g). Kept as its own stored field rather than derived at read
+	// time so those consumers need no change.
+	Bytes int `json:"b,omitempty"`
+	// InBytes is the request-side half of Bytes: for a shell segment, the
+	// segment's own command text (Segment.Raw); for a non-Bash tool call, the
+	// whole tool_use input envelope (blk.Input). Those two are measured
+	// differently on purpose — a shell segment has no separate envelope to
+	// measure the way a tool call's JSON input does — and that asymmetry was
+	// already inside the conflated Bytes; splitting it only makes it visible.
+	InBytes int `json:"ib,omitempty"`
+	// OutBytes is the response-side half of Bytes: the tool_result payload
+	// attributed to this event. A KindAttach event has no tool_use/tool_result
+	// pair to split — it enters context as one whole payload with nothing to
+	// call "input" — so its full Bytes is booked here.
+	OutBytes int    `json:"ob,omitempty"`
+	Skill    string `json:"skill,omitempty"`
+	Plugin   string `json:"plug,omitempty"`
+	MCP      string `json:"mcp,omitempty"`
+	Version  string `json:"v,omitempty"`
 	// Prompt is the full, untruncated user-turn text — only set on KindPrompt
 	// events. Captured at ingestion so a downstream consumer can do linguistic /
 	// query-quality analysis without re-parsing raw transcripts (ferret-d01).

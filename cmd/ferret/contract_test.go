@@ -110,7 +110,7 @@ func TestWriteBurnText_ReportsEveryDroppedRow_When_LimitTruncates(t *testing.T) 
 	res := &mine.BurnResult{Events: 9, Sessions: 3}
 	for i := range 5 {
 		res.Rows = append(res.Rows, mine.BurnRow{
-			Key: fmt.Sprintf("sh:cmd%d", i), Calls: 1, OutBytes: 10,
+			Key: fmt.Sprintf("sh:cmd%d", i), Calls: 1, Bytes: 10,
 		})
 	}
 	var buf bytes.Buffer

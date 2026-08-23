@@ -55,7 +55,10 @@ func removeTmp(tmp string) {
 //	1 — the pre-provenance era: manifests carrying only createdAt/root/stats.
 //	2 — usage.jsonl lands beside events.jsonl (ferret-x2v), and the manifest
 //	    carries the provenance below.
-const SchemaVersion = 2
+//	3 — Event.Bytes splits into InBytes/OutBytes (ferret-e4g); Bytes itself is
+//	    unchanged (InBytes+OutBytes), but an old corpus decodes both new fields
+//	    as zero, which is silently wrong rather than absent.
+const SchemaVersion = 3
 
 // Provenance is what a number was measured WITH — as distinct from what it was
 // measured OVER, which is Root and CreatedAt.
