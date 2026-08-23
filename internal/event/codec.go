@@ -45,12 +45,54 @@ func removeTmp(tmp string) {
 	}
 }
 
-// Manifest records what an events.jsonl was built from.
-type Manifest struct {
-	CreatedAt time.Time `json:"createdAt"`
-	Root      string    `json:"root"`
-	Stats     *Stats    `json:"stats"`
+// SchemaVersion is the artifact era. Bump it whenever a change makes numbers
+// from an older corpus incomparable to numbers from a new one — a new captured
+// field, a changed accounting rule, a different unit. A reader that finds an
+// unsupported version refuses the corpus and names the re-ingest command
+// instead of mining it, because the failure this prevents is silent: two eras
+// mixed in one trend line look exactly like a real regression (ferret-4wc).
+//
+//	1 — the pre-provenance era: manifests carrying only createdAt/root/stats.
+//	2 — usage.jsonl lands beside events.jsonl (ferret-x2v), and the manifest
+//	    carries the provenance below.
+const SchemaVersion = 2
+
+// Provenance is what a number was measured WITH — as distinct from what it was
+// measured OVER, which is Root and CreatedAt.
+//
+// Without it a measurement tool cannot tell "the number moved because the
+// transcripts changed" from "the number moved because ferret's normalizer
+// changed", and every cross-run comparison is uninterpretable. That distinction
+// is load-bearing for phase 4, whose whole premise is verifying a delta.
+type Provenance struct {
+	Ferret     string `json:"ferret"`     // build revision (VCS commit, "unknown" outside a VCS build)
+	Normalizer string `json:"normalizer"` // shellnorm rule-set version — changes re-key every shell row
+	Flags      Flags  `json:"flags"`      // the effective ingest flags this corpus was built with
 }
+
+// Flags is the effective ingest configuration, recorded because two corpora
+// built with different filters are not comparable however identical their
+// versions are.
+type Flags struct {
+	Project    string `json:"project,omitempty"`
+	SnipeUsage string `json:"snipeUsage,omitempty"`
+}
+
+// Manifest records what an events.jsonl was built from, and what it was built
+// with. It doubles as the completeness sentinel: every ingest path writes it
+// last, so a valid manifest means the artifact beside it is whole.
+type Manifest struct {
+	SchemaVersion int        `json:"schemaVersion"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	Root          string     `json:"root"`
+	Provenance    Provenance `json:"provenance"`
+	Stats         *Stats     `json:"stats"`
+}
+
+// Compatible reports whether this manifest's corpus can be mined by this build.
+// Version 0 means a manifest written before provenance existed: the field was
+// absent, so it decodes to zero, which is exactly the era this gate must catch.
+func (m *Manifest) Compatible() bool { return m.SchemaVersion == SchemaVersion }
 
 // Writer streams events to an ndjson artifact. Writes go to path+".tmp" and
 // are atomically renamed onto path only on a fully successful flush+sync+close,

@@ -9,6 +9,14 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
+// Version is the rule-set version of this package, recorded in every corpus
+// manifest (internal/event.Provenance). Bump it by hand whenever a change here
+// alters the token a given command normalizes to — a new subcommand rule, a
+// changed split, a different collapse. Two corpora built with different
+// Versions have differently-keyed shell rows, so a per-key delta across them
+// measures the rule change, not the behavior change (ferret-4wc).
+const Version = "1"
+
 // Segment is one normalized command from a (possibly compound) bash string.
 type Segment struct {
 	Cmd string // normalized: base command, or base_subcommand

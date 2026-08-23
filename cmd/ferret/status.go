@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/dkoosis/ferret/internal/event"
 	"github.com/dkoosis/ferret/internal/mine"
 	"github.com/dkoosis/ferret/internal/out"
+	"github.com/dkoosis/ferret/internal/shellnorm"
 )
 
 // StatusCmd backs both `ferret status` and bare `ferret` (ferret-c91).
@@ -56,12 +58,21 @@ func cmdStatus(cmd *StatusCmd) error {
 // unreadable yields Ready=false with Note explaining which, never an error:
 // "you have no corpus yet" is a state to report, not a failure to exit on.
 type status struct {
-	Data     string          `json:"data"`
-	Ready    bool            `json:"ready"`
-	Note     string          `json:"note,omitempty"`
-	BuiltAt  time.Time       `json:"builtAt,omitzero"`
-	Stale    bool            `json:"stale"`
-	Newest   time.Time       `json:"newest,omitzero"`
+	Data    string    `json:"data"`
+	Ready   bool      `json:"ready"`
+	Note    string    `json:"note,omitempty"`
+	BuiltAt time.Time `json:"builtAt,omitzero"`
+	Stale   bool      `json:"stale"`
+	Newest  time.Time `json:"newest,omitzero"`
+	// Two independent reasons a number here may not be worth comparing to an
+	// earlier one, reported separately because they have different remedies and
+	// a merged "stale" flag cannot tell them apart (ferret-4wc):
+	//   Stale     — the transcripts moved under a corpus that is otherwise fine.
+	//   EraDrift  — this ferret is not the ferret that built the corpus.
+	EraDrift bool            `json:"eraDrift"`
+	Era      string          `json:"era,omitempty"` // what drifted, in one phrase
+	Ferret   string          `json:"ferret,omitempty"`
+	Schema   int             `json:"schemaVersion,omitempty"`
 	Events   int             `json:"events,omitempty"`
 	Sessions int             `json:"sessions,omitempty"`
 	Waste    int             `json:"wasteBytes,omitempty"`
@@ -79,6 +90,10 @@ func readStatus(c *common) status {
 	}
 	st.Ready = true
 	st.Stale, st.BuiltAt, st.Newest = corpusStale(manifestPath)
+	if m, ok := readManifest(manifestPath); ok {
+		st.Schema, st.Ferret = m.SchemaVersion, m.Provenance.Ferret
+		st.EraDrift, st.Era = eraDrift(&m)
+	}
 
 	rep, err := statusWaste(c)
 	if err != nil {
@@ -128,6 +143,9 @@ func writeStatusText(w io.Writer, st status, maxBytes int) error {
 		st.Data, st.Events, st.Sessions, st.BuiltAt.Format(time.RFC3339), staleMark(st))
 	// waste≤: the detectors overlap, so the sum is an upper bound, never a
 	// share of the corpus total (internal/mine/friction.go's WasteReport).
+	if st.EraDrift {
+		sink.Head("era: %s — a delta across this boundary measures ferret, not behavior; 'ferret ingest' to rebase", st.Era)
+	}
 	sink.Head("waste≤%s of %s context bytes — top %d:",
 		humanBytes(st.Waste), humanBytes(st.Gross), len(st.Top))
 	// Rows go through Row, not Head, so --max-bytes actually caps this command
@@ -164,4 +182,20 @@ func staleHint(st status) string {
 // already bounded at statusTop.
 func writeStatusJSON(w io.Writer, st status) error {
 	return out.JSON(w, st)
+}
+
+// eraDrift reports whether the corpus was built by a different ferret than the
+// one reading it, and names which part differs. Schema mismatch is checked
+// first: it is the only one that makes the corpus unreadable rather than merely
+// incomparable, and ensureData refuses it outright.
+func eraDrift(m *event.Manifest) (bool, string) {
+	switch {
+	case m.SchemaVersion != event.SchemaVersion:
+		return true, fmt.Sprintf("corpus schema v%d, this ferret v%d", m.SchemaVersion, event.SchemaVersion)
+	case m.Provenance.Normalizer != shellnorm.Version:
+		return true, fmt.Sprintf("shell normalizer v%s, this ferret v%s — shell rows are keyed differently", m.Provenance.Normalizer, shellnorm.Version)
+	case m.Provenance.Ferret != "" && m.Provenance.Ferret != buildRevision():
+		return true, fmt.Sprintf("built by ferret %s, running %s", m.Provenance.Ferret, buildRevision())
+	}
+	return false, ""
 }

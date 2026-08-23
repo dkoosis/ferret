@@ -122,6 +122,13 @@ type Stats struct {
 	UsageSources int `json:"usageSources,omitempty"`
 	UsageRecords int `json:"usageRecords,omitempty"`
 	UsageJoined  int `json:"usageJoined,omitempty"`
+	// APICalls/APIDupes are the token-ledger leg (ferret-x2v): distinct API
+	// calls whose usage was captured, and repeat lines collapsed by message id.
+	// APIDupes is reported rather than hidden because it is large (~35% of
+	// usage-bearing lines) and a regression there silently inflates every spend
+	// number by that much.
+	APICalls int `json:"apiCalls,omitempty"`
+	APIDupes int `json:"apiDupes,omitempty"`
 	// CwdResets counts CwdReset events seen this ingest (ferret-cax item 5).
 	CwdResets int            `json:"cwdResets,omitempty"`
 	ByType    map[string]int `json:"byType"`

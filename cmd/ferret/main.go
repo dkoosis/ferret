@@ -32,6 +32,10 @@ var (
 	errMaxLen       = usage("--max-len must be ≥ 1")
 	errOrder        = usage("--order must be ≥ 1")
 	errBadSource    = usage("bad --source")
+
+	// errCorpusEra is a static sentinel so callers can errors.Is it; the version
+	// numbers ride in a wrap, not in a fresh error type.
+	errCorpusEra = errors.New("corpus was built by a different ferret era")
 )
 
 // usageError marks a sentinel as a complaint about the COMMAND LINE rather
@@ -329,6 +333,8 @@ var CLI struct {
 
 	Polling PollingCmd `cmd:"" help:"Rank exact-duplicate commands repeated within a session." name:"polling"`
 
+	Usage UsageCmd `cmd:"" help:"The API token ledger read back from transcripts — measured spend, reconcilable against /usage." name:"usage"`
+
 	Substitutable SubstitutableCmd `cmd:"" help:"Rank Bash calls a native tool (Grep/Glob/Read) could replace — deterministic, no judge." name:"substitutable"`
 
 	Retrieval struct {
@@ -586,6 +592,8 @@ func main() {
 		err = cmdMisfires(CLI.Misfires)
 	case "polling":
 		err = cmdPolling(CLI.Polling)
+	case "usage":
+		err = cmdUsage(&CLI.Usage)
 	case "substitutable":
 		err = cmdSubstitutable(CLI.Substitutable)
 	case "retrieval":
@@ -711,6 +719,32 @@ func manifestComplete(path string) bool {
 	return err == nil && len(b) > 0 && json.Valid(b)
 }
 
+// readManifest decodes a complete manifest, or reports that there is none to
+// read. Separate from manifestComplete because completeness ("an ingest
+// finished") and compatibility ("this build can read what it left") are
+// different questions with different remedies.
+func readManifest(path string) (event.Manifest, bool) {
+	b, err := os.ReadFile(path)
+	if err != nil || len(b) == 0 {
+		return event.Manifest{}, false
+	}
+	var m event.Manifest
+	if err := json.Unmarshal(b, &m); err != nil {
+		return event.Manifest{}, false
+	}
+	return m, true
+}
+
+// eraRefusal reports a corpus this build cannot compare against its own
+// numbers. It is a hard stop, deliberately, and NOT the auto-ingest path that
+// a missing corpus takes: a version mismatch is a state the caller must see,
+// because the alternative — quietly mining an older era's artifact — produces
+// numbers that look fine and mean nothing next to today's (ferret-4wc).
+func eraRefusal(m *event.Manifest) error {
+	return fmt.Errorf("%w: corpus schema v%d, this ferret reads v%d — the artifact predates a change that makes its numbers incomparable; rebuild with 'ferret ingest'",
+		errCorpusEra, m.SchemaVersion, event.SchemaVersion)
+}
+
 // ensureData runs a default ingest when the artifact is missing or incomplete.
 // A bare os.Stat is not sufficient: a 0-byte file (from an interrupted ingest)
 // or a file with no companion manifest passes Stat but represents a broken
@@ -728,6 +762,9 @@ func (c *common) ensureData() error {
 	manifestPath := filepath.Join(c.data, "manifest.json")
 	if manifestComplete(manifestPath) {
 		// manifest present, non-empty, valid JSON → ingest completed
+		if m, ok := readManifest(manifestPath); ok && !m.Compatible() {
+			return eraRefusal(&m)
+		}
 		if stale, builtAt, newest := corpusStale(manifestPath); stale {
 			fmt.Fprintf(os.Stderr,
 				"ferret: corpus built %s is stale — transcripts changed since (newest %s); run 'ferret ingest' to refresh\n",

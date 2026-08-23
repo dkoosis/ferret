@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dkoosis/ferret/internal/event"
+	"github.com/dkoosis/ferret/internal/shellnorm"
 )
 
 // TestManifestComplete guards the ensureData completeness gate: a bare
@@ -202,5 +203,104 @@ func TestDefaultPathsAbsoluteOnSuccess(t *testing.T) {
 	r, err := defaultRoot()
 	if err != nil || r != filepath.Join(home, ".claude", "projects") {
 		t.Errorf("defaultRoot() = %q, %v; want /home/u/.claude/projects, nil", r, err)
+	}
+}
+
+// TestEnsureData_RefusesCorpus_When_SchemaVersionIsAnEarlierEra pins the
+// ferret-4wc gate: a corpus from a previous artifact era is refused with the
+// re-ingest command named, NOT silently mined. Mining it would produce numbers
+// that look fine beside today's and mean something different — the exact
+// failure the gate exists to prevent.
+func TestEnsureData_RefusesCorpus_When_SchemaVersionIsAnEarlierEra(t *testing.T) {
+	dir := t.TempDir()
+	writeEraManifest(t, dir, event.SchemaVersion-1)
+
+	c := &common{data: dir}
+	err := c.ensureData()
+	if err == nil {
+		t.Fatal("ensureData accepted a corpus from an earlier era — it must refuse")
+	}
+	if !strings.Contains(err.Error(), "ferret ingest") {
+		t.Errorf("refusal must name the fix, got: %v", err)
+	}
+}
+
+// TestEnsureData_RefusesCorpus_When_ManifestPredatesProvenance pins the
+// zero-value case: manifests written before schemaVersion existed decode to 0,
+// which is precisely the era boundary the gate must catch rather than wave
+// through as "no version recorded, probably fine".
+func TestEnsureData_RefusesCorpus_When_ManifestPredatesProvenance(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"),
+		[]byte(`{"createdAt":"2026-08-01T00:00:00Z","root":"/tmp/x"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&common{data: dir}).ensureData(); err == nil {
+		t.Error("a pre-provenance manifest (schemaVersion absent → 0) must be refused")
+	}
+}
+
+// TestEnsureData_AcceptsCorpus_When_SchemaVersionMatches pins that the gate
+// stays out of the way on the normal path.
+func TestEnsureData_AcceptsCorpus_When_SchemaVersionMatches(t *testing.T) {
+	dir := t.TempDir()
+	writeEraManifest(t, dir, event.SchemaVersion)
+	if err := (&common{data: dir}).ensureData(); err != nil {
+		t.Errorf("ensureData refused a current-era corpus: %v", err)
+	}
+}
+
+// writeEraManifest writes a complete manifest at a chosen schema version, with
+// a root that does not exist so the staleness probe stays silent.
+func writeEraManifest(t *testing.T, dir string, version int) {
+	t.Helper()
+	m := event.Manifest{
+		SchemaVersion: version,
+		CreatedAt:     time.Now(),
+		Root:          filepath.Join(dir, "no-such-root"),
+		Provenance:    event.Provenance{Ferret: "abc123", Normalizer: shellnorm.Version},
+		Stats:         event.NewStats(),
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestEraDrift_NamesTheDifferingPart_When_ProvenanceDisagrees pins the
+// ferret-4wc reporting AC: status must say WHICH era moved, because "stale"
+// alone cannot separate "transcripts changed" from "ferret changed" and the
+// two have different remedies.
+func TestEraDrift_NamesTheDifferingPart_When_ProvenanceDisagrees(t *testing.T) {
+	cases := []struct {
+		name string
+		m    event.Manifest
+		want string
+	}{
+		{"schema", event.Manifest{SchemaVersion: event.SchemaVersion - 1}, "schema"},
+		{"normalizer", event.Manifest{SchemaVersion: event.SchemaVersion,
+			Provenance: event.Provenance{Normalizer: "0", Ferret: buildRevision()}}, "normalizer"},
+		{"build", event.Manifest{SchemaVersion: event.SchemaVersion,
+			Provenance: event.Provenance{Normalizer: shellnorm.Version, Ferret: "deadbeef0000"}}, "built by ferret"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			drift, why := eraDrift(&tc.m)
+			if !drift {
+				t.Fatalf("expected drift for %s, got none", tc.name)
+			}
+			if !strings.Contains(why, tc.want) {
+				t.Errorf("reason %q does not name %q", why, tc.want)
+			}
+		})
+	}
+
+	same := event.Manifest{SchemaVersion: event.SchemaVersion,
+		Provenance: event.Provenance{Normalizer: shellnorm.Version, Ferret: buildRevision()}}
+	if drift, why := eraDrift(&same); drift {
+		t.Errorf("matching provenance reported drift: %s", why)
 	}
 }
