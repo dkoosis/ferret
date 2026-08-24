@@ -1,0 +1,48 @@
+direction: right
+
+classes: {
+  source: {
+    style.stroke: "#6a737d"
+    style.stroke-dash: 3
+  }
+  artifact: {
+    shape: cylinder
+  }
+}
+
+transcripts: |md
+  **Transcripts**
+  `~/.claude/projects/**/*.jsonl`
+| {class: source}
+
+events: |md
+  **Canonical events**
+  `~/.ferret/events.jsonl`
+| {class: artifact}
+
+streams: |md
+  **Token streams**
+  keyed (session, agent)
+|
+
+patterns: |md
+  **Patterns**
+  n-grams · subsequences · graph
+|
+
+ranked: |md
+  **Ranked output**
+  priced in measured bytes
+|
+
+ledger: |md
+  **Fixes ledger**
+  `~/.ferret/fixes.jsonl`
+| {class: artifact}
+
+transcripts -> events: ingest
+events -> streams: lens
+streams -> patterns
+patterns -> ranked
+ranked -> ledger: fixes add
+ledger -> ranked: --since-fixes (burn delta)

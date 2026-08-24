@@ -122,15 +122,10 @@ enters the ledger.
 
 ## How it works
 
-```mermaid
-flowchart LR
-  T["~/.claude/projects/**/*.jsonl"] -->|ingest| E["~/.ferret/events.jsonl<br/>canonical events"]
-  E -->|lens| K["token streams<br/>keyed (session, agent)"]
-  K --> P["patterns<br/>n-grams · subsequences · graph"]
-  P --> R["ranked output<br/>priced in measured bytes"]
-  R -->|fixes add| L["~/.ferret/fixes.jsonl<br/>baseline ledger"]
-  L -->|--since-fixes| R
-```
+<img src="docs/diagrams/pipeline.svg" alt="transcripts to canonical events to token streams to patterns to ranked output, with the fixes ledger feeding back in" width="480">
+
+<sub>Source: [`docs/diagrams/pipeline.d2`](docs/diagrams/pipeline.d2) — regenerate with
+`d2 --layout tala docs/diagrams/pipeline.d2 docs/diagrams/pipeline.svg`.</sub>
 
 - **Transcripts** are the raw ground truth, read-only. ferret never writes to them.
 - **`~/.ferret/events.jsonl`** is a build artifact — one canonical event per action,
