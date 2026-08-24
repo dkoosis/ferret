@@ -1,0 +1,34 @@
+direction: right
+
+# Render:  d2 --layout tala --tala-seeds 4 pipeline.d2 pipeline.svg
+# The seed is pinned because tala's default seed set lays this graph out as a
+# 3.5:1 ribbon; seed 4 returns a near-square 1212x1034 canvas.
+#
+# Labels are plain text, never |md| blocks. D2 renders a markdown label as
+# <foreignObject>, and a browser does not render foreignObject when the SVG is
+# loaded through an <img> tag — which is how README.md embeds this. Markdown
+# labels ship as empty boxes on GitHub.
+
+classes: {
+  source: {
+    style.stroke: "#6a737d"
+    style.stroke-dash: 3
+  }
+  artifact: {
+    shape: cylinder
+  }
+}
+
+transcripts: "Transcripts\n~/.claude/projects/**/*.jsonl" {class: source}
+events: "Canonical events\n~/.ferret/events.jsonl" {class: artifact}
+streams: "Token streams\nkeyed (session, agent)"
+patterns: "Patterns\nn-grams · subsequences · graph"
+ranked: "Ranked output\npriced in measured bytes"
+ledger: "Fixes ledger\n~/.ferret/fixes.jsonl" {class: artifact}
+
+transcripts -> events: ingest
+events -> streams: lens
+streams -> patterns
+patterns -> ranked
+ranked -> ledger: fixes add
+ledger -> ranked: --since-fixes (burn delta)
