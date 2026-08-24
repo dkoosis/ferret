@@ -122,10 +122,10 @@ enters the ledger.
 
 ## How it works
 
-<img src="docs/diagrams/pipeline.svg" alt="transcripts to canonical events to token streams to patterns to ranked output, with the fixes ledger feeding back in" width="480">
+<img src="docs/diagrams/pipeline.svg" alt="transcripts to canonical events to token streams to patterns to ranked output, with the fixes ledger feeding back in" width="520">
 
 <sub>Source: [`docs/diagrams/pipeline.d2`](docs/diagrams/pipeline.d2) — regenerate with
-`d2 --layout tala docs/diagrams/pipeline.d2 docs/diagrams/pipeline.svg`.</sub>
+`d2 --layout tala --tala-seeds 4 docs/diagrams/pipeline.d2 docs/diagrams/pipeline.svg`.</sub>
 
 - **Transcripts** are the raw ground truth, read-only. ferret never writes to them.
 - **`~/.ferret/events.jsonl`** is a build artifact — one canonical event per action,
