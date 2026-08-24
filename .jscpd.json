@@ -1,5 +1,6 @@
 {
   "gitignore": true,
+  "minLines": 17,
   "ignore": [
     "**/.sandbox/**",
     "**/node_modules/**",
