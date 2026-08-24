@@ -1,31 +1,201 @@
 # ferret
 
-Mines Claude Code transcripts (`~/.claude/projects/**/*.jsonl`) for repeated behavior: scriptable routines, friction loops, and noisy context. AX-first — the primary consumer is Claude itself.
+> **One sentence:** ferret reads your Claude Code transcripts and tells you, in measured bytes, which habits are wasting the most context.
+
+`ferret` **turns a pile of session logs into a ranked repair list** for **anyone tuning an agent's tools, hooks, and memory**, without **guessing which habit costs the most** — every finding is priced in bytes that actually entered a request body, over the whole corpus, with no model in the loop.
+
+AX-first: the primary reader is Claude itself.
+
+## See it work
+
+```console
+$ ferret ingest
+health unpaired=0.0% shell-fallback=14 deduped=663 decode-errs=0
+api-ledger calls=105546 duplicate-lines-collapsed=95813
+
+$ ferret status
+ferret /Users/you/.ferret · 553506 events · 2872 sessions · built 2026-08-24T14:36:19-04:00
+waste≤22.4MB of 477.1MB context bytes — top 3:
+       1.3MB  misfire    191x  Read
+       1.1MB  misfire    543x  SendMessage
+    1017.0KB  misfire    709x  Edit
+next:
+  ferret friction
+
+$ ferret friction --limit 4
+friction rows=6983 waste≤28.2MB [poll 12.6MB · misfire 9.7MB · motif 5.8MB]  gross=477.1MB
+     1.5MB waste    246x   261 sess          0B gross  motif    Read ⇝ Read ⇝ Edit
+     1.3MB waste    191x   124 sess      76.9MB gross  misfire  Read
+     1.1MB waste    543x   118 sess       5.2MB gross  misfire  SendMessage
+  1017.0KB waste    709x   295 sess      12.9MB gross  misfire  Edit
+```
+
+`Read ⇝ Read ⇝ Edit`, 246 needless repeats across 261 sessions, 1.5MB of context: that
+is a hook waiting to be written, and now it has a price tag.
 
 ## Install
 
-```
-make build          # or: go build -o ferret ./cmd/ferret
-make help           # all targets (check, audit, install…)
-```
-
-## Quickstart
-
-```
-ferret ingest                               # 1.4GB raw → ~36MB ~/.ferret/events.jsonl (~15s)
-ferret summary  [--by project|session]      # corpus health, tool mix, failure rates
-ferret ngrams   [--lens tool] [--n 2-5]               # repeated n-grams
-ferret seqs     [--lens tool] [--max-gap 3]           # gapped subsequences (PrefixSpan)
-ferret rank     [--lens tool] [--top 10]              # ranked review queue, bucketed
-ferret report   [--kind routine|friction|loop|noise] # findings → action verb, ranked by measured burn
-ferret surprise [--lens tool]                         # per-session predictability (low=scriptable, high=thrash)
-ferret graph    [--loops] [--format mermaid|dot]      # transition graph
-ferret tokens   --session PREFIX                      # one session's token stream (lens debugger)
-ferret reach    [--since Y-M-D] [--until Y-M-D]       # recall-opportunity reach-rate (memory keystone)
+```console
+go install github.com/dkoosis/ferret/cmd/ferret@latest
 ```
 
-Flags vary by command; the table under [Commands](#commands) is generated from the CLI grammar
-and is the authoritative list. Truncation is never silent.
+From a clone: `make build` (binary in place) or `make deploy` (build + install to `GOPATH/bin`).
+`make help` lists every target.
+
+## Common workflows
+
+### Find what is burning context
+
+```console
+$ ferret ingest          # ~/.claude/projects/**/*.jsonl → ~/.ferret/events.jsonl
+$ ferret status          # corpus health + the heaviest waste rows
+$ ferret friction        # one ranked table: polling + misfires + motifs, priced by burn
+$ ferret burn            # gross cost per normalized command — the tune-up list
+```
+
+`friction` ranks **waste** (calls that bought nothing); `burn` ranks **gross** spend
+(what a command costs even when it works). A command can top `burn` and be fine —
+`Read` is expensive because you read a lot — while a cheap command called 700 times
+in a failing loop tops `friction`. The subtotals under `friction` are sound; their
+sum is an upper bound, because a failing repeated call is charged by two detectors.
+
+### Fix something, then prove the fix landed
+
+```console
+$ ferret report --top 5                                  # motifs → an action verb, ranked by burn
+$ ferret fixes add --motif "Edit!,Read" --fix "hookify read-before-edit"
+$ ferret ingest && ferret report --since-fixes           # burn delta vs the recorded baseline
+```
+
+`fixes add` stamps the motif's current burn as a baseline, so the next report can
+subtract. This is the loop ferret exists for: rank what burns, change something,
+measure whether it moved.
+
+### Read one session closely
+
+```console
+$ ferret spine    --session 68ff0758     # prompts + thinking + calls + result sizes
+$ ferret segments --session 68ff0758     # task boundaries (one per user prompt)
+$ ferret dialogue --session 68ff0758     # per-turn repair/accept tags + outcome rollup
+$ ferret tokens   --session 68ff0758 --lens exact   # the raw token stream (lens debugger)
+```
+
+Session arguments are **prefixes** — the first few characters of the session UUID
+are enough. `ferret search "some string"` finds which session to look at.
+
+### Measure whether memory is being reached for
+
+```console
+$ ferret reach --format md
+### reach 2026-08-17..2026-08-24 · n=40
+reach-rate **store=8%** (3/40) · kg[+beads]=12% · fail=37/40 · sessions=35
+channels: store=3 beads=2 grep=2 gh=0 none=33 · class: recall=26 reorient=14
+```
+
+`reach` finds recall-opportunity moments — someone asking what is already known or
+decided — and classifies what the agent reached for **first**: the knowledge store,
+beads, grep, git forensics, or nothing. Reach-rate is store-first reaches over
+opportunities, always printed with its `n`. Default window is the trailing 7 days,
+so the weekly cadence is a bare `ferret reach --format md` appended to a ledger.
+Single-week deltas are noise at tens of opportunities per week; judge on a rolling
+three weeks.
+
+### Ask a model, deliberately
+
+Most of ferret never leaves the machine. A handful of commands send
+transcript-derived material to the Anthropic API and cost money; they are labelled
+`[model]` in `ferret --help` and in the table below.
+
+```console
+$ ferret adjudicate --session 68ff0758 --propose   # LLM analyst: tool-for-intent mismatches
+$ ferret adjudicate --session 68ff0758 --emit-prompt  # assemble the prompt, call nothing
+$ FERRET_OFFLINE=1 ferret adjudicate --session 68ff0758
+ferret: `ferret adjudicate` calls the Anthropic API — offline mode: refusing to call
+the Anthropic API (unset FERRET_OFFLINE / drop --offline to allow it)
+```
+
+`--offline` (or `FERRET_OFFLINE=1`) makes every model command fail closed with exit
+code 2 — safe to set globally and forget. Model commands print their preflight and
+cost lines on **stderr**, so `--format json` stays pipeable into `jq`. Their verdicts
+are a precision layer over the deterministic floor: a human validates before anything
+enters the ledger.
+
+## How it works
+
+```mermaid
+flowchart LR
+  T["~/.claude/projects/**/*.jsonl"] -->|ingest| E["~/.ferret/events.jsonl<br/>canonical events"]
+  E -->|lens| K["token streams<br/>keyed (session, agent)"]
+  K --> P["patterns<br/>n-grams · subsequences · graph"]
+  P --> R["ranked output<br/>priced in measured bytes"]
+  R -->|fixes add| L["~/.ferret/fixes.jsonl<br/>baseline ledger"]
+  L -->|--since-fixes| R
+```
+
+- **Transcripts** are the raw ground truth, read-only. ferret never writes to them.
+- **`~/.ferret/events.jsonl`** is a build artifact — one canonical event per action,
+  cheap to rebuild, safe to delete.
+- **Lenses** re-slice those same events at different granularity. Re-slicing is a
+  seconds-long loop, which is the whole point of keeping a canonical layer.
+- **The fixes ledger** is the only durable state ferret authors, and it exists to
+  make a before/after comparison possible.
+
+### The important rule
+
+**The corpus is an artifact of a particular ferret, and ferret refuses to compare
+across versions.** When the event schema changes, an older `events.jsonl` is rejected
+with an era error naming `ferret ingest` rather than silently ranked — otherwise a
+"delta" measures ferret's own churn instead of your behavior. Re-ingest after every
+upgrade. Truncation is never silent either: a capped table says how many rows it
+dropped and which flag lifts the cap.
+
+## Example
+
+Suppose a week feels slow and you want to know why, not guess:
+
+```console
+$ ferret ingest && ferret friction --limit 3
+     1.5MB waste    246x   261 sess          0B gross  motif    Read ⇝ Read ⇝ Edit
+     1.3MB waste    191x   124 sess      76.9MB gross  misfire  Read
+  1017.0KB waste    709x   295 sess      12.9MB gross  misfire  Edit
+
+$ ferret report --kind friction --top 2
+friction hook     burn=455598  n=484  sess=317  fail=50%  Edit! ⇝ Read   ex: 68ff0758@279
+friction hook     burn=171396  n=120  sess= 95  fail=33%  sh:sed ⇝ Edit! ⇝ Read  ex: f7ec7869@148
+
+$ ferret spine --session 68ff0758        # look at the example occurrence
+$ ferret fixes add --motif "Edit!,Read" --fix "hookify read-before-edit"
+```
+
+Half of those `Edit` calls failed and were repaired by a `Read` that should have come
+first — a hook, not a habit. Afterward:
+
+```text
+~/.ferret/fixes.jsonl
+{"motif":"Edit!,Read","fix":"hookify read-before-edit","addedAt":"2026-08-24T14:38:59-04:00",
+ "baselineBurn":455598,"disposition":"fix","lens":"tool"}
+```
+
+Next week, `ferret ingest && ferret report --since-fixes` annotates that motif with
+`[fixed DATE burn BASE→NOW ↓]` — an arrow that has to point down, or the fix did not
+land.
+
+## Configuration
+
+No config file. Four environment variables, each with a flag equivalent where it matters:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `FERRET_DATA` | `~/.ferret` | Artifact directory (`--data DIR`). |
+| `FERRET_OFFLINE` | unset | Refuse every `[model]` command, exit 2 (`--offline`). |
+| `FERRET_ANTHROPIC_API_KEY` | unset | API key for `[model]` commands. |
+| `FERRET_LIVE_KEYCHAIN` | unset | Let tests touch the real keychain. |
+
+The API key is read **keychain-first** — macOS keychain service `ferret`, account
+`anthropic` — falling back to `FERRET_ANTHROPIC_API_KEY`. A locked or unreadable
+keychain is a hard error, not a silent fallback. With no key at all, model commands
+fail with a message naming all three doors, including `--emit-prompt`, which
+assembles the prompt without calling anything.
 
 ## Commands
 
@@ -79,25 +249,9 @@ and is the authoritative list. Truncation is never silent.
 
 <!-- END COMMANDS -->
 
-## Reach-rate (memory keystone metric)
-
-`ferret reach` mechanizes the memory-recall autopsy for epic **tx-qw86** ("Memory where the action is"). It reads raw transcripts (not the events artifact), finds **recall-opportunity** moments — dk asking what's already known/decided/built (the always-loaded `recall.md` triggers: *do you remember · did we · I thought we · where do we stand · don't we already · what did we decide*) plus tx-vtea re-orientation asides (*where are we · I forget · remind me*) — and classifies what the agent reached for **first**: the trixi store (`get_nug`, `trixi search`/`get`), `bd` beads, grep/rg/Read, gh/git forensics, or nothing.
-
-**Reach-rate = store-first reaches / opportunities**, every rate printed with its `n`. Weekly reports feed a rolling 3-week judgment window (single-week deltas are noise at tens of opportunities/week).
-
-```
-ferret reach --since 2026-07-03 --until 2026-07-05          # a fixed window (text scorecard)
-ferret reach --format md --limit 20                        # trailing 7d, one ledger-appendable block
-ferret reach --project trixi --format json                 # scoped, machine-readable
-```
-
-Default window is the trailing 7 days, so the weekly cadence is a bare `ferret reach --format md` appended to the Inquiry ledger — loop/cron-able, e.g. a weekly `launchd`/cron entry or `/loop 7d ferret reach --format md`.
-
-Phase 1 is transcript-only (no telemetry). The Phase-2 **RU** column (was the reached result actually *used*?) joins trixi's `retrieval_events` telemetry (tx-kji6) onto these opportunities — the seam is `reach.JoinTelemetry`, a no-op until Phase 2.
-
 ## Lenses
 
-Lenses re-slice the same canonical events at different granularity; pick with `--lens`.
+A lens decides what counts as one token. The same events, re-sliced; pick with `--lens`.
 
 | Lens | Token | Example |
 |------|-------|---------|
@@ -106,17 +260,44 @@ Lenses re-slice the same canonical events at different granularity; pick with `-
 | `target` | tool + target class | `Edit:.go`, `Read:.md` |
 | `exact` | tool + full normalized target | `Edit:internal/lens/lens.go` |
 
-## Design
+Coarse finds shapes, exact finds culprits. Start at `tool`.
 
+## Design notes
+
+- **Tokenization is the product.** The canonical event layer exists so that
+  re-slicing at a new granularity costs seconds, not a re-parse.
+- Streams are keyed `(session, agent)` — subagent transcripts never interleave into
+  the parent timeline. `agent_id` is the only reliable discriminator; `session_id`
+  and `transcript_path` are shared between a parent and its subagents.
+- Failed actions tokenize as `tok!`; runs collapse to `tok+`.
+- Order comes from file position, never timestamps — some event types carry none.
+- Compound bash is split via a real shell AST (`mvdan.cc/sh`); `git checkout -b x`
+  normalizes to `git_checkout`.
+- Noise floor: min-count, min-sessions, and closed-gram suppression — a gram dies
+  when its extension keeps ≥80% of its count.
+- Burn is `event.Bytes` (tool input + tool result) summed over real calls. It is what
+  entered the request body, so it is what ranks. Nothing here is model-estimated.
+
+## Documentation
+
+- [`NORTH_STAR.md`](NORTH_STAR.md) — what ferret is for and the route it is on
+- [`docs/design/`](docs/design) — scorer and metric designs (dialogue episodes,
+  deterministic scorers, search-quality metrics)
+- `ferret --help`, and `ferret <command> --help` for per-command flags
+- The command table above is generated from the CLI grammar and is the authoritative list
+
+## Development
+
+```console
+git clone https://github.com/dkoosis/ferret.git
+cd ferret
+make check      # vet + lint + test + build + conform  (the gate)
+make audit      # check + race + fuzz + dupe + nilcheck + vuln
 ```
-raw logs → canonical events → tokens (lenses) → patterns → ranked output
+
+The command table in this README is a snapshot test. Add or change a command and
+`make check` fails until you regenerate it:
+
+```console
+FERRET_UPDATE_README=1 go test ./cmd/ferret -run TestREADMECommandsGenerated
 ```
-
-- **Tokenization is the product.** Lenses re-slice the same events at different granularity; the artifact makes re-slicing a seconds-long loop.
-- Streams keyed `(session, agent)` — subagent transcripts never interleave into the parent timeline.
-- Failed actions tokenize as `tok!`; runs collapse to `tok+` (trivia suppression).
-- Order comes from file position, never timestamps (some event types carry none).
-- Compound bash split via `mvdan.cc/sh` AST; `git checkout -b x` → `git_checkout`.
-- Noise floor: min-count, min-sessions, closed-gram suppression (a gram dies when its extension keeps ≥80% of its count).
-
-Plan: vault `Project/dk/ferret/docs/plans/2026-06-10-ferret-v0.md`.
