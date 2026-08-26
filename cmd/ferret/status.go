@@ -166,7 +166,7 @@ func staleMark(st status) string {
 	if !st.Stale {
 		return ""
 	}
-	return fmt.Sprintf(" · STALE (transcripts newer: %s)", st.Newest.Format(time.RFC3339))
+	return fmt.Sprintf(" · STALE (%s behind)", staleLag(st.BuiltAt, st.Newest))
 }
 
 // staleHint returns the re-ingest hint, or "" when the corpus is current —

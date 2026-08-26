@@ -136,6 +136,18 @@ func TestCorpusStale(t *testing.T) {
 		t.Error("transcript older than build time must not be stale")
 	}
 
+	// Newer, but inside the tolerance → fresh. The session running ferret is
+	// itself appending under the ingest root, so a strict newest > builtAt test
+	// reports STALE seconds after a successful ingest and never reads fresh.
+	within := built.Add(staleTolerance - time.Minute)
+	if err := os.Chtimes(tx, within, within); err != nil {
+		t.Fatal(err)
+	}
+	if stale, _, _ := corpusStale(manifestPath); stale {
+		t.Errorf("transcript %v newer than build must stay fresh inside the %v tolerance",
+			staleTolerance-time.Minute, staleTolerance)
+	}
+
 	// Missing manifest → advisory silence, not stale.
 	if stale, _, _ := corpusStale(filepath.Join(dataDir, "absent.json")); stale {
 		t.Error("missing manifest must not report stale")
