@@ -767,8 +767,8 @@ func (c *common) ensureData() error {
 		}
 		if stale, builtAt, newest := corpusStale(manifestPath); stale {
 			fmt.Fprintf(os.Stderr,
-				"ferret: corpus built %s is stale — transcripts changed since (newest %s); run 'ferret ingest' to refresh\n",
-				builtAt.Format(time.RFC3339), newest.Format(time.RFC3339))
+				"ferret: corpus is %s behind the transcripts (built %s); run 'ferret ingest' to refresh\n",
+				staleLag(builtAt, newest), builtAt.Format(time.RFC3339))
 		}
 		return nil
 	}
@@ -776,12 +776,23 @@ func (c *common) ensureData() error {
 	return ingest(c.data, "", "", "", false)
 }
 
+// staleTolerance is how far the transcripts may run ahead of the corpus before
+// it is worth saying so. It is not slack: the session running ferret is itself
+// appending to a transcript under the ingest root, so the newest mod-time is
+// ~now no matter how recently ingest finished. A strict newest > builtAt test
+// therefore reports STALE seconds after a successful ingest and can never read
+// fresh — a gate that always fires is a gate its readers learn to skip. The
+// window only has to outlast one scan; past it, the lag is real work missing
+// from the corpus and the warning is earned.
+const staleTolerance = 15 * time.Minute
+
 // corpusStale reports whether the corpus described by the manifest at
-// manifestPath is older than the newest transcript under its recorded root,
-// returning the build time and newest-transcript time for the warning message.
-// It is best-effort and advisory: an unreadable/unparseable manifest, a
-// manifest that records no root, or an unreadable transcript tree all yield
-// (false, …) so the caller stays silent rather than warning spuriously.
+// manifestPath has fallen materially behind the newest transcript under its
+// recorded root, returning the build time and newest-transcript time for the
+// warning message. It is best-effort and advisory: an unreadable/unparseable
+// manifest, a manifest that records no root, or an unreadable transcript tree
+// all yield (false, …) so the caller stays silent rather than warning
+// spuriously.
 func corpusStale(manifestPath string) (stale bool, builtAt, newest time.Time) {
 	b, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -792,7 +803,23 @@ func corpusStale(manifestPath string) (stale bool, builtAt, newest time.Time) {
 		return false, time.Time{}, time.Time{}
 	}
 	newest = newestTranscriptMod(m.Root)
-	return newest.After(m.CreatedAt), m.CreatedAt, newest
+	return newest.Sub(m.CreatedAt) > staleTolerance, m.CreatedAt, newest
+}
+
+// staleLag renders how far the corpus trails the transcripts, in the coarsest
+// unit that still carries the decision: minutes below an hour, hours below a
+// day, then days. Callers only ever ask "re-ingest or not", so a lag printed to
+// the second is precision the reader has to discard.
+func staleLag(builtAt, newest time.Time) string {
+	d := newest.Sub(builtAt)
+	switch {
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Round(time.Minute).Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Round(time.Hour).Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Round(24*time.Hour).Hours()/24))
+	}
 }
 
 // newestTranscriptMod returns the most recent modification time among the
