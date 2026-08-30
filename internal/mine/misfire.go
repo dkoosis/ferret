@@ -27,12 +27,19 @@ import (
 
 // MisfireRow is one Action key's corpus-wide failure ranking.
 type MisfireRow struct {
-	Key      string  `json:"key"`      // Event.Action — shellnorm token or tool name
-	Fails    int     `json:"fails"`    // events with Status fail|cfail
-	FailSess int     `json:"failSess"` // distinct sessions with ≥1 failure of this key — the "spread"
-	Calls    int     `json:"calls"`    // all tool|shell events with this key, any status
-	FailRate float64 `json:"failRate"` // Fails / Calls
-	Score    float64 `json:"score"`    // Fails × FailSess — the corpus-wide rank
+	Key      string `json:"key"`      // Event.Action — shellnorm token or tool name
+	Fails    int    `json:"fails"`    // events with Status fail|cfail
+	FailSess int    `json:"failSess"` // distinct sessions with ≥1 failure of this key — the "spread"
+	Calls    int    `json:"calls"`    // all tool|shell events with this key, any status
+	// FailBytes sums Event.Bytes over the failing calls only. It exists because
+	// the key's mean cost is the wrong price for a failure: a failed Read
+	// returns an error string, not the 7.6KB an average Read returns, and
+	// pricing 256 Read misfires at the Read mean reported 1.9MB of waste that
+	// was never spent (ferret-rwa). Measured beats modeled wherever the events
+	// carry the number, and here they do.
+	FailBytes int     `json:"failBytes"`
+	FailRate  float64 `json:"failRate"` // Fails / Calls
+	Score     float64 `json:"score"`    // Fails × FailSess — the corpus-wide rank
 }
 
 // RepairPair is a failed call paired with the succeeded variant that fixed it,
@@ -91,6 +98,7 @@ type MisfireReport struct {
 // tables are filled in one pass.
 type misfireAgg struct {
 	fails        int
+	failBytes    int // sum of Event.Bytes over the failing calls themselves
 	calls        int
 	failSess     map[string]struct{}
 	swallows     int
@@ -177,6 +185,10 @@ func observeStatus(a *misfireAgg, pending map[failKey]string, pairCounts map[str
 	switch ev.Status {
 	case event.StatusFail, event.StatusCFail:
 		a.fails++
+		// cfail segments each hold their share of one result payload (resolve()
+		// splits it), so summing the segments of a failed compound chain counts
+		// that payload exactly once.
+		a.failBytes += ev.Bytes
 		a.failSess[ev.Session] = struct{}{}
 		if ev.Status == event.StatusFail {
 			pending[fk] = ev.Detail
@@ -227,11 +239,12 @@ func rankMisfires(aggs map[string]*misfireAgg) []MisfireRow {
 			continue // no misfire signal — not a ranking candidate
 		}
 		row := MisfireRow{
-			Key:      key,
-			Fails:    a.fails,
-			FailSess: len(a.failSess),
-			Calls:    a.calls,
-			FailRate: misfireRatio(a.fails, a.calls),
+			Key:       key,
+			Fails:     a.fails,
+			FailBytes: a.failBytes,
+			FailSess:  len(a.failSess),
+			Calls:     a.calls,
+			FailRate:  misfireRatio(a.fails, a.calls),
 		}
 		row.Score = float64(row.Fails) * float64(row.FailSess)
 		rows = append(rows, row)

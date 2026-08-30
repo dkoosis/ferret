@@ -173,6 +173,15 @@ func appendPollWaste(rows []WasteRow, poll PollingReport, price map[string]*Burn
 // appendMisfireWaste charges each key for the calls that failed. cfail rides
 // in Fails alongside fail (misfire.go) — a call inside a failed compound chain
 // put its bytes in the request either way.
+//
+// The price is the failing calls' OWN bytes, not the key's mean (ferret-rwa).
+// The mean is drawn from every call of the key, successes included, and a
+// failure does not cost what a success costs: a failed Read returns an error
+// string where an average Read returns 7.6KB. On the 2026-08-30 corpus the
+// mean priced 256 Read misfires at 1.9MB — the top friction row, and a row two
+// sessions shipped rules against before anyone checked it. Poll rows keep the
+// mean (appendPollWaste): a repeated `git status` really does return about
+// what an average `git status` returns, so there the model holds.
 func appendMisfireWaste(rows []WasteRow, mis MisfireReport, price map[string]*BurnRow) []WasteRow {
 	for _, m := range mis.Rows {
 		if m.Fails <= 0 {
@@ -184,7 +193,7 @@ func appendMisfireWaste(rows []WasteRow, mis MisfireReport, price map[string]*Bu
 			Occurrences: m.Fails,
 			Sessions:    m.FailSess,
 		}
-		applyPrice(&row, price, float64(m.Fails))
+		applyMeasuredPrice(&row, price, m.FailBytes)
 		rows = append(rows, row)
 	}
 	return rows
@@ -239,6 +248,25 @@ func applyPrice(row *WasteRow, price map[string]*BurnRow, n float64) {
 	row.GrossBytes = b.Bytes
 	row.BytesPerCall = b.BytesPerCall
 	row.WastedBytes = int(n * b.BytesPerCall)
+}
+
+// applyMeasuredPrice is applyPrice for a detector that already knows what its
+// occurrences actually cost. It joins the same gross/per-call columns so the
+// row still reads against the burn table, but takes the waste as given rather
+// than multiplying a mean.
+//
+// The burn-membership check is kept deliberately: a key absent from the burn
+// table means the detector and the burn table disagree about the corpus, and
+// MergeWaste drops the resulting zero-waste row so that disagreement stays
+// visible. Pricing such a row from measured bytes alone would hide it.
+func applyMeasuredPrice(row *WasteRow, price map[string]*BurnRow, measured int) {
+	b, ok := price[row.Key]
+	if !ok {
+		return
+	}
+	row.GrossBytes = b.Bytes
+	row.BytesPerCall = b.BytesPerCall
+	row.WastedBytes = measured
 }
 
 // wasteLess is the row ordering: estimated waste descending, then spread
