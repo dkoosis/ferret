@@ -1,6 +1,6 @@
 # ferret — roadmap
 
-★ ferrets out tool-use friction and pathological interaction patterns in Claude Code logs so we can intentionally learn and improve
+★ ferrets out tool-use friction and pathological interaction patterns in Claude Code logs and suggests opportunities for improvement.
 
 *The ★ line is mirrored from `~/Projects/kg/Project/ferret/NORTH_STAR.md`, which owns it. This file owns route order only — edited when the route changes, never as status. Progress derives live from `bd epic status`.*
 
