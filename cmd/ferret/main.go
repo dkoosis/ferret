@@ -203,7 +203,7 @@ type CommonFlags struct {
 
 // LensFlags are shared across all subcommands that build a corpus.
 type LensFlags struct {
-	Lens        string `help:"Token lens: coarse|tool|target|exact." default:"tool" name:"lens"`
+	Lens        string `help:"Token lens: coarse|tool|cmd|target|exact|confidence." default:"tool" name:"lens"`
 	NoMarkFail  bool   `help:"Don't append ! to failed-action tokens." name:"no-mark-fail"`
 	NoCollapse  bool   `help:"Don't run-length collapse repeated tokens." name:"no-collapse"`
 	NoSidechain bool   `help:"Exclude sidechain events." name:"no-sidechain"`
@@ -260,7 +260,7 @@ var CLI struct {
 		LensFlags
 		MinSupport int    `help:"Min distinct streams containing the pattern." default:"20" name:"min-support"`
 		MaxGap     int    `help:"Max positions between consecutive items (1 = adjacent)." default:"3" name:"max-gap"`
-		MaxLen     int    `help:"Max pattern length." default:"5" name:"max-len"`
+		MaxLen     int    `help:"Max pattern length." default:"8" name:"max-len"`
 		Order      int    `help:"Gram-model order for cohesion scoring." default:"3" name:"order"`
 		Top        int    `help:"Max cards per bucket fed to the projection." default:"10" name:"top"`
 		Kind       string `help:"Only this kind: routine|friction|loop|noise (default: all but noise)." name:"kind"`
@@ -922,9 +922,16 @@ func emptyNote(sink *out.Sink, n int, noun string) {
 const (
 	reportMinSupport = 20
 	reportMaxGap     = 3
-	reportMaxLen     = 5
-	reportOrder      = 3
-	reportTop        = 10
+	// reportMaxLen was 5 until ferret-jtv. A wrap preflight or a ship sequence
+	// runs 5-8 calls, so a 5-cap split every one of them into overlapping
+	// fragments that ranked separately and priced separately — the whole
+	// routine, the thing a script would replace, never appeared as a row.
+	// RankPatterns' δ-fold already absorbs a sub-pattern into any longer
+	// pattern retaining ≥Delta of its support, so raising the cap makes the
+	// routine rank once, at full length, rather than adding rows.
+	reportMaxLen = 8
+	reportOrder  = 3
+	reportTop    = 10
 	// reportSurpriseMinToks skips streams too short for a stable surprise mean
 	// when splitting routine vs friction — matches the surprise command default.
 	reportSurpriseMinToks = 20

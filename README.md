@@ -1,6 +1,6 @@
 # ferret
 
-> **One sentence:** ferret reads your Claude Code transcripts and tells you, in measured bytes, which habits are wasting the most context.
+> ★ ferrets out tool-use friction and pathological interaction patterns in Claude Code logs and suggests opportunities for improvement.
 
 `ferret` **turns a pile of session logs into a ranked repair list** for **anyone tuning an agent's tools, hooks, and memory**, without **guessing which habit costs the most** — every finding is priced in bytes that actually entered a request body, over the whole corpus, with no model in the loop.
 

@@ -11,7 +11,7 @@ import (
 type Card struct {
 	IDs             []uint32
 	Support         int     // distinct streams
-	Bits            float64 // mean conditional bits per transition (cohesion; low = deterministic)
+	Bits            float64 // median conditional bits per transition (cohesion; low = deterministic)
 	Score           float64
 	Bucket          string
 	Folded          int // sub-patterns absorbed by this card
@@ -231,19 +231,47 @@ func isSubseq(sub, sup []uint32) bool {
 	return i == len(sub)
 }
 
-// patternBits is the mean stupid-backoff surprisal of the pattern's
+// patternBits is the MEDIAN stupid-backoff surprisal of the pattern's
 // transitions, treating the pattern as a contiguous token sequence under
 // the corpus gram model. Gapped occurrences pay for their gaps here:
 // only chains the corpus actually runs back-to-back score as cohesive.
+//
+// The median replaced the mean in ferret-jtv. A consolidation candidate is a
+// chain whose steps FOLLOW each other — but a real routine is usually entered
+// unpredictably and then runs deterministically, and a mean lets that one
+// entry transition sink the four certain ones behind it. Measured on dk's
+// corpus under the mean: the wrap preflight (prompt ⇝ eval ⇝ bd_list ⇝
+// git_status ⇝ ls, 77 sessions) scored 1.7 bits and tool-ship.sh's own
+// git_checkout ⇝ add ⇝ commit ⇝ push ⇝ gh_pr scored 1.1, so both sat above
+// ScriptBits=1.0 in the watch bucket that report discards as noise, while the
+// script bucket held three 2-3 call fragments. The median is the ordinary
+// robust answer to one outlier in a small sample, and its blast radius is
+// exactly the patterns this bead is about: with a single transition (any
+// 2-gram, e.g. the Read ⇝ Edit work rhythm at 1.8 bits) median and mean are
+// the same number, so nothing short moves.
 func patternBits(ids []uint32, grams map[string]int, total, order int) float64 {
 	if len(ids) < 2 {
 		return 0
 	}
-	bits := 0.0
+	bits := make([]float64, 0, len(ids)-1)
 	for i := 1; i < len(ids); i++ {
-		bits += -math.Log2(scoreIDs(ids, i, grams, total, order))
+		bits = append(bits, -math.Log2(scoreIDs(ids, i, grams, total, order)))
 	}
-	return bits / float64(len(ids)-1)
+	return median(bits)
+}
+
+// median returns the middle value of xs, averaging the two middles on an even
+// count. It sorts in place; callers pass a slice they own.
+func median(xs []float64) float64 {
+	if len(xs) == 0 {
+		return 0
+	}
+	sort.Float64s(xs)
+	mid := len(xs) / 2
+	if len(xs)%2 == 1 {
+		return xs[mid]
+	}
+	return (xs[mid-1] + xs[mid]) / 2
 }
 
 func classify(c *Corpus, ids []uint32, bits, scriptBits float64) string {

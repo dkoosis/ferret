@@ -1,6 +1,7 @@
 package mine
 
 import (
+	"math"
 	"strings"
 	"testing"
 )
@@ -200,4 +201,78 @@ func keys(m map[string]*Card) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// TestRankUnpredictableEntryDoesNotSinkRoutine pins the median cohesion
+// statistic (ferret-jtv). A real routine is entered unpredictably and then
+// runs deterministically: many different tokens precede the trigger, but every
+// step after it always follows the one before. Under a mean, that single
+// high-surprisal entry transition was enough to push the whole chain past
+// ScriptBits into the watch bucket report discards as noise — which is how
+// dk's ship sequence and wrap preflight stayed invisible. The median ignores
+// the outlier the way it is supposed to.
+func TestRankUnpredictableEntryDoesNotSinkRoutine(t *testing.T) {
+	// Each stream enters the a→b→c→d routine from a different predecessor, so
+	// the ?→a transition is maximally surprising while a→b→c→d is certain.
+	preds := []string{"p", "q", "r", "s", "t", "u", "v", "w"}
+	streams := make([][]string, 0, len(preds))
+	for _, p := range preds {
+		streams = append(streams, []string{p, "a", "b", "c", "d"})
+	}
+	got, _ := rankAll(t, streams,
+		SeqOpts{MinSupport: 8, MaxGap: 3, MaxLen: 5},
+		RankOpts{})
+	routine, ok := got["a b c d"]
+	if !ok {
+		t.Fatalf("a⇝b⇝c⇝d missing; got %v", keys(got))
+	}
+	if routine.Bucket != BucketScript {
+		t.Errorf("a⇝b⇝c⇝d bucket = %s, want script (bits=%.2f)", routine.Bucket, routine.Bits)
+	}
+}
+
+// TestPatternBitsMedianLeavesPairsAlone pins the blast radius of the median:
+// with a single transition there is nothing to take a median over, so every
+// 2-gram scores exactly what the mean gave it. That is what keeps a work
+// rhythm like Read⇝Edit — one genuinely uncertain transition, not a routine —
+// from being promoted into the script bucket alongside the real routines.
+func TestPatternBitsMedianLeavesPairsAlone(t *testing.T) {
+	streams := [][]string{
+		{"a", "b", "x", "p", "y"},
+		{"a", "b", "x", "q", "y"},
+		{"a", "b", "x", "r", "y"},
+		{"a", "b", "x", "s", "y"},
+	}
+	c := corpusFrom(streams)
+	grams, total := trainGrams(c, 3)
+	for _, pair := range [][]string{{"a", "b"}, {"x", "y"}} {
+		ids := idsFor(c, pair...)
+		want := -math.Log2(scoreIDs(ids, 1, grams, total, 3))
+		if got := patternBits(ids, grams, total, 3); got != want {
+			t.Errorf("patternBits(%v) = %v, want the single transition's bits %v", pair, got, want)
+		}
+	}
+}
+
+// TestMedian pins the statistic itself, including the even-count average.
+func TestMedian(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []float64
+		want float64
+	}{
+		{"empty", nil, 0},
+		{"single", []float64{2.5}, 2.5},
+		{"odd count takes the middle", []float64{9, 1, 2}, 2},
+		{"even count averages the middles", []float64{4, 1, 2, 3}, 2.5},
+		{"unsorted input", []float64{5, 0.25, 0.5, 0.25}, 0.375},
+		{"one outlier does not move it", []float64{0.25, 0.25, 0.25, 99}, 0.25},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := median(c.in); got != c.want {
+				t.Errorf("median(%v) = %v, want %v", c.in, got, c.want)
+			}
+		})
+	}
 }
