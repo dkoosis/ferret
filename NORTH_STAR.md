@@ -10,9 +10,4 @@ This file is rewritten, not appended.
 
 ## roadmap
 
-*Route order, decision-owned — edited when the route changes, never as status. Progress derives live from `bd epic status` (parsed by the SessionStart hook: numbered lines, epic id first token).*
-
-1. ferret-bbp — user-turn repair/acceptance tagger reads intent from the human's words
-2. ferret-kuv — intent-grounded tool-improvement harness
-3. ferret-wf9 — in-session feedback tap: solicit t=0 human labels inline to calibrate the scorers
-4. ferret-097 — ferret closes its own loop: rank burners/misfires, tune, verify the delta
+Route order lives in `ROADMAP.md` at the repo root — one home, parsed by the SessionStart hook. Progress derives live from `bd epic status`.
