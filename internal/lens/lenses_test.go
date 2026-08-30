@@ -129,3 +129,108 @@ func TestShellClass(t *testing.T) {
 		}
 	}
 }
+
+// TestCmdLens pins the lens between tool and exact: option NAMES survive in
+// argv order, every value is dropped, and two invocations differing only in a
+// value collapse to one token — the property that lets a repeated shell
+// sequence rank as one consolidation candidate instead of as unique noise.
+func TestCmdLens(t *testing.T) {
+	l, err := Get("cmd")
+	if err != nil {
+		t.Fatalf("Get(cmd): %v", err)
+	}
+	tests := []struct {
+		name string
+		ev   *event.Event
+		want string
+		ok   bool
+	}{
+		{
+			name: "flag names kept, values dropped",
+			ev:   &event.Event{Kind: event.KindShell, Action: "bd_list", Detail: "bd list --status in_progress --json"},
+			want: "sh:bd_list --status --json",
+			ok:   true,
+		},
+		{
+			name: "same shape with a different value is the same token",
+			ev:   &event.Event{Kind: event.KindShell, Action: "bd_list", Detail: "bd list --status closed --json"},
+			want: "sh:bd_list --status --json",
+			ok:   true,
+		},
+		{
+			name: "no flags falls back to the tool token",
+			ev:   &event.Event{Kind: event.KindShell, Action: "bd_list", Detail: "bd list"},
+			want: "sh:bd_list",
+			ok:   true,
+		},
+		{
+			name: "long-form value split off an = keeps only the name",
+			ev:   &event.Event{Kind: event.KindShell, Action: "git_log", Detail: "git log --oneline --max-count=10"},
+			want: "sh:git_log --oneline --max-count",
+			ok:   true,
+		},
+		{
+			name: "short flag keeps its name, not its argument",
+			ev:   &event.Event{Kind: event.KindShell, Action: "git_log", Detail: "git log --oneline -n 10"},
+			want: "sh:git_log --oneline -n",
+			ok:   true,
+		},
+		{
+			name: "a non-literal value does not fail the whole command",
+			ev:   &event.Event{Kind: event.KindShell, Action: "rg", Detail: "rg -n $PATTERN internal/"},
+			want: "sh:rg -n",
+			ok:   true,
+		},
+		{
+			name: "a glob value does not fail the whole command",
+			ev:   &event.Event{Kind: event.KindShell, Action: "rg", Detail: "rg --files-with-matches *.go"},
+			want: "sh:rg --files-with-matches",
+			ok:   true,
+		},
+		{
+			name: "everything after -- is positional",
+			ev:   &event.Event{Kind: event.KindShell, Action: "go_test", Detail: "go test ./... -- --not-a-flag"},
+			want: "sh:go_test",
+			ok:   true,
+		},
+		{
+			name: "bare - is stdin, not a flag",
+			ev:   &event.Event{Kind: event.KindShell, Action: "jq", Detail: "jq -r .id -"},
+			want: "sh:jq -r",
+			ok:   true,
+		},
+		{
+			name: "unparseable detail falls back to the tool token",
+			ev:   &event.Event{Kind: event.KindShell, Action: "rg", Detail: "rg --json 'unclosed"},
+			want: "sh:rg",
+			ok:   true,
+		},
+		{
+			name: "tool event keeps tool identity, Detail ignored",
+			ev:   &event.Event{Kind: event.KindTool, Action: "Read", Detail: "internal/lens/lenses.go"},
+			want: "Read",
+			ok:   true,
+		},
+		{
+			name: "prompt unchanged",
+			ev:   &event.Event{Kind: event.KindPrompt},
+			want: "prompt",
+			ok:   true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := l.Token(tc.ev)
+			if got != tc.want || ok != tc.ok {
+				t.Errorf("Token() = (%q, %v), want (%q, %v)", got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
+
+// TestCmdLensRegistered ensures the lens is discoverable by name.
+func TestCmdLensRegistered(t *testing.T) {
+	if !slices.Contains(Names(), "cmd") {
+		t.Errorf("cmd not in Names() = %v", Names())
+	}
+}

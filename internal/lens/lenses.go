@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/dkoosis/ferret/internal/event"
+	"github.com/dkoosis/ferret/internal/shellnorm"
 )
 
 // ---- coarse: behavior classes (read, search, edit, test, vcs, agent…) ----
@@ -179,6 +180,38 @@ func (confidence) Token(e *event.Event) (string, bool) {
 		return base + "~approx", true
 	}
 	return base, true
+}
+
+// ---- cmd: tool identity + option names, values stripped ----
+//
+// The lens between tool and exact (ferret-jtv). For shell, tool is too coarse
+// to tell `bd list --status in_progress --json` from a bare `bd list`, while
+// exact is unusable: every path and search string is unique, so a shell
+// sequence repeats corpus-wide only a couple of dozen times and the miner
+// sees no routine at all. Keeping the flag NAMES and dropping their values
+// splits the invocations that genuinely differ and folds the ones that differ
+// only in an argument — which is what lets a repeated sequence read as one
+// consolidation candidate rather than as noise.
+//
+// Non-shell events are unchanged from the tool lens: their identity is the
+// tool name, and Detail there is a target, not a command line.
+type cmd struct{}
+
+func (cmd) Name() string { return "cmd" }
+
+func (cmd) Token(e *event.Event) (string, bool) {
+	base, ok := tool{}.Token(e)
+	if !ok {
+		return "", false
+	}
+	if e.Kind != event.KindShell || e.Detail == "" {
+		return base, true
+	}
+	flags := shellnorm.Flags(e.Detail)
+	if len(flags) == 0 {
+		return base, true
+	}
+	return base + " " + strings.Join(flags, " "), true
 }
 
 // ---- exact: tool + full normalized target ----

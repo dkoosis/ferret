@@ -533,6 +533,48 @@ func plainWordLit(w *syntax.Word) (string, bool) {
 	return sb.String(), true
 }
 
+// Flags (ferret-jtv) returns a command's option NAMES in argv order, values
+// stripped — the middle ground between the tool lens (which sees only
+// `bd_list`) and the exact lens (which sees the whole command line, so every
+// distinct path or search string is its own token and nothing ever repeats).
+// `bd list --status in_progress --json` yields ["--status", "--json"]; so does
+// the same call with a different status, which is the point: two invocations
+// that differ only in a value are the same routine, and a routine is what a
+// consolidation candidate is made of.
+//
+// Deliberately more tolerant than Argv: a value Argv would decline over — a
+// `$VAR`, a glob, a redirect, an env assignment — is not a flag name, so it is
+// skipped rather than failing the whole command. Only a parse failure or a
+// non-call statement yields nil. `--flag=value` keeps just `--flag`; a bare
+// `-` (stdin) is a positional, not a flag; everything after a `--` terminator
+// is positional by definition.
+func Flags(raw string) []string {
+	parser := syntax.NewParser(syntax.Variant(syntax.LangBash))
+	file, err := parser.Parse(strings.NewReader(raw), "")
+	if err != nil || len(file.Stmts) != 1 {
+		return nil
+	}
+	call, ok := file.Stmts[0].Cmd.(*syntax.CallExpr)
+	if !ok {
+		return nil
+	}
+	var flags []string
+	for _, w := range call.Args {
+		lit, ok := plainWordLit(w)
+		if !ok || !strings.HasPrefix(lit, "-") || lit == "-" {
+			continue
+		}
+		if lit == "--" {
+			break
+		}
+		if eq := strings.IndexByte(lit, '='); eq > 0 {
+			lit = lit[:eq]
+		}
+		flags = append(flags, lit)
+	}
+	return flags
+}
+
 // plainWordPartsLit requires every part of a double-quoted span to be a bare
 // literal — a `"$VAR"` interpolation fails here even though the outer word is
 // double-quoted, because the inner part is a ParamExp, not a Lit.

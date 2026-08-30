@@ -1,6 +1,7 @@
 package shellnorm
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -294,6 +295,42 @@ func TestArgv(t *testing.T) {
 				if argv[i] != c.wantArgv[i] {
 					t.Errorf("Argv(%q)[%d] = %q, want %q", c.in, i, argv[i], c.wantArgv[i])
 				}
+			}
+		})
+	}
+}
+
+// TestFlags pins the option-name scan the cmd lens rides on (ferret-jtv):
+// names survive in argv order, values never do, and — unlike Argv — a value
+// the parser cannot read as a plain literal is skipped rather than failing
+// the whole command, because a $VAR or a glob is never a flag name.
+func TestFlags(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{"no flags", "bd list", nil},
+		{"long flags with values", "bd list --status in_progress --json", []string{"--status", "--json"}},
+		{"equals form keeps only the name", "git log --max-count=10", []string{"--max-count"}},
+		{"short flag drops its argument", "git log --oneline -n 10", []string{"--oneline", "-n"}},
+		{"bundled shorts stay one token", "ls -la", []string{"-la"}},
+		{"bare dash is stdin", "jq -r .id -", []string{"-r"}},
+		{"double dash terminates", "go test ./... -- --not-a-flag", nil},
+		{"param expansion skipped, not fatal", "rg -n $PATTERN internal/", []string{"-n"}},
+		{"glob skipped, not fatal", "rg --files *.go", []string{"--files"}},
+		{"redirect does not hide flags", "go test --json ./... > out.txt", []string{"--json"}},
+		{"env assignment does not hide flags", "GOFLAGS=-mod=mod go test --json ./...", []string{"--json"}},
+		{"quoted value dropped like any other", "rg --glob '!vendor' -n", []string{"--glob", "-n"}},
+		{"parse failure yields nothing", "rg --json 'unclosed", nil},
+		{"pipeline is not a single call", "git log --oneline | head -5", nil},
+		{"empty", "", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := Flags(c.raw)
+			if !slices.Equal(got, c.want) {
+				t.Errorf("Flags(%q) = %v, want %v", c.raw, got, c.want)
 			}
 		})
 	}
