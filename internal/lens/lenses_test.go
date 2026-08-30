@@ -234,3 +234,59 @@ func TestCmdLensRegistered(t *testing.T) {
 		t.Errorf("cmd not in Names() = %v", Names())
 	}
 }
+
+// TestCmdLensPrefersStoredFlags pins the read order the ferret-dep fix turns
+// on: the flags ingest computed from the untruncated statement win over
+// anything a re-parse of the truncated Detail could produce, and a v1 corpus —
+// which has no stored flags at all — still gets a usable token from Detail.
+func TestCmdLensPrefersStoredFlags(t *testing.T) {
+	l, err := Get("cmd")
+	if err != nil {
+		t.Fatalf("Get(cmd): %v", err)
+	}
+	tests := []struct {
+		name string
+		ev   *event.Event
+		want string
+	}{
+		{
+			name: "stored flags are used",
+			ev: &event.Event{
+				Kind: event.KindShell, Action: "bd_create",
+				Detail: `bd create "a title so long it ran past the detail ceiling`,
+				Flags:  []string{"--type", "--priority"},
+			},
+			want: "sh:bd_create --type --priority",
+		},
+		{
+			name: "stored flags beat what the truncated detail would yield",
+			ev: &event.Event{
+				Kind: event.KindShell, Action: "bd_list",
+				Detail: "bd list --json",
+				Flags:  []string{"--status", "--json", "--limit"},
+			},
+			want: "sh:bd_list --status --json --limit",
+		},
+		{
+			name: "v1 corpus with no stored flags falls back to Detail",
+			ev: &event.Event{
+				Kind: event.KindShell, Action: "bd_list",
+				Detail: "bd list --status open --json",
+			},
+			want: "sh:bd_list --status --json",
+		},
+		{
+			name: "no stored flags and no detail is just the tool token",
+			ev:   &event.Event{Kind: event.KindShell, Action: "bd_list"},
+			want: "sh:bd_list",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := l.Token(tc.ev)
+			if !ok || got != tc.want {
+				t.Errorf("Token() = (%q, %v), want (%q, true)", got, ok, tc.want)
+			}
+		})
+	}
+}

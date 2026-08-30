@@ -335,3 +335,88 @@ func TestFlags(t *testing.T) {
 		})
 	}
 }
+
+// TestSplitSegmentFlags pins the flags Split attaches per segment (ferret-dep).
+//
+// The compound shapes are the point. `Flags` alone declines anything that is
+// not one bare CallExpr — the pipeline case in TestFlags above returns nil —
+// but Split has already reduced each of these to a single statement by the
+// time a flag scan runs, so every arm keeps its own options. That is why the
+// stored field, not a re-parse of the joined command line, is what the cmd
+// lens reads.
+func TestSplitSegmentFlags(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want [][]string // one entry per segment, in order
+	}{
+		{"plain call", "bd list --status open --json", [][]string{{"--status", "--json"}}},
+		{"no options", "chezmoi status", [][]string{nil}},
+		{
+			"pipeline keeps the left arm's options",
+			"bd list --status open --json | jq -r '.[]'",
+			[][]string{{"--status", "--json"}},
+		},
+		{
+			"and-chain keeps both arms' options",
+			"git add -A && git commit -m x --no-verify",
+			[][]string{{"-A"}, {"-m", "--no-verify"}},
+		},
+		{
+			"subshell keeps the inner options",
+			"(cd /x; go build -v ./...)",
+			[][]string{{"-v"}},
+		},
+		{
+			"trivial leading command is dropped, its partner keeps options",
+			"cd /x && go test ./... -run TestY",
+			[][]string{{"-run"}},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			segs, fallback := Split(c.raw)
+			if fallback {
+				t.Fatalf("Split(%q) fell back", c.raw)
+			}
+			if len(segs) != len(c.want) {
+				t.Fatalf("Split(%q) gave %d segments, want %d", c.raw, len(segs), len(c.want))
+			}
+			for i, seg := range segs {
+				if !slices.Equal(seg.Flags, c.want[i]) {
+					t.Errorf("segment %d (%s) flags = %v, want %v", i, seg.Cmd, seg.Flags, c.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestSplitFlagsSurviveDetailTruncation is the defect ferret-dep fixes, stated
+// as a test: the segment carries options that a 160-byte Detail no longer
+// contains, so a downstream re-parse of Detail cannot recover them.
+//
+// The shape is the one that dominates the corpus — a long quoted positional
+// pushing the option list past the cut. Measured 2026-08-30: 13,747 shell
+// events, 9.6% of those carrying a Detail.
+func TestSplitFlagsSurviveDetailTruncation(t *testing.T) {
+	const detailMax = 160 // event.DetailMax; duplicated to keep shellnorm free of that import
+	raw := `bd create "` + strings.Repeat("x", 200) + `" --type task --priority 1`
+
+	segs, fallback := Split(raw)
+	if fallback || len(segs) != 1 {
+		t.Fatalf("Split gave fallback=%v, %d segments; want a single parsed segment", fallback, len(segs))
+	}
+	want := []string{"--type", "--priority"}
+	if !slices.Equal(segs[0].Flags, want) {
+		t.Fatalf("segment flags = %v, want %v", segs[0].Flags, want)
+	}
+
+	truncated := segs[0].Raw
+	if len(truncated) > detailMax {
+		truncated = truncated[:detailMax]
+	}
+	if got := Flags(truncated); len(got) != 0 {
+		t.Fatalf("re-parsing the truncated Detail recovered %v — the premise of storing "+
+			"Segment.Flags is that it cannot; adjust the test, not the field", got)
+	}
+}

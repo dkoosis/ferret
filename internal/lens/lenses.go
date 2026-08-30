@@ -204,14 +204,33 @@ func (cmd) Token(e *event.Event) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	if e.Kind != event.KindShell || e.Detail == "" {
+	if e.Kind != event.KindShell {
 		return base, true
 	}
-	flags := shellnorm.Flags(e.Detail)
+	flags := cmdFlags(e)
 	if len(flags) == 0 {
 		return base, true
 	}
 	return base + " " + strings.Join(flags, " "), true
+}
+
+// cmdFlags prefers the flags ingest stored on the event and falls back to
+// parsing Detail (ferret-dep).
+//
+// The stored field is the accurate one: Detail is truncated to 160 bytes, and
+// re-parsing it loses every option that sat past the cut — 9.6% of dk's shell
+// events when measured on 2026-08-30. The fallback exists only for a corpus
+// built before the field did; such a corpus already reports as era-drifted
+// (shellnorm.Version v1 vs v2), so this path degrades exactly one lens rather
+// than erroring on a corpus the user has not re-ingested yet.
+func cmdFlags(e *event.Event) []string {
+	if len(e.Flags) > 0 {
+		return e.Flags
+	}
+	if e.Detail == "" {
+		return nil
+	}
+	return shellnorm.Flags(e.Detail)
 }
 
 // ---- exact: tool + full normalized target ----

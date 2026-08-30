@@ -510,6 +510,10 @@ func (b *Builder) fromToolUse(src transcript.Source, raw *transcript.Raw, blk *t
 			ev.Compound = len(segs) > 1
 			ev.Swallow = seg.Swallowed
 			ev.Pipe = seg.Piped
+			// Flags comes from the parsed statement, not from ev.Detail: the
+			// trunc above would cut a long command's option list off first
+			// (event.go Flags, ferret-dep).
+			ev.Flags = seg.Flags
 			ev.Query = trixiCLIQuery(seg.Cmd, seg.Raw)
 			out = append(out, &ev)
 		}

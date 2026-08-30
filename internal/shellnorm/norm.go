@@ -15,7 +15,12 @@ import (
 // changed split, a different collapse. Two corpora built with different
 // Versions have differently-keyed shell rows, so a per-key delta across them
 // measures the rule change, not the behavior change (ferret-4wc).
-const Version = "1"
+//
+// v2 (ferret-dep, 2026-08-30): Segment.Flags is computed at ingest from the
+// untruncated statement. Segment.Cmd is untouched, so the tool lens is
+// unchanged — but the cmd lens keys 13,747 shell events differently than a v1
+// corpus does, which is exactly the drift this constant exists to declare.
+const Version = "2"
 
 // Segment is one normalized command from a (possibly compound) bash string.
 type Segment struct {
@@ -35,6 +40,19 @@ type Segment struct {
 	// substitution detector needs this: `rg foo | head` truncates rg's output,
 	// so the pipe itself is an escape hatch from "rg alone could replace this."
 	Piped bool
+	// Flags is the segment's option NAMES in argv order, values stripped — the
+	// cmd lens's token material (see Flags, and internal/lens's cmd lens).
+	//
+	// It is computed HERE, from the parsed statement, rather than re-derived
+	// downstream from Segment.Raw, because Raw is truncated to
+	// event.DetailMax (160 bytes) before it is stored. Measured over dk's
+	// 143,793-event shell corpus (2026-08-30, ferret-dep): 9.6% of shell
+	// events — 13,747 of them — lose their flags to that cut, since a long
+	// quoted positional pushes the option list past the ceiling
+	// (`bd create "<long title>" --type epic --priority 1`). Parsing the
+	// untruncated statement once at ingest recovers all of them, and spares
+	// every later report run one shell parse per event.
+	Flags []string
 }
 
 // subcmdTools take a significant first subcommand worth keeping.
@@ -173,7 +191,7 @@ func fromCall(c *syntax.CallExpr, st *syntax.Stmt, pr *syntax.Printer) (Segment,
 			cmd = base + "_" + sub
 		}
 	}
-	return Segment{Cmd: cmd, Raw: printStmt(st, pr)}, true
+	return Segment{Cmd: cmd, Raw: printStmt(st, pr), Flags: flagsFromCall(c)}, true
 }
 
 func wordLit(w *syntax.Word) string {
@@ -548,6 +566,12 @@ func plainWordLit(w *syntax.Word) (string, bool) {
 // non-call statement yields nil. `--flag=value` keeps just `--flag`; a bare
 // `-` (stdin) is a positional, not a flag; everything after a `--` terminator
 // is positional by definition.
+//
+// Prefer Segment.Flags where a Segment is in hand: Flags parses the string it
+// is given, and a Detail string has already been truncated to 160 bytes by the
+// time a lens sees it (Segment.Flags documents what that costs). This entry
+// point remains for callers holding only raw text — and for corpora built
+// before the field existed, which the cmd lens still falls back to.
 func Flags(raw string) []string {
 	parser := syntax.NewParser(syntax.Variant(syntax.LangBash))
 	file, err := parser.Parse(strings.NewReader(raw), "")
@@ -558,6 +582,12 @@ func Flags(raw string) []string {
 	if !ok {
 		return nil
 	}
+	return flagsFromCall(call)
+}
+
+// flagsFromCall is the shared rule Flags and fromCall both apply, so a
+// stored Segment.Flags and a re-parse of the same text can never disagree.
+func flagsFromCall(call *syntax.CallExpr) []string {
 	var flags []string
 	for _, w := range call.Args {
 		lit, ok := plainWordLit(w)

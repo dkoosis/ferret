@@ -1,10 +1,12 @@
 # ferret
 
-> ★ ferrets out tool-use friction and pathological interaction patterns in Claude Code logs and suggests opportunities for improvement.
+> ★ measures Claude Code sessions in bytes — the multi-step sequences worth one deterministic helper, the calls that bought nothing, who burned it — and proves each fix by the delta.
 
 `ferret` **turns a pile of session logs into a ranked repair list** for **anyone tuning an agent's tools, hooks, and memory**, without **guessing which habit costs the most** — every finding is priced in bytes that actually entered a request body, over the whole corpus, with no model in the loop.
 
 AX-first: the primary reader is Claude itself.
+
+Four surfaces, and nothing else (ratified 2026-08-30): multi-step routines worth collapsing into one deterministic helper · the burn-delta that proves a fix worked · single-call waste priced per command key · per-agent attribution. Narrating *why* a session went wrong belongs to Claude Code's built-in usage report; ferret prices, structures, and verifies.
 
 ## See it work
 

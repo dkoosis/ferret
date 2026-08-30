@@ -35,6 +35,16 @@ type Event struct {
 	// (same one-way loss Swallow exists to capture), so it must be captured
 	// here, at ingest. Set from Segment.Piped (ferret-cax item 3).
 	Pipe bool `json:"pi,omitempty"`
+	// Flags is a shell segment's option NAMES, values stripped — the cmd lens's
+	// token material, set from Segment.Flags (ferret-dep).
+	//
+	// Stored rather than re-derived from Detail because Detail is truncated to
+	// DetailMax: a long quoted positional pushes the option list past the cut,
+	// and 9.6% of this corpus's shell events (13,747, measured 2026-08-30) lose
+	// every flag that way. Empty is ambiguous by design — a command with no
+	// options and one whose parse failed both yield nil, and neither is worth a
+	// second field, since the cmd lens treats both as "token is the tool name".
+	Flags []string `json:"fl,omitempty"`
 	// CwdReset marks the trailing shell segment of a Bash call whose tool_result
 	// reported "Shell cwd was reset" (ferret-cax item 5) — the harness resetting
 	// a session's working directory out from under an in-flight sequence of
