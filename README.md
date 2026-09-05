@@ -277,7 +277,7 @@ Coarse finds shapes, exact finds culprits. Start at `tool`.
 
 ## Documentation
 
-- [`NORTH_STAR.md`](NORTH_STAR.md) — what ferret is for and the route it is on
+- [`docs/NORTH_STAR.md`](docs/NORTH_STAR.md) — what ferret is for and the route it is on
 - [`docs/design/`](docs/design) — scorer and metric designs (dialogue episodes,
   deterministic scorers, search-quality metrics)
 - `ferret --help`, and `ferret <command> --help` for per-command flags

@@ -1,4 +1,3 @@
-# go-sandbox v0.2.0 synced 2026-04-05
 #!/usr/bin/env bash
 # go-sandbox lib-activate.sh — local dev environment activation
 # Sourced by generated activate.sh. Requires: _SANDBOX_DIR set by caller.
@@ -17,15 +16,10 @@ _CODEX_PLATFORM="${_CODEX_OS}-${_CODEX_ARCH}"
 
 _REPO_DIR="$(cd "$_SANDBOX_DIR/.." && pwd)"
 
-export GOTOOLCHAIN=local
-export GOPROXY="https://proxy.golang.org,direct"
-export GOSUMDB="sum.golang.org"
-
-# Repo-local caches
-export GOCACHE="$_REPO_DIR/.sandbox/cache/go-build"
-export GOMODCACHE="$_REPO_DIR/.sandbox/cache/mod"
-export GOLANGCI_LINT_CACHE="$_REPO_DIR/.sandbox/cache/golangci-lint"
-mkdir -p "$GOCACHE" "$GOMODCACHE" "$GOLANGCI_LINT_CACHE" 2>/dev/null || true
+# The Go environment lives in lib-env.sh, which setup sources too — one file,
+# two consumers, so the caches setup warms are the caches this reads.
+# shellcheck source=/dev/null
+source "$_SANDBOX_DIR/lib/lib-env.sh"
 
 # Repo-local customization seam. The shared lib stays byte-identical fleet-wide;
 # anything repo-specific lives here and survives a re-pull from GO_SANDBOX_REF.
@@ -33,8 +27,7 @@ if [ -f "$_SANDBOX_DIR/local-activate.sh" ]; then
   . "$_SANDBOX_DIR/local-activate.sh"
 fi
 
-# Performance
-export GOMAXPROCS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+# Performance (GOMAXPROCS is set in lib-env.sh)
 ulimit -n 4096 2>/dev/null || true
 
 # Ubuntu fd-find workaround — shim lives in a gitignored cache dir, not root bin/

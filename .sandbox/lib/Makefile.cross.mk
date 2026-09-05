@@ -1,4 +1,3 @@
-# go-sandbox v0.2.0 synced 2026-04-05
 # go-sandbox Makefile.cross.mk — includable cross-compile targets
 # Include from consuming project: include .sandbox/lib/Makefile.cross.mk
 # Requires: .sandbox/project.conf exists
@@ -32,7 +31,7 @@ cross-arm64: ## Cross-compile linux/arm64 sandbox tools
 
 _cross-build:
 	@# Pre-flight: local Go must be >= go.mod target
-	@LOCAL_GO=$$(go version | sed 's/.*go\([0-9]*\.[0-9]*\).*/\1/'); \
+	@set -o pipefail; LOCAL_GO=$$(go version | sed 's/.*go\([0-9]*\.[0-9]*\).*/\1/'); \
 	MOD_MIN=$$(echo $(GOMOD_VER) | cut -d. -f1)$$(printf '%03d' $$(echo $(GOMOD_VER) | cut -d. -f2)); \
 	LOC_MIN=$$(echo $$LOCAL_GO | cut -d. -f1)$$(printf '%03d' $$(echo $$LOCAL_GO | cut -d. -f2)); \
 	if [ "$$LOC_MIN" -lt "$$MOD_MIN" ]; then \
@@ -42,7 +41,7 @@ _cross-build:
 	echo "  local go$$LOCAL_GO >= go.mod go$(GOMOD_VER) — ok"
 	@mkdir -p $(SANDBOX_BIN_DIR)/linux-$(CROSS_ARCH)
 	@# All tool installs go here; use shell var instead of $(eval) to avoid parse-time trap
-	@. .sandbox/project.conf; \
+	@set -o pipefail; . .sandbox/project.conf; \
 	XBIN="$$(go env GOPATH)/bin/linux_$(CROSS_ARCH)"; \
 	for entry in $$PROJECT_BINS; do \
 		name=$${entry%%:*}; path=$${entry#*:}; \
@@ -135,7 +134,7 @@ _cross-build:
 		esac; \
 	done
 	@# UPX compress (verify compressed binary runs to catch musl/kernel issues)
-	@if command -v upx >/dev/null 2>&1; then \
+	@set -o pipefail; if command -v upx >/dev/null 2>&1; then \
 		echo "-- upx compressing"; \
 		for f in $(SANDBOX_BIN_DIR)/linux-$(CROSS_ARCH)/*; do \
 			[ -f "$$f" ] || continue; \
@@ -159,4 +158,4 @@ _cross-build:
 	fi
 	@echo "-- result:"
 	@du -sh $(SANDBOX_BIN_DIR)/linux-$(CROSS_ARCH)/
-	@du -h $(SANDBOX_BIN_DIR)/linux-$(CROSS_ARCH)/* | sort -rh
+	@set -o pipefail; du -h $(SANDBOX_BIN_DIR)/linux-$(CROSS_ARCH)/* | sort -rh
