@@ -24,20 +24,27 @@ import (
 // corpus coordinates of one occurrence — the CLI layer resolves them to a
 // human exemplar ("session@seq"); this package stays pure (no corpus-key
 // truncation/formatting policy).
+//
+// Cost is in BYTES, converted here from Finding's token counts. Every other
+// number in the Scoreboard payload — WasteRow.WastedBytes, ScoreboardDelta's
+// Before/AfterBytes — is already bytes, so emitting tokens on this one struct
+// would hand a `--format json` consumer two units under sibling keys with
+// nothing marking the difference. Ferret is a byte-measurement tool; the
+// payload speaks one unit.
 type ScoreboardRoutine struct {
-	Key      string `json:"key"` // token chain, e.g. "Read ⇝ Read ⇝ Edit"
-	Burn     int    `json:"burn"`
-	SideBurn int    `json:"sideBurn"`
-	Count    int    `json:"count"`
-	Sessions int    `json:"sessions"`
-	ExStream int    `json:"exStream"`
-	ExSeq    int    `json:"exSeq"`
+	Key           string `json:"key"` // token chain, e.g. "Read ⇝ Read ⇝ Edit"
+	BurnBytes     int    `json:"burnBytes"`
+	SideBurnBytes int    `json:"sideBurnBytes"`
+	Count         int    `json:"count"`
+	Sessions      int    `json:"sessions"`
+	ExStream      int    `json:"exStream"`
+	ExSeq         int    `json:"exSeq"`
 }
 
 // ScoreboardDelta is one ledger `fix` entry's burn delta — before (the
 // baseline captured by `fixes add`) and after (the motif's burn this ingest,
 // 0 when the motif no longer recurs at all). Both bytes, converted from the
-// ledger's/Finding's token counts by the same bytesPerToken ratio Findings
+// ledger's/Finding's token counts by the same BytesPerToken ratio Findings
 // uses throughout.
 type ScoreboardDelta struct {
 	Key         string `json:"key"`
@@ -81,13 +88,13 @@ func BuildScoreboard(corpus *Corpus, findings []*Finding, waste WasteReport, led
 			continue
 		}
 		sb.Routines = append(sb.Routines, ScoreboardRoutine{
-			Key:      strings.Join(corpus.Tokens(f.IDs), " ⇝ "),
-			Burn:     f.Burn,
-			SideBurn: f.SideBurn,
-			Count:    f.Count,
-			Sessions: f.Sessions,
-			ExStream: f.ExStream,
-			ExSeq:    f.ExSeq,
+			Key:           strings.Join(corpus.Tokens(f.IDs), " ⇝ "),
+			BurnBytes:     f.Burn * BytesPerToken,
+			SideBurnBytes: f.SideBurn * BytesPerToken,
+			Count:         f.Count,
+			Sessions:      f.Sessions,
+			ExStream:      f.ExStream,
+			ExSeq:         f.ExSeq,
 		})
 	}
 
@@ -135,8 +142,8 @@ func buildDelta(corpus *Corpus, findings []*Finding, idx map[string]fixes.Entry)
 		}
 		delta = append(delta, ScoreboardDelta{
 			Key: displayKey, Fix: e.Fix, FixedAt: e.AddedAt.Format("2006-01-02"),
-			BeforeBytes: e.BaselineBurn * bytesPerToken,
-			AfterBytes:  after * bytesPerToken,
+			BeforeBytes: e.BaselineBurn * BytesPerToken,
+			AfterBytes:  after * BytesPerToken,
 		})
 	}
 	return delta

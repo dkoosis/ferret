@@ -204,7 +204,7 @@ func appendMisfireWaste(rows []WasteRow, mis MisfireReport, price map[string]*Bu
 // those two kinds qualify: a routine recurring is the thing to script, not
 // waste to eliminate, and noise is by definition not actionable.
 //
-// Finding.Burn is in TOKENS (finding.go's bytesPerToken divide) while every
+// Finding.Burn is in TOKENS (finding.go's BytesPerToken divide) while every
 // other column in this table is bytes — the multiply back is the whole reason
 // this cannot be a one-line join.
 //
@@ -223,7 +223,7 @@ func appendMotifWaste(rows []WasteRow, corpus *Corpus, motifs []*Finding) []Wast
 		if redundant <= 0 || f.Count <= 0 {
 			continue
 		}
-		share := float64(f.Burn*bytesPerToken) * float64(redundant) / float64(f.Count)
+		share := float64(f.Burn*BytesPerToken) * float64(redundant) / float64(f.Count)
 		rows = append(rows, WasteRow{
 			Key:         strings.Join(corpus.Tokens(f.IDs), " ⇝ "),
 			Source:      WasteMotif,

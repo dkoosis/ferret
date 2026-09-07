@@ -100,14 +100,19 @@ func TestBuildHomeScoreboard_RoutinesMatchReportPipeline_When_LedgerIsEmpty(t *t
 		t.Fatal("no routines found — fixture did not clear min-support")
 	}
 
-	// Independently replicate report --lens cmd's own default (kind="") view.
+	// Independently replicate report --lens cmd's default (kind="") view at the
+	// scoreboard's own recurrence floor. homeMinSupport, not reportMinSupport:
+	// the scoreboard deliberately asks a looser floor than `report`'s default
+	// (see home.go's homeMinSupport) because at 20 the routines section renders
+	// empty on a real corpus. Everything else in the pipeline is identical, so
+	// this still proves the scoreboard adds no detector and reorders nothing.
 	lo := &lensOpts{lens: homeLens}
 	wantCorpus, _, err := lo.corpus(c.eventsPath())
 	if err != nil {
 		t.Fatalf("corpus: %v", err)
 	}
 	sscores := mine.ScoreSurprise(wantCorpus, mine.SurpriseOpts{Order: reportOrder, MinToks: reportSurpriseMinToks})
-	findings, _ := mineFindings(wantCorpus, reportMinSupport, reportMaxGap, reportMaxLen, reportOrder, reportTop,
+	findings, _ := mineFindings(wantCorpus, homeMinSupport, reportMaxGap, reportMaxLen, reportOrder, reportTop,
 		mine.SurpriseIndex(sscores), mine.FrictionCut(sscores))
 	var want []string
 	for _, f := range findings {
@@ -203,9 +208,14 @@ func TestBuildHomeScoreboard_LedgerEntryLeavesRankingAndAppearsOnDelta(t *testin
 	tokens := strings.Split(top.Key, " ⇝ ")
 	motif := fixes.MotifKey(tokens)
 
+	// BaselineBurn is in TOKENS (the ledger's unit); ScoreboardRoutine is in
+	// BYTES. Convert through the one exported ratio rather than a local copy —
+	// a second `const bytesPerToken = 4` in this package is exactly the drift
+	// this change removed.
 	entry := fixes.Entry{
 		Motif: motif, Fix: "hookified", Disposition: fixes.DispositionFix,
-		BaselineBurn: top.Burn, AddedAt: time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC), Lens: homeLens,
+		BaselineBurn: top.BurnBytes / mine.BytesPerToken,
+		AddedAt:      time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC), Lens: homeLens,
 	}
 	if err := fixes.Append(fixes.Path(c.data), entry); err != nil {
 		t.Fatalf("fixes.Append: %v", err)
@@ -227,9 +237,11 @@ func TestBuildHomeScoreboard_LedgerEntryLeavesRankingAndAppearsOnDelta(t *testin
 	if d.Key != top.Key {
 		t.Errorf("delta key = %q, want %q", d.Key, top.Key)
 	}
-	if d.BeforeBytes != top.Burn*bytesPerToken || d.AfterBytes != top.Burn*bytesPerToken {
+	// Delta and routine rows are both bytes now, so this is a direct compare —
+	// no conversion, which is the point of the units change.
+	if d.BeforeBytes != top.BurnBytes || d.AfterBytes != top.BurnBytes {
 		t.Errorf("delta bytes = before=%d after=%d, want both %d (burn unchanged since the fix, no re-ingest)",
-			d.BeforeBytes, d.AfterBytes, top.Burn*bytesPerToken)
+			d.BeforeBytes, d.AfterBytes, top.BurnBytes)
 	}
 	_ = corpus
 }
@@ -258,8 +270,10 @@ func TestCmdHome_FallsBackToStatus_When_CorpusMissing(t *testing.T) {
 func homeScoreboardFixture() mine.Scoreboard {
 	return mine.Scoreboard{
 		Routines: []mine.ScoreboardRoutine{
-			{Key: "Read ⇝ Read ⇝ Edit", Burn: 175000, SideBurn: 66500, Count: 433, Sessions: 230, ExStream: 0, ExSeq: 12},
-			{Key: "Read ⇝ sh:rg -n ⇝ Read", Burn: 108000, SideBurn: 41000, Count: 171, Sessions: 132, ExStream: 1, ExSeq: 4},
+			// Bytes, not tokens — the same rendered figures as before the units
+			// change (175000 and 108000 tokens x BytesPerToken).
+			{Key: "Read ⇝ Read ⇝ Edit", BurnBytes: 700_000, SideBurnBytes: 266_000, Count: 433, Sessions: 230, ExStream: 0, ExSeq: 12},
+			{Key: "Read ⇝ sh:rg -n ⇝ Read", BurnBytes: 432_000, SideBurnBytes: 164_000, Count: 171, Sessions: 132, ExStream: 1, ExSeq: 4},
 		},
 		Waste: []mine.WasteRow{
 			{Key: "Read", Source: mine.WasteFail, WastedBytes: 1_025_126, Occurrences: 138, Sessions: 61},

@@ -36,6 +36,25 @@ const scoreboardCap = 3
 // view, not a knob.
 const homeLens = "cmd"
 
+// homeMinSupport is the recurrence floor for the routines ranking, and it is
+// deliberately looser than `report`'s reportMinSupport (20).
+//
+// Measured on the live corpus 2026-09-07 (22,328 events / 118 sessions), at
+// order=3: min-support 20 yields 0 findings, 10 yields 4, 5 yields 20. So the
+// report default renders bare `ferret`'s headline section EMPTY on a real
+// corpus of this size — the front page would show only its waste half.
+//
+// The two commands want different floors because they answer different
+// questions. `report` is the exhaustive audit: a high floor keeps it honest,
+// and a reader who wants more passes --min-support. The scoreboard shows the
+// top 3 and nothing else, so its floor only decides whether those 3 rows
+// exist; the cap, not the floor, is what protects the reader here.
+//
+// This does not change `report`'s output — reportMinSupport is untouched and
+// `ferret report` is byte-identical (golden diff). It changes which findings
+// the scoreboard asks for.
+const homeMinSupport = 10
+
 // cmdHome renders the scoreboard, or falls back to the existing status block
 // when the corpus is missing/stale/era-drifted. The freshness gate runs
 // FIRST and reuses status.go's Ready/Stale/EraDrift verbatim — a stale corpus
@@ -83,7 +102,7 @@ func buildHomeScoreboard(c *common) (mine.Scoreboard, *mine.Corpus, error) {
 	}
 
 	sscores := mine.ScoreSurprise(corpus, mine.SurpriseOpts{Order: reportOrder, MinToks: reportSurpriseMinToks})
-	findings, _ := mineFindings(corpus, reportMinSupport, reportMaxGap, reportMaxLen, reportOrder, reportTop,
+	findings, _ := mineFindings(corpus, homeMinSupport, reportMaxGap, reportMaxLen, reportOrder, reportTop,
 		mine.SurpriseIndex(sscores), mine.FrictionCut(sscores))
 	// report's default view (no --kind) drops noise; the scoreboard mirrors it
 	// so routines[].key matches `report --lens cmd --limit 3` exactly.
@@ -142,7 +161,7 @@ func writeHomeText(w io.Writer, corpus *mine.Corpus, st status, sb mine.Scoreboa
 		sink.Head("routines (cmd lens, by burn — one helper each):")
 		for i, r := range sb.Routines {
 			sink.Head("%d  %10s  n=%-5d sess=%-4d side=%3.0f%%  %-40s next: ferret tokens --session %s",
-				i+1, humanBytes(r.Burn*bytesPerToken), r.Count, r.Sessions, sideSharePct(r), r.Key,
+				i+1, humanBytes(r.BurnBytes), r.Count, r.Sessions, sideSharePct(r), r.Key,
 				exemplarSession(corpus, r.ExStream, r.ExSeq))
 		}
 	}
@@ -170,20 +189,15 @@ func writeHomeText(w io.Writer, corpus *mine.Corpus, st status, sb mine.Scoreboa
 	return nil
 }
 
-// bytesPerToken mirrors internal/mine's unexported constant: Finding.Burn and
-// fixes.Entry.BaselineBurn are both measured in tokens, and every byte figure
-// this view prints is that count converted back with the same ratio the rest
-// of ferret uses (internal/mine/finding.go).
-const bytesPerToken = 4
-
-// sideSharePct is SideBurn's share of Burn as a percentage — the same
+// sideSharePct is side burn's share of total burn as a percentage — the same
 // "subagent sidechain slice" figure report.go's sideShare renders, recomputed
-// here because mine.ScoreboardRoutine carries the raw counts, not the ratio.
+// here because mine.ScoreboardRoutine carries the two totals, not the ratio.
+// Both are bytes, so the ratio is unit-independent.
 func sideSharePct(r mine.ScoreboardRoutine) float64 {
-	if r.Burn == 0 {
+	if r.BurnBytes == 0 {
 		return 0
 	}
-	return 100 * float64(r.SideBurn) / float64(r.Burn)
+	return 100 * float64(r.SideBurnBytes) / float64(r.BurnBytes)
 }
 
 // exemplarSession resolves a routine's exemplar occurrence to just the

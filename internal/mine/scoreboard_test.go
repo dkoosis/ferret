@@ -25,8 +25,9 @@ func TestBuildScoreboard_CapsRoutinesAndCountsBelowCut_When_MoreFindingsThanCap(
 	if len(sb.Routines) != 3 {
 		t.Fatalf("routines = %d, want 3 (capped)", len(sb.Routines))
 	}
-	if sb.Routines[0].Key != "Read ⇝ Edit" || sb.Routines[0].Burn != 300 {
-		t.Errorf("top routine = %+v, want Read ⇝ Edit burn=300", sb.Routines[0])
+	// Finding.Burn is 300 TOKENS; the routine row reports BYTES.
+	if sb.Routines[0].Key != "Read ⇝ Edit" || sb.Routines[0].BurnBytes != 300*BytesPerToken {
+		t.Errorf("top routine = %+v, want Read ⇝ Edit burnBytes=%d", sb.Routines[0], 300*BytesPerToken)
 	}
 	if sb.BelowCut != 1 {
 		t.Errorf("belowCut = %d, want 1 (the 4th finding)", sb.BelowCut)
@@ -92,9 +93,9 @@ func TestBuildScoreboard_EmitsDeltaOnlyForFixDisposition_When_LedgerMixesVerdict
 	if d.Key != "Read ⇝ Edit" || d.Fix != "hookified" || d.FixedAt != "2026-08-12" {
 		t.Errorf("delta row = %+v", d)
 	}
-	if d.BeforeBytes != 300*bytesPerToken || d.AfterBytes != 100*bytesPerToken {
+	if d.BeforeBytes != 300*BytesPerToken || d.AfterBytes != 100*BytesPerToken {
 		t.Errorf("delta bytes = before=%d after=%d, want before=%d after=%d",
-			d.BeforeBytes, d.AfterBytes, 300*bytesPerToken, 100*bytesPerToken)
+			d.BeforeBytes, d.AfterBytes, 300*BytesPerToken, 100*BytesPerToken)
 	}
 }
 
