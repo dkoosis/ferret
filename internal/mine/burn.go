@@ -2,9 +2,20 @@ package mine
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/dkoosis/ferret/internal/event"
 )
+
+// overcountFactor is the disclosed threshold ferret-wmb's AC calls for: an
+// at:* row whose serialized record bytes exceed its content-bearing bytes by
+// more than this factor is marked Overcount. Chosen from the two measured
+// extremes in the bead's Evidence section: at:hook_success runs ~12.2x
+// record/content-only (88.3MB vs 7.24MB corpus-wide), at:skill_listing checks
+// out at ~1.2x (21.0KB vs 17,430B, genuinely mostly content). 2x sits cleanly
+// between them — the row that measurably IS mostly overhead stays flagged,
+// the row that measurably IS mostly content does not.
+const overcountFactor = 2.0
 
 // BurnRow is one normalized command's corpus-wide burn: how much measured
 // context its calls cost, aggregated across every session that called it.
@@ -20,6 +31,19 @@ type BurnRow struct {
 	Calls        int     `json:"calls"`
 	BytesPerCall float64 `json:"bytesPerCall"` // the per-call toll a "should I stop running this?" decision turns on
 	Sessions     int     `json:"sessions"`
+	// ContentBytes is the row's summed content-bearing bytes (event.Event.
+	// ContentBytes, KindAttach only) — zero and not meaningful for a tool/shell
+	// row, which carries no comparable content-only figure. It exists to
+	// DISCLOSE how much of Bytes a model actually sees; Bytes stays the whole
+	// serialized record and stays the ranking key (ferret-wmb).
+	ContentBytes int `json:"contentBytes,omitempty"`
+	// Overcount marks an at:* row whose Bytes exceed ContentBytes by more than
+	// overcountFactor — the record carries far more than the content a model
+	// actually sees (routing metadata, unsurfaced stdout, ...). Never set for a
+	// tool/shell row: those have no comparable content-only figure to disclose
+	// against. This is disclosure, not re-accounting: Bytes is unchanged either
+	// way (ferret-wmb Rules — the fix is not a per-class content allowlist).
+	Overcount bool `json:"overcount,omitempty"`
 
 	sessions map[string]struct{} // distinct-session accumulator; collapsed into Sessions at result time
 }
@@ -95,6 +119,7 @@ func Burn(eventsPath string) (*BurnResult, error) {
 		}
 		r.Calls++
 		r.Bytes += ev.Bytes
+		r.ContentBytes += ev.ContentBytes
 		r.sessions[ev.Session] = struct{}{}
 		return nil
 	})
@@ -109,6 +134,7 @@ func Burn(eventsPath string) (*BurnResult, error) {
 		if r.Calls > 0 {
 			r.BytesPerCall = float64(r.Bytes) / float64(r.Calls)
 		}
+		r.Overcount = isOvercounted(r.Key, r.Bytes, r.ContentBytes)
 		res.Rows = append(res.Rows, *r)
 	}
 	sort.Slice(res.Rows, func(i, j int) bool { return burnLess(&res.Rows[i], &res.Rows[j]) })
@@ -142,4 +168,23 @@ func burnKey(ev *event.Event) string {
 		return "at:" + ev.Action
 	}
 	return ev.Action
+}
+
+// isOvercounted decides whether a row's disclosed content trails its
+// record bytes by more than overcountFactor. Scoped to "at:" keys only — a
+// tool/shell row has no comparable content-only figure, so it can never be
+// marked no matter how its (always-zero) ContentBytes compares to Bytes.
+//
+// contentBytes == 0 with bytes > 0 is the maximal case (ferret-wmb AC): a
+// record that discloses no content at all is, by definition, more than
+// overcountFactor times its content — there is no finite ratio to compute, so
+// it is marked directly rather than dividing by zero.
+func isOvercounted(key string, bytes, contentBytes int) bool {
+	if !strings.HasPrefix(key, "at:") || bytes == 0 {
+		return false
+	}
+	if contentBytes == 0 {
+		return true
+	}
+	return float64(bytes) > overcountFactor*float64(contentBytes)
 }

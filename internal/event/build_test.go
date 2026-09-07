@@ -1050,6 +1050,46 @@ func TestAttachmentBytesAreWholeSerializedPayload(t *testing.T) {
 	}
 }
 
+// TestAttachmentContentBytesReadsGenericContentField pins ferret-wmb's
+// disclosure half: ContentBytes is read from the record's own "content" key
+// alone, generically across every class — never a per-class allowlist of
+// different field names (decode.go:30-36 explains why that shape is wrong).
+// Bytes stays the whole record; ContentBytes exists only to disclose how much
+// of it a model actually sees.
+func TestAttachmentContentBytesReadsGenericContentField(t *testing.T) {
+	src := writeTranscript(t, attachLine("a1", "hook_success", `,"content":"hello"`))
+	evs := ingest(t, src)
+	if len(evs) != 1 {
+		t.Fatalf("events = %d, want 1", len(evs))
+	}
+	if evs[0].ContentBytes != len("hello") {
+		t.Errorf("ContentBytes = %d, want %d", evs[0].ContentBytes, len("hello"))
+	}
+}
+
+// TestAttachmentContentBytesZero_When_ContentEmptyButStdoutPresent is the
+// ferret-wmb AC fixture: at:hook_success's measured typical shape — content:""
+// with the hook's real output living in stdout, plus routing metadata
+// (hookName, toolUseID, durationMs, exitCode). The Evidence section measured
+// that stdout is mostly never surfaced to a model and, where it is, it
+// duplicates content — so ContentBytes must read 0 here, not stdout's length.
+// Bytes still charges the whole serialized record.
+func TestAttachmentContentBytesZero_When_ContentEmptyButStdoutPresent(t *testing.T) {
+	payload := `,"content":"","stdout":"make check\nPASS\n","hookName":"PostToolUse",` +
+		`"toolUseID":"t1","durationMs":42,"exitCode":0`
+	src := writeTranscript(t, attachLine("a1", "hook_success", payload))
+	evs := ingest(t, src)
+	if len(evs) != 1 {
+		t.Fatalf("events = %d, want 1", len(evs))
+	}
+	if evs[0].ContentBytes != 0 {
+		t.Errorf("ContentBytes = %d, want 0 (content is empty; stdout is not summed in — ferret-wmb)", evs[0].ContentBytes)
+	}
+	if evs[0].Bytes == 0 {
+		t.Error("Bytes = 0, want the whole serialized record — disclosure must not shrink the ranking key")
+	}
+}
+
 // A class ferret has never seen must still be measured. This is the regression
 // that keeps a future attachment type from silently costing zero.
 func TestUnknownAttachmentClassStillCounted(t *testing.T) {

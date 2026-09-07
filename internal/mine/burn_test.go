@@ -374,3 +374,57 @@ func TestBurn_AttachmentOutranksTool_When_ItCostsMore(t *testing.T) {
 		t.Errorf("top key = %q, want at:skill_listing — a 20KB injection must outrank a 9KB Read that folds at 2048", res.Rows[0].Key)
 	}
 }
+
+// TestBurn_MarksOvercount_When_HookSuccessRecordCarriesNoDisclosedContent pins
+// the ferret-wmb AC: at:hook_success's measured typical shape — a record
+// carrying content:"" with the rest of its bytes in routing metadata — must be
+// marked, not silently ranked as though every one of its bytes were injected
+// context. cb is absent from the fixture line, which is the real shape:
+// content:"" decodes to ContentBytes=0.
+func TestBurn_MarksOvercount_When_HookSuccessRecordCarriesNoDisclosedContent(t *testing.T) {
+	path := writeBurnFixture(t, `{"i":1,"s":"s1","k":"attach","act":"hook_success","b":403}
+`)
+	res, err := Burn(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := findBurnRow(t, res, "at:hook_success")
+	if !row.Overcount {
+		t.Error("Overcount = false, want true — 403B record with 0B disclosed content is the maximal over-count case")
+	}
+	if row.ContentBytes != 0 {
+		t.Errorf("ContentBytes = %d, want 0", row.ContentBytes)
+	}
+}
+
+// TestBurn_DoesNotMarkOvercount_When_ContentAccountsForMostOfTheRecord is the
+// negative: at:skill_listing checks out in the ferret-wmb Evidence section
+// (~1.2x record/content, genuinely mostly content) and must not be flagged.
+func TestBurn_DoesNotMarkOvercount_When_ContentAccountsForMostOfTheRecord(t *testing.T) {
+	path := writeBurnFixture(t, `{"i":1,"s":"s1","k":"attach","act":"skill_listing","b":21000,"cb":17430}
+`)
+	res, err := Burn(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := findBurnRow(t, res, "at:skill_listing")
+	if row.Overcount {
+		t.Error("Overcount = true, want false — 21.0KB/17,430B is ~1.2x, under the disclosed factor")
+	}
+}
+
+// TestBurn_NeverMarksOvercount_When_RowIsNotAnAttachment guards the shape
+// rule: a tool/shell row has no comparable content-only figure to disclose
+// against, so Overcount must never fire there.
+func TestBurn_NeverMarksOvercount_When_RowIsNotAnAttachment(t *testing.T) {
+	path := writeBurnFixture(t, `{"i":1,"s":"s1","k":"tool","act":"Read","b":9000}
+`)
+	res, err := Burn(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := findBurnRow(t, res, "Read")
+	if row.Overcount {
+		t.Error("Overcount = true, want false — tool rows carry no comparable content-only figure")
+	}
+}

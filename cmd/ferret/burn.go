@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
 
@@ -78,13 +79,14 @@ func writeBurnText(w io.Writer, res *mine.BurnResult, limit, maxBytes int) error
 		"≡ burn: ranked context cost per normalized command across the whole corpus — the tune-up list.",
 		"≡ bytes = event.Bytes (tool_use input + tool_result content) summed over every call — measured, not modeled. This is what enters the request body, so it is what ranks (ferret-noj).",
 		"≡ bytes/call is the per-call toll a \"should I stop running this?\" decision turns on; the two columns disagree when a cheap command is called constantly.",
-		"≡ shell rows are shellnorm-normalized (sh:git_commit, ...), tool rows keyed by tool name, attachment classes by at:class.")
+		"≡ shell rows are shellnorm-normalized (sh:git_commit, ...), tool rows keyed by tool name, attachment classes by at:class.",
+		"≡ an at:* row's bytes are the WHOLE serialized attachment record, not the content a model actually sees — that is deliberate (ferret-rfc), not a bug. A row marked ⚠ over-count exceeds its disclosed content bytes by more than 2x; read its bytes as an upper bound on injected context, not the figure itself (ferret-wmb).")
 	sink.Head("burn events=%d sessions=%d rows=%d", res.Events, res.Sessions, len(res.Rows))
 	emptyNote(sink, len(res.Rows), "commands")
 	for i := range res.Rows {
 		r := &res.Rows[i] // index-range: BurnRow carries a map field, value-range trips rangeValCopy
-		sink.Row("%10s bytes  %8s/call  %6d calls  %4d sess  %s",
-			humanBytes(r.Bytes), humanBytes(int(r.BytesPerCall)), r.Calls, r.Sessions, r.Key)
+		sink.Row("%10s bytes  %8s/call  %6d calls  %4d sess  %s%s",
+			humanBytes(r.Bytes), humanBytes(int(r.BytesPerCall)), r.Calls, r.Sessions, r.Key, overcountNote(r))
 	}
 	// Legal moves, not a plan (DK-AXI rule 11): gross cost is not waste — the
 	// merged view says how much of it bought nothing.
@@ -92,4 +94,20 @@ func writeBurnText(w io.Writer, res *mine.BurnResult, limit, maxBytes int) error
 		sink.NextHead("ferret friction")
 	}
 	return nil
+}
+
+// overcountNote renders the ferret-wmb disclosure suffix for a row the miner
+// flagged Overcount — empty string for every other row. contentBytes == 0 has
+// no finite ratio to print (see mine.isOvercounted), so it states the
+// disclosed content directly instead of dividing by zero.
+func overcountNote(r *mine.BurnRow) string {
+	if !r.Overcount {
+		return ""
+	}
+	if r.ContentBytes == 0 {
+		return "  ⚠ over-count: 0B disclosed content in this record"
+	}
+	ratio := float64(r.Bytes) / float64(r.ContentBytes)
+	return fmt.Sprintf("  ⚠ over-count %.1fx record/content (content %s of %s record)",
+		ratio, humanBytes(r.ContentBytes), humanBytes(r.Bytes))
 }

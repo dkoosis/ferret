@@ -109,6 +109,55 @@ func TestWriteBurnText_RespectsLimit_When_LimitBelowRowCount(t *testing.T) {
 	}
 }
 
+// TestWriteBurnText_MarksOvercountRow_When_RowIsFlagged pins ferret-wmb AC1:
+// a row the miner flagged Overcount must carry a visible marker in the
+// rendered text — a reader ranking work off the row cannot mistake the
+// whole-record figure for injected context.
+func TestWriteBurnText_MarksOvercountRow_When_RowIsFlagged(t *testing.T) {
+	res := &mine.BurnResult{
+		Events: 219000, Sessions: 400,
+		Rows: []mine.BurnRow{
+			{Key: "at:hook_success", Bytes: 88300000, Calls: 219000, BytesPerCall: 403, Sessions: 400, ContentBytes: 7240000, Overcount: true},
+		},
+	}
+	var buf bytes.Buffer
+	if err := writeBurnText(&buf, res, 0, 0); err != nil {
+		t.Fatalf("writeBurnText: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "over-count") {
+		t.Errorf("rendered row missing an over-count marker\n---\n%s", out)
+	}
+}
+
+// TestWriteBurnText_OmitsOvercountMarker_When_NoRowIsFlagged is the negative:
+// the marker must not appear on rows the miner left unflagged.
+func TestWriteBurnText_OmitsOvercountMarker_When_NoRowIsFlagged(t *testing.T) {
+	var buf bytes.Buffer
+	if err := writeBurnText(&buf, burnResult(), 0, 0); err != nil {
+		t.Fatalf("writeBurnText: %v", err)
+	}
+	rowsOut := burnRowsOut(t, buf.String())
+	if strings.Contains(rowsOut, "⚠") {
+		t.Errorf("no row is flagged Overcount, but rendered rows carry the marker\n---\n%s", rowsOut)
+	}
+}
+
+// TestWriteBurnText_PreambleNamesTheOvercount_Always pins ferret-wmb AC2: the
+// preamble names the over-count explicitly regardless of whether any row in
+// this particular result happens to be flagged — a reader ranking work off a
+// row needs the caveat every time, not only on a corpus that triggers it.
+func TestWriteBurnText_PreambleNamesTheOvercount_Always(t *testing.T) {
+	var buf bytes.Buffer
+	if err := writeBurnText(&buf, burnResult(), 0, 0); err != nil {
+		t.Fatalf("writeBurnText: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "over-count") {
+		t.Errorf("preamble must name the over-count explicitly\n---\n%s", out)
+	}
+}
+
 // TestWriteBurnJSON_RoundTrips_When_ResultEncoded pins the JSON contract:
 // valid JSON, totals present, rows carry all four AC columns, and --limit
 // truncation is reflected in the total/truncated bookkeeping keys.
