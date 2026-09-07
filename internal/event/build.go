@@ -169,10 +169,33 @@ func (b *Builder) attachmentLine(src transcript.Source, st *fileState, raw *tran
 		Project: src.Project, Session: session(src, raw), Agent: src.Agent,
 		Sidechain: raw.IsSidechain,
 		Kind:      KindAttach, Action: class,
-		Bytes: n, OutBytes: n,
+		Bytes: n, OutBytes: n, ContentBytes: attachContentBytes(raw.Attachment),
 		Version: raw.Version,
 	})
 	b.Stats.Attachments++
+}
+
+// attachContent is the generic decode of an attachment payload's own
+// "content" key — the one field name shared across every class that carries
+// genuine model-visible text (hook_success, skill_listing, ...). It is
+// deliberately NOT the per-class allowlist transcript.Raw.Attachment's own
+// comment warns against: a class whose real text lives under a different key
+// (edited_text_file's "snippet", the *_delta classes' "addedLines") reads
+// ContentBytes=0 here rather than being read at all, which biases the
+// disclosure toward over-counting — the same direction Bytes above already
+// takes, and for the same reason (ferret-wmb).
+type attachContent struct {
+	Content string `json:"content"`
+}
+
+// attachContentBytes reads the disclosed content-bearing byte count out of a
+// raw attachment payload. A decode failure (malformed JSON already counted as
+// a DecodeErr by the cheap AttachClass probe above) or an absent "content" key
+// both read as 0 — the honest answer for a class that discloses no content.
+func attachContentBytes(payload []byte) int {
+	var c attachContent
+	_ = json.Unmarshal(payload, &c) // best-effort; absence/mismatch just reads ""
+	return len(c.Content)
 }
 
 // isDuplicate dedups by message UUID across the whole ingest: resumed and

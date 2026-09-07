@@ -78,11 +78,19 @@ type Event struct {
 	// attributed to this event. A KindAttach event has no tool_use/tool_result
 	// pair to split — it enters context as one whole payload with nothing to
 	// call "input" — so its full Bytes is booked here.
-	OutBytes int    `json:"ob,omitempty"`
-	Skill    string `json:"skill,omitempty"`
-	Plugin   string `json:"plug,omitempty"`
-	MCP      string `json:"mcp,omitempty"`
-	Version  string `json:"v,omitempty"`
+	OutBytes int `json:"ob,omitempty"`
+	// ContentBytes is the record's own "content" field length — read
+	// generically, the same key name across every attachment class, never a
+	// per-class allowlist of different field names (that shape hid ~235MB for
+	// ferret's whole life; see transcript.Raw.Attachment). Set only on
+	// KindAttach events, where it exists to DISCLOSE how much of Bytes a model
+	// actually sees; Bytes itself stays the whole serialized record and stays
+	// the ranking key (ferret-wmb). Zero and not meaningful on any other Kind.
+	ContentBytes int    `json:"cb,omitempty"`
+	Skill        string `json:"skill,omitempty"`
+	Plugin       string `json:"plug,omitempty"`
+	MCP          string `json:"mcp,omitempty"`
+	Version      string `json:"v,omitempty"`
 	// Prompt is the full, untruncated user-turn text — only set on KindPrompt
 	// events. Captured at ingestion so a downstream consumer can do linguistic /
 	// query-quality analysis without re-parsing raw transcripts (ferret-d01).
