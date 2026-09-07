@@ -338,10 +338,14 @@ var CLI struct {
 		CommonFlags
 	} `cmd:"" help:"Mine review gates (code-review/plan-review/precommit/QA): per-gate rejection sets + overlap ratio ω (high ω = redundant gate) + confirmed friction loops."`
 
-	// default:"withargs" makes a bare `ferret` (and `ferret --data X`) run
-	// status instead of erroring into the synopsis — AXI #8, content first.
-	// `ferret --help` still prints the full command list.
-	Status StatusCmd `cmd:"" default:"withargs" help:"Corpus health + the heaviest waste rows (the bare-ferret default)." name:"status"`
+	// default:"withargs" makes a bare `ferret` (and `ferret --data X`) run the
+	// scoreboard instead of erroring into the synopsis — AXI #8, content
+	// first. `ferret --help` still prints the full command list. `ferret
+	// status` (below) keeps the older compact corpus-health view, callable by
+	// name (ferret-4vx moved the bare default to HomeCmd).
+	Home HomeCmd `cmd:"" default:"withargs" help:"Measurement scoreboard: top routines by burn, priced single-call waste, burn-delta since the last fix (the bare-ferret default)." name:"home"`
+
+	Status StatusCmd `cmd:"" help:"Corpus health + the heaviest waste rows."`
 
 	Friction FrictionCmd `cmd:"" help:"One ranked table of estimated wasted bytes — polling, misfires and motif findings merged, priced by burn." name:"friction"`
 
@@ -582,6 +586,8 @@ func main() {
 		err = cmdLandmark()
 	case "gates":
 		err = cmdGates()
+	case "home":
+		err = cmdHome(&CLI.Home)
 	case "status":
 		err = cmdStatus(&CLI.Status)
 	case "friction":

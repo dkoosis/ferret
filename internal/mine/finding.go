@@ -166,9 +166,9 @@ const (
 	ActionTrim    Action = "trim"     // cut the redundant context
 )
 
-// bytesPerToken is the standard rough tokenizer ratio: burn is reported in
+// BytesPerToken is the standard rough tokenizer ratio: burn is reported in
 // tokens so it reads as "what this costs the model", not raw bytes.
-const bytesPerToken = 4
+const BytesPerToken = 4
 
 // MinOddsRatioSupport is the default minimum labeled host-stream count (a+b) a
 // motif needs before AttachOddsRatio trusts its odds ratio (ferret-qus, spike
@@ -225,8 +225,8 @@ func Findings(c *Corpus, cards []*Card, maxGap int, surprise map[string]float64,
 			IDs: card.IDs, Kind: kind, Action: action,
 			Count: count, Sessions: sessions,
 			FailRate: failRate(c, card.IDs),
-			Burn:     burnBytes / bytesPerToken,
-			SideBurn: sideBytes / bytesPerToken,
+			Burn:     burnBytes / BytesPerToken,
+			SideBurn: sideBytes / BytesPerToken,
 			Surprise: surp,
 			ExStream: card.ExStream, ExSeq: card.ExSeq,
 		})

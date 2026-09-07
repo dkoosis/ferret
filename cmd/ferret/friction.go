@@ -52,7 +52,7 @@ func cmdFriction(cmd *FrictionCmd) error {
 		return err
 	}
 
-	rep, err := mergeFriction(c, cmd)
+	rep, err := mergeFriction(c, fromLensFlags(cmd.LensFlags), cmd.NoMotifs, cmd.Source)
 	if err != nil {
 		return err
 	}
@@ -69,7 +69,13 @@ func cmdFriction(cmd *FrictionCmd) error {
 // mergeFriction runs the detectors and hands them to mine.MergeWaste. Burn
 // streams the artifact itself (it takes a path, not a slice); misfires and
 // polling share one in-memory load, mirroring cmdMisfires/cmdPolling.
-func mergeFriction(c *common, cmd *FrictionCmd) (mine.WasteReport, error) {
+//
+// Takes primitive flags rather than *FrictionCmd (ferret-4vx) so a caller
+// with no FrictionCmd of its own — bare `ferret`'s scoreboard — can drive the
+// same merge without constructing a fake one. cmdFriction is the only other
+// caller and passes its own flags through unchanged, so this is a pure
+// signature refactor: identical behavior, identical output.
+func mergeFriction(c *common, lo *lensOpts, noMotifs bool, source string) (mine.WasteReport, error) {
 	burn, err := mine.Burn(c.eventsPath())
 	if err != nil {
 		return mine.WasteReport{}, err
@@ -78,7 +84,7 @@ func mergeFriction(c *common, cmd *FrictionCmd) (mine.WasteReport, error) {
 	if err != nil {
 		return mine.WasteReport{}, err
 	}
-	corpus, motifs, err := frictionMotifs(c, cmd)
+	corpus, motifs, err := frictionMotifs(c, lo, noMotifs, source)
 	if err != nil {
 		return mine.WasteReport{}, err
 	}
@@ -89,11 +95,10 @@ func mergeFriction(c *common, cmd *FrictionCmd) (mine.WasteReport, error) {
 // so a motif's waste here is measured the same way `ferret report` measures its
 // burn. Returns (nil, nil) when the leg is skipped — MergeWaste reads the
 // corpus only when there are motifs to render.
-func frictionMotifs(c *common, cmd *FrictionCmd) (*mine.Corpus, []*mine.Finding, error) {
-	if cmd.NoMotifs || (cmd.Source != "" && cmd.Source != string(mine.WasteMotif)) {
+func frictionMotifs(c *common, lo *lensOpts, noMotifs bool, source string) (*mine.Corpus, []*mine.Finding, error) {
+	if noMotifs || (source != "" && source != string(mine.WasteMotif)) {
 		return nil, nil, nil
 	}
-	lo := fromLensFlags(cmd.LensFlags)
 	corpus, _, err := lo.corpus(c.eventsPath())
 	if err != nil {
 		return nil, nil, err
