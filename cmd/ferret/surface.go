@@ -90,6 +90,7 @@ var commandSurfaces = map[string]cmdSurface{
 	"conformance":     {kind: surfaceLocal},
 	"landmark":        {kind: surfaceLocal},
 	"gates":           {kind: surfaceLocal},
+	"home":            {kind: surfaceLocal},
 	"status":          {kind: surfaceLocal},
 	"friction":        {kind: surfaceLocal},
 	"burn":            {kind: surfaceLocal},
