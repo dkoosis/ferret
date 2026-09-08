@@ -223,7 +223,7 @@ assembles the prompt without calling anything.
 | `ferret status` | local | ✓ | — | Corpus health + the heaviest waste rows. |
 | `ferret friction` | local | ✓ | `--lens` `--no-mark-fail` `--no-collapse` `--no-sidechain` `--source` `--no-motifs` | One ranked table of estimated wasted bytes — polling, misfires and motif findings merged, priced by burn. |
 | `ferret burn` | local | ✓ | — | Ranked corpus-wide context-byte burn per normalized command (the tune-up list). |
-| `ferret misfires` | local | ✓ | `--reasons` `--key` | Rank repeated command misfires + repair pairs corpus-wide. |
+| `ferret misfires` | local | ✓ | `--reasons` `--key` `--by` | Rank repeated command misfires + repair pairs corpus-wide. |
 | `ferret polling` | local | ✓ | — | Rank exact-duplicate commands repeated within a session. |
 | `ferret usage` | local | ✓ | — | The API token ledger read back from transcripts — measured spend, reconcilable against /usage. |
 | `ferret substitutable` | local | ✓ | — | Rank Bash calls a native tool (Grep/Glob/Read) could replace — deterministic, no judge. |
