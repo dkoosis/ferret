@@ -372,6 +372,62 @@ func TestSingleSegmentFailureIsFail(t *testing.T) {
 	}
 }
 
+// TestFailedCallCapturesErrText is the ferret-54q ingest-side AC: a failed
+// tool_result's text lands in Event.Err, capped, so a downstream reason
+// breakdown (internal/mine.MineReasons) never has to re-scan transcripts.
+func TestFailedCallCapturesErrText(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Edit", `{"file_path":"a.go"}`),
+		toolResultErrContent("u2", "t1", `"File has not been read yet. Read it first."`),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 1 {
+		t.Fatalf("events = %d, want 1", len(evs))
+	}
+	if evs[0].Status != StatusFail {
+		t.Fatalf("status = %q, want %q", evs[0].Status, StatusFail)
+	}
+	if evs[0].Err != "File has not been read yet. Read it first." {
+		t.Errorf("Err = %q, want the full (untruncated — under DetailMax) tool_result text", evs[0].Err)
+	}
+}
+
+// TestOKCallLeavesErrEmpty guards the negative: a successful call must not
+// carry stray Err text — an empty Err is exactly what "not a failure" means,
+// distinct from "failure with uncaptured text" (both are "", but only a
+// failed Status makes that ambiguous, which is why MineReasons gates on
+// Status first).
+func TestOKCallLeavesErrEmpty(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Read", `{"file_path":"a.go"}`),
+		toolResultContent("u2", "t1", `"file contents"`),
+	)
+	evs := ingest(t, src)
+	if evs[0].Err != "" {
+		t.Errorf("Err = %q, want \"\" on a successful call", evs[0].Err)
+	}
+}
+
+// TestCompoundFailureBroadcastsErrToEverySegment mirrors
+// TestCompoundFailureIsCFailNotFail: the failing segment of a compound chain
+// is unknown, so Err — like Status — is set on every segment sharing the one
+// tool_result payload, not attributed to a guessed single segment.
+func TestCompoundFailureBroadcastsErrToEverySegment(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"go test ./... && go build ./..."}`),
+		toolResultErrContent("u2", "t1", `"exit status 1"`),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 2 {
+		t.Fatalf("events = %d, want 2 (split compound)", len(evs))
+	}
+	for _, ev := range evs {
+		if ev.Err != "exit status 1" {
+			t.Errorf("%s: Err = %q, want the shared payload text on every segment", ev.Action, ev.Err)
+		}
+	}
+}
+
 func TestDuplicateUUIDDedup(t *testing.T) {
 	// Resumed sessions copy history: the same uuid in a second file must not double-count.
 	line1 := toolUse("dup", "t1", "Read", `{"file_path":"a.go"}`)

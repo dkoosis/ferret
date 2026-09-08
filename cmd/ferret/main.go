@@ -461,6 +461,8 @@ var CLI struct {
 		} `cmd:"" help:"Mine assistant self-audit text for confessed call-waste; prints candidate substitutions for dk to confirm via 'fixes sub' (regex/heuristic only, no LLM leg, no auto-record). ferret-kuv.16."`
 	} `cmd:"" help:"Fix ledger: record motif→fix, then 'report --since-fixes' computes burn-delta."`
 
+	Floor FloorCmd `cmd:"" help:"Per-session fixed load floor: SessionStart hook + tool/skill roster bytes paid before dk's first real turn, as a share of total session bytes (rule files measured from disk)." name:"floor"`
+
 	Reach struct {
 		Root     string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
 		Since    string `help:"Window start YYYY-MM-DD (default: 7 days ago)." name:"since"`
@@ -630,6 +632,8 @@ func main() {
 		err = cmdFixesSubs()
 	case "fixes proposals":
 		err = cmdFixesProposals()
+	case "floor":
+		err = cmdFloor()
 	case "reach":
 		err = cmdReach()
 	case "recurrence":
