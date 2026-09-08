@@ -35,5 +35,8 @@ ferret-j33/
 # bd worktree
 ferret-cax/
 
+# tool-ship.sh worktrees (sd-p6rt shared-checkout route)
+.claude/worktrees/
+
 # bd audit residue: passive re-export, Dolt is source of truth
 .beads/interactions.jsonl

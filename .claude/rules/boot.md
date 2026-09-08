@@ -1,19 +1,20 @@
 # Boot
-updated: 2026-07-27
+updated: 2026-09-07
 
 *Project working-memory. Maintained for future-me: current state + live frontier + traps that still bite. Resolved lanes pruned — history lives in beads/PRs.*
 
-## lane: ferret-097 — close the loop (NEW, phase 4, ratified 2026-07-27)
-Phases 1–3 (bbp/kuv/wf9) ALL CLOSED. Route fork resolved as EXTEND (decision nug `0d350b228b92`): ★ line unchanged, roadmap gains rung 4. **ferret-097** — ferret moves observation→actuation: rank what burns, tune, verify the delta.
-→ Children: **nrr** (per-shellnorm-command output-byte burn ranking, `report --kind burn` or `ferret burn` — pin door at build) · **ct1** (repeated-misfire ranking + repair pairs, feeds the kuv.15 substitution-ledger loop) · **kt5** (burn-delta in report, undeferred, blocked by nrr). Ready: nrr, ct1.
-→ Trigger: RTK review (rtk-ai/rtk — Rust output-filter proxy). RTK adoption NOT decided — revisit after nrr's ranking says what actually burns.
+## lane: none — phase 4 closed, the queue is loose beads
+Phases 1–4 ALL CLOSED. ferret-097 (close the loop: rank burners/misfires, tune, verify the delta) closed 2026-07-28 with nrr/ct1/kt5 all merged; ✗ read it as live work.
+→ There is no open epic. Confirm before planning against this line: `bd list --status open --type epic` (empty = still true) · `bd ready` for what is actually next.
+→ Still undecided: RTK adoption (rtk-ai/rtk — Rust output-filter proxy). nrr's burn ranking has landed, so the "revisit after nrr says what actually burns" trigger is now MET and nobody has revisited it.
 ~ dk drives forks himself — hand them crisply, ✗ pre-decide ratified semantics.
 
 ## State
-- main @ `4cf29d5` (#104: 917 omitempty + fk8 judge fan-out), origin synced. PR queue EMPTY.
+- Where main stands and what is in flight: `git log --oneline -n 5` · `gh pr list` — ✗ trust a sha written here, it goes stale between sessions.
 - Scorers live in **`internal/score/`** (landmark/quality/conform/qpp all there — ratified, design-doc D2). New scorers go here.
 - `/team` = one shared tree + loto (worktrees retired). No concurrent `make check`; primary verifies once at wave end.
-- 7hr (param-clump refactor) stays DEFERRED — revisit only if phase 4 leaves cmd/ferret's surface intact.
+- 7hr (param-clump refactor) UNDEFERRED and landed — `sessionRun{w, root, session, format}` in `cmd/ferret/segment.go` now carries the clump through the 6+ session-render funcs. New session-render func → take the struct.
+- Bare-`ferret` scoreboard: `--max-bytes` budgets the data rows (they go through `sink.Row`, ✗ `sink.Head`) and Δ is row-capped at `scoreboardCap`. The cap slices an ORDERED `buildDelta` — newest fix first, key ascending for same-day ties — so the row under evaluation survives. New Δ ordering idea → read ferret-yid's trail first; largest-reduction ordering was considered and dropped (a fix that made burn WORSE is the row you most need to see).
 
 ## Frontier — where the work is
 
@@ -23,7 +24,7 @@ Phases 1–3 (bbp/kuv/wf9) ALL CLOSED. Route fork resolved as EXTEND (decision n
 
 **ferret-wf9 — CLOSED (phase 3).** In-session feedback tap shipped end-to-end (#96–99): ask-side selector + label ledger + live join orchestration + answer-side recognition/valence/probe-exclusion. Gold labels now accumulate in-band.
 
-**ferret-097 — OPEN (phase 4, the live lane).** Close the loop: burn ranking (nrr) + misfire ranking (ct1) → tune → burn-delta verify (kt5). Detail in the top lane block.
+**ferret-097 — CLOSED (phase 4).** Close the loop: burn ranking (nrr) + misfire ranking (ct1) + burn-delta verify (kt5), all three merged 2026-07-28. Ferret now measures its own fixes end to end; the RTK fork it was gating is still open (top block).
 
 **Retrieval-outcome contract (trixi⇄ferret)** — ferret's consumer side = the bbp epic, now SHIPPED. Spec: `~/Projects/dk/Project/trixi/specs/retrieval-outcome-contract-design.md`. Seam: `trixi/observe.2.1` emits retrieval-event JSONL (producer) → `ferret/bbp` joins to segments + adjudicates (consumer, done) → `search-loop.4` reads back via interrupted-time-series (reader, upstream). Golden fixture is the contract test (ferret vendors it). Producer conformance = `tx-dii8m`.
 
@@ -38,7 +39,7 @@ Phases 1–3 (bbp/kuv/wf9) ALL CLOSED. Route fork resolved as EXTEND (decision n
 Dry fenced grants, zero corrections → trust-the-loop. Surface deviations, ✗ ask permission mid-build. On **open design** dk drives + wants the *why* before a model-changing/destructive call; hand him the approve/merge fork crisply (he ends on "next?"). When dk states a ground-truth fact, verify-then-proceed — ✗ re-litigate.
 
 ## Loose thread
-- read-before-edit/write hookify guard — top ferret-scan burn finding (`Edit!⇝Read` + `Write!⇝Read⇝Write`, ~670k). Build as a hook, log in the ferret fix ledger. Harness-side, not a ferret bead. Done-status unverified.
+- read-before-edit/write hookify guard — RESOLVED 2026-09-07 (ferret-kk7). `read-before-edit@cc-plugins` is enabled in `~/.claude/settings.json`; verified live that an Edit on a file unread this session is refused and the same Edit after a Read passes. Still unlogged in the ferret fix ledger, so the ~670k burn has no measured delta yet: `ferret fixes add --motif 'Edit! ⇝ Read' --fix 'read-before-edit@cc-plugins hook'`.
 
 ## Shipped ledger
 **bbp epic (closed):** agent-initiative scorer bbp.11 (#83/85/87) + no-pushback over-init bbp.18 (#86) · bbp.21 shipped-artifact tell (#91) · bbp.20 query-mode recall roots (#90) · bbp.19 transcript-paste parse (#93) · bbp.17 read-adjacency 5-verdict (#81) · bbp.16 ts→segment join + helped CLI (#79) · bbp.15 judge_fingerprint (#78) · bbp.14 helped adjudicator (#74) · bbp.13/.12/.10/.9 (#56/57/58/59) · bbp.7 v2 taxonomy (#54) · bbp.5 staged Hop1 judge (#53) · spine bbp.1/.2/.3/.4/.6 (#49–52).
