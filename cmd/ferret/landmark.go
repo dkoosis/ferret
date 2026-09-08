@@ -59,7 +59,7 @@ func cmdLandmark() error {
 		if err != nil {
 			return err
 		}
-		return landmarkSession(os.Stdout, root, cmd.Session, cmd.Data, cmd.Format)
+		return landmarkSession(sessionRun{w: os.Stdout, root: root, session: cmd.Session, format: cmd.Format}, cmd.Data)
 	}
 	spec, err := readLandmarkSpec(cmd.Spec)
 	if err != nil {
@@ -132,16 +132,16 @@ func landmarkCorpus(dataDir string) *mine.Corpus {
 // dataDir fills uniqueness weights (uniform fallback when absent — weighting is an
 // enhancement, never a hard dependency). The mapping + scoring loop lives in
 // internal/analyst (ScoreSessionLandmarks) so this stays a thin render shell.
-func landmarkSession(w io.Writer, root, session, dataDir, format string) error {
-	res, err := segmentSession(root, session)
+func landmarkSession(p sessionRun, dataDir string) error {
+	res, err := segmentSession(p.root, p.session)
 	if err != nil {
 		return err
 	}
 	sp := analyst.ScoreSessionLandmarks(res, landmarkCorpus(dataDir))
-	if format == fmtJSON {
-		return writeLandmarkSessionJSON(w, sp)
+	if p.format == fmtJSON {
+		return writeLandmarkSessionJSON(p.w, sp)
 	}
-	return writeLandmarkSessionText(w, sp)
+	return writeLandmarkSessionText(p.w, sp)
 }
 
 // writeLandmarkSessionJSON emits the per-session landmark verdict as indented

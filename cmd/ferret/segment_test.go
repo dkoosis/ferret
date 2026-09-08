@@ -35,7 +35,7 @@ func runSeg(t *testing.T, lines []string, format string) string {
 	root := t.TempDir()
 	writeSpineFixture(t, root, "-Users-dev-proj", "s.jsonl", lines)
 	var buf bytes.Buffer
-	if err := segments(&buf, root, "s", format); err != nil {
+	if err := segments(sessionRun{w: &buf, root: root, session: "s", format: format}); err != nil {
 		t.Fatalf("segments: %v", err)
 	}
 	return buf.String()

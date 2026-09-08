@@ -54,7 +54,7 @@ func cmdDialogue() error {
 	if err != nil {
 		return err
 	}
-	return runDialogue(os.Stdout, root, cmd.Session, cmd.Format)
+	return runDialogue(sessionRun{w: os.Stdout, root: root, session: cmd.Session, format: cmd.Format})
 }
 
 // runDialogue resolves session (a prefix) to one transcript, tags every genuine
@@ -65,15 +65,15 @@ func cmdDialogue() error {
 // ∇ This is the SESSION-level rollup (one outcome for the whole session). The
 // per-EPISODE rollup (one outcome per segment, via dialogue.Classify over each
 // segment's turns) is the follow-on once this is wired through the segmenter.
-func runDialogue(w io.Writer, root, session, format string) error {
-	src, distinct, err := resolveSpineSource(root, session)
+func runDialogue(p sessionRun) error {
+	src, distinct, err := resolveSpineSource(p.root, p.session)
 	if err != nil {
 		return err
 	}
 	if distinct > 1 {
 		fmt.Fprintf(os.Stderr,
 			"ferret: --session %q matched %d sessions; emitting %q (use a longer prefix to disambiguate)\n",
-			session, distinct, src.Session)
+			p.session, distinct, src.Session)
 	}
 
 	var res dlgResult
@@ -94,12 +94,12 @@ func runDialogue(w io.Writer, root, session, format string) error {
 		}
 	}
 
-	if format == fmtJSON {
-		enc := json.NewEncoder(w)
+	if p.format == fmtJSON {
+		enc := json.NewEncoder(p.w)
 		enc.SetIndent("", "  ")
 		return enc.Encode(res)
 	}
-	return writeDialogueText(w, res)
+	return writeDialogueText(p.w, res)
 }
 
 // shippedTell reports the terminal-tracker/VCS signal (internal/score's weak

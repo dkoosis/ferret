@@ -161,7 +161,7 @@ func runCand(t *testing.T, lines []string, format string, top int) string {
 	root := t.TempDir()
 	writeSpineFixture(t, root, "-Users-dev-proj", "s.jsonl", lines)
 	var buf bytes.Buffer
-	if err := candidates(&buf, root, "s", format, top, ""); err != nil {
+	if err := candidates(sessionRun{w: &buf, root: root, session: "s", format: format}, top, ""); err != nil {
 		t.Fatalf("candidates: %v", err)
 	}
 	return buf.String()

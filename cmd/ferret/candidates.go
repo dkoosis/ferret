@@ -266,15 +266,15 @@ func cmdCandidates() error {
 	if cmd.Session == "" {
 		return corpusCandidates(os.Stdout, root, cmd.Format, cmd.Top, cmd.MinSessions)
 	}
-	return candidates(os.Stdout, root, cmd.Session, cmd.Format, cmd.Top, cmd.Conformance)
+	return candidates(sessionRun{w: os.Stdout, root: root, session: cmd.Session, format: cmd.Format}, cmd.Top, cmd.Conformance)
 }
 
 // candidates segments one session and emits its ranked cost-leak bundle to w. When
 // conformancePath is set it loads the per-task reference plans and folds kuv.4
 // conformance into the leak score for the tasks it covers (ferret-567.2); empty =
 // the reference-free three-factor ranking.
-func candidates(w io.Writer, root, session, format string, top int, conformancePath string) error {
-	res, err := segmentSession(root, session)
+func candidates(p sessionRun, top int, conformancePath string) error {
+	res, err := segmentSession(p.root, p.session)
 	if err != nil {
 		return err
 	}
@@ -288,10 +288,10 @@ func candidates(w io.Writer, root, session, format string, top int, conformanceP
 		ranked.Candidates = ranked.Candidates[:top]
 		ranked.Truncated = true
 	}
-	if format == fmtJSON {
-		return writeCandidatesJSON(w, ranked)
+	if p.format == fmtJSON {
+		return writeCandidatesJSON(p.w, ranked)
 	}
-	return writeCandidatesText(w, ranked)
+	return writeCandidatesText(p.w, ranked)
 }
 
 // writeCandidatesJSON emits the bundle as indented JSON — the analyst feed.

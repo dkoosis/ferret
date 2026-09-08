@@ -33,7 +33,7 @@ func runQualitySession(t *testing.T, lines []string, format string) string {
 	root := t.TempDir()
 	writeSpineFixture(t, root, "-Users-dev-proj", "q.jsonl", lines)
 	var buf bytes.Buffer
-	if err := qualitySession(&buf, root, "q", format); err != nil {
+	if err := qualitySession(sessionRun{w: &buf, root: root, session: "q", format: format}); err != nil {
 		t.Fatalf("qualitySession: %v", err)
 	}
 	return buf.String()
@@ -93,7 +93,7 @@ func TestQualitySessionWithConformSpec(t *testing.T) {
 		t.Fatalf("readQualitySpec: %v", err)
 	}
 	var buf bytes.Buffer
-	if err := qualitySessionWithSpec(&buf, root, "q", fmtJSON, spec); err != nil {
+	if err := qualitySessionWithSpec(sessionRun{w: &buf, root: root, session: "q", format: fmtJSON}, spec); err != nil {
 		t.Fatalf("qualitySessionWithSpec: %v", err)
 	}
 	var got struct {
@@ -131,7 +131,7 @@ func TestQualitySessionWithEmptyRefRejected(t *testing.T) {
 		t.Fatalf("readQualitySpec: %v", err)
 	}
 	var buf bytes.Buffer
-	if err := qualitySessionWithSpec(&buf, root, "q", fmtJSON, spec); !errors.Is(err, errConformNoRef) {
+	if err := qualitySessionWithSpec(sessionRun{w: &buf, root: root, session: "q", format: fmtJSON}, spec); !errors.Is(err, errConformNoRef) {
 		t.Fatalf("err = %v; want errConformNoRef", err)
 	}
 }
@@ -142,10 +142,10 @@ func TestQualitySessionWithNilSpecMatchesReferenceFree(t *testing.T) {
 	root := t.TempDir()
 	writeSpineFixture(t, root, "-Users-dev-proj", "q.jsonl", qualitySessionLines())
 	var free, enriched bytes.Buffer
-	if err := qualitySession(&free, root, "q", fmtJSON); err != nil {
+	if err := qualitySession(sessionRun{w: &free, root: root, session: "q", format: fmtJSON}); err != nil {
 		t.Fatalf("qualitySession: %v", err)
 	}
-	if err := qualitySessionWithSpec(&enriched, root, "q", fmtJSON, nil); err != nil {
+	if err := qualitySessionWithSpec(sessionRun{w: &enriched, root: root, session: "q", format: fmtJSON}, nil); err != nil {
 		t.Fatalf("qualitySessionWithSpec: %v", err)
 	}
 	if free.String() != enriched.String() {

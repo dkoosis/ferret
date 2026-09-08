@@ -184,7 +184,7 @@ func runPropose(root string) error {
 	}
 	warnAmbiguousSession(cmd.Session, distinct, src.Session, "proposing for")
 	var bundle bytes.Buffer
-	if err := candidates(&bundle, root, cmd.Session, fmtJSON, cmd.Top, ""); err != nil {
+	if err := candidates(sessionRun{w: &bundle, root: root, session: cmd.Session, format: fmtJSON}, cmd.Top, ""); err != nil {
 		return err
 	}
 	// Same placeholder mapping as cmdAdjudicate (ferret-5c0): the propose prompt's

@@ -29,31 +29,31 @@ func cmdFixesProposals() error {
 	if err != nil {
 		return err
 	}
-	return runFixesProposals(os.Stdout, root, cmd.Session, cmd.Format)
+	return runFixesProposals(sessionRun{w: os.Stdout, root: root, session: cmd.Session, format: cmd.Format})
 }
 
 // runFixesProposals resolves session (a prefix) to one transcript, walks
 // every assistant turn's text through fixes.DetectProposals, and renders the
 // accumulated proposals. Mirrors runDialogue's session-resolution +
 // transcript.ReadLines shape (cmd/ferret/dialogue.go).
-func runFixesProposals(w io.Writer, root, session, format string) error {
-	src, distinct, err := resolveSpineSource(root, session)
+func runFixesProposals(p sessionRun) error {
+	src, distinct, err := resolveSpineSource(p.root, p.session)
 	if err != nil {
 		return err
 	}
-	warnAmbiguousSession(session, distinct, src.Session, "emitting")
+	warnAmbiguousSession(p.session, distinct, src.Session, "emitting")
 
 	proposals, err := scanProposals(src)
 	if err != nil {
 		return err
 	}
 
-	if format == fmtJSON {
-		return out.JSON(w, map[string]any{
+	if p.format == fmtJSON {
+		return out.JSON(p.w, map[string]any{
 			"session": src.Session, "proposals": proposals, keyTotal: len(proposals),
 		})
 	}
-	return writeProposalsText(w, src.Session, proposals)
+	return writeProposalsText(p.w, src.Session, proposals)
 }
 
 // scanProposals walks one transcript's assistant turns and runs each turn's
