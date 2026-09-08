@@ -23,7 +23,7 @@ jobs:
     # Fire only on a PR comment carrying the trigger phrase. github.event.issue
     # is a PR iff .pull_request is set. Private repo → commenters are already
     # collaborators, so no extra author gating is needed.
-    if: ${{ github.event.issue.pull_request && contains(github.event.comment.body, '@codex review') }}
+    if: ${{ github.event.issue.pull_request && contains(github.event.comment.body, '@codex review') && github.event.comment.user.type != 'Bot' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
