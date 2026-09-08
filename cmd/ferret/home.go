@@ -143,8 +143,11 @@ func writeHomeJSON(w io.Writer, st status, sb mine.Scoreboard) error {
 	})
 }
 
-// writeHomeText renders the ≤40-line scoreboard. Every row carries its own
-// `next:` command — a legal move, not a plan (DK-AXI rule 11) — because this
+// writeHomeText renders the ≤40-line scoreboard. Data rows go through
+// sink.Row, so --max-bytes truncates them and Close prints the `… +K more`
+// notice — the header and the section labels stay Head, since a budget that
+// eats the label before the rows would hand the reader unlabelled numbers.
+// Every row carries its own `next:` command — a legal move, not a plan (DK-AXI rule 11) — because this
 // is the terse, no-routing-prose view: the built-in usage report is where
 // recommendations live now (decision feb7162e18b9).
 func writeHomeText(w io.Writer, corpus *mine.Corpus, st status, sb mine.Scoreboard, maxBytes int) error {
@@ -160,7 +163,7 @@ func writeHomeText(w io.Writer, corpus *mine.Corpus, st status, sb mine.Scoreboa
 	if len(sb.Routines) > 0 {
 		sink.Head("routines (cmd lens, by burn — one helper each):")
 		for i, r := range sb.Routines {
-			sink.Head("%d  %10s  n=%-5d sess=%-4d side=%3.0f%%  %-40s next: ferret tokens --session %s",
+			sink.Row("%d  %10s  n=%-5d sess=%-4d side=%3.0f%%  %-40s next: ferret tokens --session %s",
 				i+1, humanBytes(r.BurnBytes), r.Count, r.Sessions, sideSharePct(r), r.Key,
 				exemplarSession(corpus, r.ExStream, r.ExSeq))
 		}
@@ -169,7 +172,7 @@ func writeHomeText(w io.Writer, corpus *mine.Corpus, st status, sb mine.Scoreboa
 	if len(sb.Waste) > 0 {
 		sink.Head("waste (priced, by wastedBytes):")
 		for i, r := range sb.Waste {
-			sink.Head("%d  %10s  %-8s %5dx/%d sess  %-24s next: %s",
+			sink.Row("%d  %10s  %-8s %5dx/%d sess  %-24s next: %s",
 				i+1, humanBytes(r.WastedBytes), r.Source, r.Occurrences, r.Sessions, r.Key, wasteNextCmd(r))
 		}
 	}
@@ -177,7 +180,7 @@ func writeHomeText(w io.Writer, corpus *mine.Corpus, st status, sb mine.Scoreboa
 	if len(sb.Delta) > 0 {
 		sink.Head("Δ since fixes:")
 		for _, d := range sb.Delta {
-			sink.Head("  %s  fix %s  %s → %s (%s)",
+			sink.Row("  %s  fix %s  %s → %s (%s)",
 				d.Key, d.FixedAt, humanBytes(d.BeforeBytes), humanBytes(d.AfterBytes), deltaPct(d))
 		}
 	}

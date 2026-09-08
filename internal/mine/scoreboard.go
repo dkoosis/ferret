@@ -60,9 +60,10 @@ type Scoreboard struct {
 	Routines []ScoreboardRoutine `json:"routines"`
 	Waste    []WasteRow          `json:"waste"`
 	Delta    []ScoreboardDelta   `json:"delta"`
-	// BelowCut is routines-past-cap plus waste-past-cap combined — one figure
-	// for the tail line ("… N more"), not a per-category breakdown; a reader
-	// who wants the split already has `ferret report`/`ferret friction`.
+	// BelowCut is routines-past-cap plus waste-past-cap plus delta-past-cap
+	// combined — one figure for the tail line ("… N more"), not a per-category
+	// breakdown; a reader who wants the split already has `ferret report`,
+	// `ferret friction` and `ferret report --since-fixes`.
 	BelowCut int `json:"belowCut"`
 }
 
@@ -72,8 +73,9 @@ type Scoreboard struct {
 // would render. waste is the friction merge with the motif leg skipped (poll
 // ∪ misfire only — home.go arranges that by calling mergeFriction with
 // NoMotifs, so no second union is computed here). ledger is every recorded
-// fix/wontfix/watch entry; rowCap bounds each of Routines and Waste (3, per the
-// bead).
+// fix/wontfix/watch entry; rowCap bounds each of Routines, Waste and Delta (3,
+// per the bead) — the ledger only grows, so an uncapped Δ section is the one
+// part of the scoreboard that would outrun the 40-line budget over time.
 func BuildScoreboard(corpus *Corpus, findings []*Finding, waste WasteReport, ledger []fixes.Entry, rowCap int) Scoreboard {
 	idx := fixes.Index(ledger)
 
@@ -110,12 +112,19 @@ func BuildScoreboard(corpus *Corpus, findings []*Finding, waste WasteReport, led
 		sb.Waste = append(sb.Waste, r)
 	}
 
-	sb.Delta = buildDelta(corpus, findings, idx)
+	delta := buildDelta(corpus, findings, idx)
+	if len(delta) > rowCap {
+		sb.BelowCut += len(delta) - rowCap
+		delta = delta[:rowCap]
+	}
+	sb.Delta = delta
 	return sb
 }
 
 // buildDelta renders one row per ledger `fix` entry (wontfix/watch verdicts
 // have no baseline burn to delta — they only ever leave the ranking above).
+// It returns every row; BuildScoreboard applies the cap, so the count folded
+// into BelowCut is computed from the full set.
 // "after" is the matching finding's current burn, 0 when the motif no longer
 // recurs — the fix worked all the way to elimination, not merely a
 // reduction. Sorted by key so repeated runs are byte-stable (map iteration
