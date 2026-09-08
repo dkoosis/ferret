@@ -10,10 +10,11 @@ Phases 1–3 (bbp/kuv/wf9) ALL CLOSED. Route fork resolved as EXTEND (decision n
 ~ dk drives forks himself — hand them crisply, ✗ pre-decide ratified semantics.
 
 ## State
-- main @ `baecb0a` (#153: bare ferret is the measurement scoreboard). PR queue: #154 (7hr) · #155 (3kj) · #156 (9lm), all open for review 2026-09-07.
+- Where main stands and what is in flight: `git log --oneline -n 5` · `gh pr list` — ✗ trust a sha written here, it goes stale between sessions.
 - Scorers live in **`internal/score/`** (landmark/quality/conform/qpp all there — ratified, design-doc D2). New scorers go here.
 - `/team` = one shared tree + loto (worktrees retired). No concurrent `make check`; primary verifies once at wave end.
-- 7hr (param-clump refactor) UNDEFERRED and shipped as #154 — `sessionRun{w, root, session, format}` in segment.go, 13 files, no behavior change.
+- 7hr (param-clump refactor) UNDEFERRED and landed — `sessionRun{w, root, session, format}` in `cmd/ferret/segment.go` now carries the clump through the 6+ session-render funcs. New session-render func → take the struct.
+- Bare-`ferret` scoreboard: `--max-bytes` budgets the data rows (they go through `sink.Row`, ✗ `sink.Head`) and Δ is row-capped. Open defect on that cap — **ferret-3lb**: the cap slices `buildDelta`'s alphabetical sort, so Δ keeps the alphabetically-first fixes, not the biggest reductions.
 
 ## Frontier — where the work is
 
