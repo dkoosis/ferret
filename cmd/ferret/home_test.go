@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -349,5 +350,76 @@ func TestGuardOffline_NeverRefusesHome(t *testing.T) {
 	t.Cleanup(func() { CLI.Offline = orig })
 	if err := guardOffline("home"); err != nil {
 		t.Errorf("guardOffline(home) under --offline = %v, want nil (home is local)", err)
+	}
+}
+
+// TestWriteHomeText_TruncatesWithinBudget_When_MaxBytesIsSmall is the
+// ferret-3kj regression: every data row used to go through sink.Head, which
+// is unbudgeted, so --max-bytes was a silent no-op on bare `ferret`. The
+// budget is set below the fixture's full render but above its header, so the
+// header survives and the rows are what gets cut.
+func TestWriteHomeText_TruncatesWithinBudget_When_MaxBytesIsSmall(t *testing.T) {
+	corpus := &mine.Corpus{StreamKeys: []string{"proj/session1234@", "proj/session5678@"}, Vocab: []string{"x"}}
+
+	var full bytes.Buffer
+	if err := writeHomeText(&full, corpus, homeStatusFixture(), homeScoreboardFixture(), 0); err != nil {
+		t.Fatalf("writeHomeText (unbudgeted): %v", err)
+	}
+
+	const budget = 200
+	if full.Len() <= budget {
+		t.Fatalf("fixture renders %d bytes, which is already within the %d-byte budget — the test proves nothing", full.Len(), budget)
+	}
+
+	var buf bytes.Buffer
+	if err := writeHomeText(&buf, corpus, homeStatusFixture(), homeScoreboardFixture(), budget); err != nil {
+		t.Fatalf("writeHomeText (budgeted): %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "more (raise -limit / -max-bytes)") {
+		t.Errorf("truncation was silent — no `… +K more` notice\n---\n%s", got)
+	}
+	// Head lines (banner, section labels, the below-cut tail and the `next:`
+	// block) are deliberately uncapped, so the assertion is that the BUDGETED
+	// rows shrank, not that the total is under budget to the byte.
+	if buf.Len() >= full.Len() {
+		t.Errorf("budgeted render is %d bytes, unbudgeted is %d — --max-bytes did nothing", buf.Len(), full.Len())
+	}
+	if strings.Contains(got, "Read ⇝ sh:rg -n ⇝ Read") {
+		t.Errorf("the second routine row survived a %d-byte budget\n---\n%s", budget, got)
+	}
+}
+
+// TestBuildScoreboard_CapsDelta_When_LedgerHasMoreFixesThanRowCap pins the
+// second half of ferret-3kj: buildDelta emitted one row per `fix` entry with
+// no cap, so the Δ section grew without bound as the ledger filled.
+func TestBuildScoreboard_CapsDelta_When_LedgerHasMoreFixesThanRowCap(t *testing.T) {
+	const fixCount = 50
+	corpus := &mine.Corpus{Vocab: []string{"x"}}
+	ledger := make([]fixes.Entry, 0, fixCount)
+	for i := range fixCount {
+		ledger = append(ledger, fixes.Entry{
+			Motif:        fmt.Sprintf("tool%02d", i),
+			Fix:          "hookified",
+			Disposition:  fixes.DispositionFix,
+			BaselineBurn: 1000 + i,
+			AddedAt:      time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC),
+		})
+	}
+
+	sb := mine.BuildScoreboard(corpus, nil, mine.WasteReport{}, ledger, scoreboardCap)
+	if len(sb.Delta) != scoreboardCap {
+		t.Fatalf("Delta has %d rows, want the %d-row cap", len(sb.Delta), scoreboardCap)
+	}
+	if want := fixCount - scoreboardCap; sb.BelowCut != want {
+		t.Errorf("BelowCut = %d, want %d (the capped Δ remainder)", sb.BelowCut, want)
+	}
+
+	var buf bytes.Buffer
+	if err := writeHomeText(&buf, corpus, homeStatusFixture(), sb, 0); err != nil {
+		t.Fatalf("writeHomeText: %v", err)
+	}
+	if n := strings.Count(buf.String(), "\n"); n > 40 {
+		t.Errorf("a %d-fix ledger renders %d lines, want ≤ 40\n---\n%s", fixCount, n, buf.String())
 	}
 }
