@@ -113,6 +113,10 @@ func TestWriteBurnText_RespectsLimit_When_LimitBelowRowCount(t *testing.T) {
 // a row the miner flagged Overcount must carry a visible marker in the
 // rendered text — a reader ranking work off the row cannot mistake the
 // whole-record figure for injected context.
+//
+// Scoped to burnRowsOut and asserting the marker's own glyph and ratio, not
+// the bare phrase (ferret-9lm): the preamble always says "over-count", so a
+// whole-output Contains check passed even with overcountNote stubbed to "".
 func TestWriteBurnText_MarksOvercountRow_When_RowIsFlagged(t *testing.T) {
 	res := &mine.BurnResult{
 		Events: 219000, Sessions: 400,
@@ -124,9 +128,36 @@ func TestWriteBurnText_MarksOvercountRow_When_RowIsFlagged(t *testing.T) {
 	if err := writeBurnText(&buf, res, 0, 0); err != nil {
 		t.Fatalf("writeBurnText: %v", err)
 	}
-	out := buf.String()
-	if !strings.Contains(out, "over-count") {
-		t.Errorf("rendered row missing an over-count marker\n---\n%s", out)
+	rowsOut := burnRowsOut(t, buf.String())
+	// 88.3MB record / 7.24MB content = 12.2x — the ratio the reader discounts by.
+	for _, want := range []string{"⚠ over-count", "12.2x record/content"} {
+		if !strings.Contains(rowsOut, want) {
+			t.Errorf("rendered row missing %q\n---\n%s", want, rowsOut)
+		}
+	}
+}
+
+// TestWriteBurnText_MarksOvercountRow_When_ContentBytesIsZero covers
+// overcountNote's divide-by-zero branch (ferret-9lm): a record disclosing no
+// content at all has no finite ratio, so the row states the disclosed bytes
+// instead of printing an Inf.
+func TestWriteBurnText_MarksOvercountRow_When_ContentBytesIsZero(t *testing.T) {
+	res := &mine.BurnResult{
+		Events: 1200, Sessions: 40,
+		Rows: []mine.BurnRow{
+			{Key: "at:hook_success", Bytes: 4800000, Calls: 1200, BytesPerCall: 4000, Sessions: 40, ContentBytes: 0, Overcount: true},
+		},
+	}
+	var buf bytes.Buffer
+	if err := writeBurnText(&buf, res, 0, 0); err != nil {
+		t.Fatalf("writeBurnText: %v", err)
+	}
+	rowsOut := burnRowsOut(t, buf.String())
+	if !strings.Contains(rowsOut, "⚠ over-count: 0B disclosed content") {
+		t.Errorf("zero-content row missing its disclosure\n---\n%s", rowsOut)
+	}
+	if strings.Contains(rowsOut, "Inf") || strings.Contains(rowsOut, "NaN") {
+		t.Errorf("zero-content row divided by zero\n---\n%s", rowsOut)
 	}
 }
 
@@ -153,8 +184,15 @@ func TestWriteBurnText_PreambleNamesTheOvercount_Always(t *testing.T) {
 		t.Fatalf("writeBurnText: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "over-count") {
-		t.Errorf("preamble must name the over-count explicitly\n---\n%s", out)
+	// Scoped to the text before the rows header (ferret-9lm, mirror image of
+	// the positive test): a flagged row's own marker must not satisfy an
+	// assertion about the preamble.
+	preamble, _, ok := strings.Cut(out, "burn events=")
+	if !ok {
+		t.Fatalf("missing burn events= header\n---\n%s", out)
+	}
+	if !strings.Contains(preamble, "over-count") {
+		t.Errorf("preamble must name the over-count explicitly\n---\n%s", preamble)
 	}
 }
 
