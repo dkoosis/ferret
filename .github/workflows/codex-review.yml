@@ -22,8 +22,11 @@ jobs:
   codex:
     # Fire only on a PR comment carrying the trigger phrase. github.event.issue
     # is a PR iff .pull_request is set. Private repo → commenters are already
-    # collaborators, so no extra author gating is needed.
-    if: ${{ github.event.issue.pull_request && contains(github.event.comment.body, '@codex review') }}
+    # collaborators, so no extra author gating is needed. Excludes only the
+    # workflow's own feedback-posting identity (github-actions[bot], via
+    # post_feedback below) — not every bot — so another bot's genuine
+    # @codex review comment can still fire.
+    if: ${{ github.event.issue.pull_request && contains(github.event.comment.body, '@codex review') && github.event.comment.user.login != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
