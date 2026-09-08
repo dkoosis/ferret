@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/dkoosis/ferret/internal/mine"
 	"github.com/dkoosis/ferret/internal/out"
@@ -26,10 +28,17 @@ import (
 // to the dispatch switch, mirroring every other subcommand.
 type MisfiresCmd struct {
 	CommonFlags
+	// Reasons and Key add the ferret-54q breakdown: without --reasons,
+	// cmdMisfires' output is unchanged (byte-identical) from before either
+	// flag existed.
+	Reasons bool   `help:"Break each ranked key's failures down by captured error-text reason." name:"reasons"`
+	Key     string `help:"Scope --reasons to one misfire key (Event.Action); omitted = every ranked key." name:"key"`
 }
 
 // cmdMisfires wires the kong flags to mine.MineMisfires over the canonical
 // events artifact — the same load-then-mine shape as cmdGates (gates.go).
+// --reasons switches to the mine.MineReasons breakdown instead (ferret-54q);
+// the plain ranking below it is untouched either way.
 func cmdMisfires(cmd MisfiresCmd) error {
 	c, err := fromCommonFlags(cmd.CommonFlags)
 	if err != nil {
@@ -44,6 +53,13 @@ func cmdMisfires(cmd MisfiresCmd) error {
 	events, err := loadEvents(c.eventsPath())
 	if err != nil {
 		return err
+	}
+	if cmd.Reasons {
+		rep := mine.MineReasons(events, cmd.Key)
+		if c.format == fmtJSON {
+			return writeReasonsJSON(os.Stdout, rep)
+		}
+		return writeReasonsText(os.Stdout, rep, c.limit, c.maxBytes)
 	}
 	rep := mine.MineMisfires(events)
 	if c.format == fmtJSON {
@@ -158,4 +174,68 @@ func repairRow(sink *out.Sink, p mine.RepairPair) bool {
 		return sink.Row("%-24s  count=%d  (key-level — no raw command text captured for this key)", p.Key, p.Count)
 	}
 	return sink.Row("%-24s  count=%d  %q → %q", p.Key, p.Count, p.FailedRaw, p.FixedRaw)
+}
+
+// writeReasonsJSON emits the ferret-54q reason breakdown as a single JSON
+// document — no row cap: a corpus-wide reason list is small (one row per
+// distinct error-text bucket per key), unlike the row-heavy tables above.
+func writeReasonsJSON(w io.Writer, rep mine.ReasonsReport) error {
+	return out.JSON(w, map[string]any{
+		"keys":       rep.Keys,
+		"failed":     rep.Failed,
+		"uncaptured": rep.Uncaptured,
+	})
+}
+
+// writeReasonsText emits the reason breakdown: one line per ranked key
+// listing its top error-text reasons and counts, then the coverage line the
+// bead's Rules require — how many failed events in range carry no captured
+// error text, so a pre-capture corpus reads as "not captured" rather than
+// "no failures".
+func writeReasonsText(w io.Writer, rep mine.ReasonsReport, limit, maxBytes int) error {
+	sink := out.NewSink(w, limit, maxBytes)
+	defer sink.Close()
+	about(sink,
+		"≡ misfires --reasons: each ranked key's failures broken down by captured",
+		"≡ error-text reason (event.Err, set once at ingest — never re-scanned from",
+		"≡ transcripts here). A hook/guard denial groups by its script name",
+		"≡ (hook:<script>), not its message text; every other reason is the first ~70",
+		"≡ chars of the tool_result text, whitespace-collapsed.")
+
+	sink.Head("reasons keys=%d failed=%d", len(rep.Keys), rep.Failed)
+	emptyNote(sink, len(rep.Keys), "keys with a captured reason")
+	for _, kr := range rep.Keys {
+		sink.Row("%s", reasonLine(kr))
+	}
+	writeCoverageNote(sink, rep)
+	return nil
+}
+
+// reasonLine renders one key's ranked reasons as "reason count · reason
+// count · …", the shape the bead's Acceptance Criteria names.
+func reasonLine(kr mine.KeyReasons) string {
+	parts := make([]string, 0, len(kr.Reasons))
+	for _, r := range kr.Reasons {
+		parts = append(parts, fmt.Sprintf("%s %d", r.Reason, r.Count))
+	}
+	return fmt.Sprintf("%-24s  %s", kr.Key, strings.Join(parts, " · "))
+}
+
+// writeCoverageNote states the report's own coverage: a corpus ingested
+// before event.Err existed decodes every old row with Err == "", and without
+// this line that reads as "no failures" rather than "not captured" — the
+// exact failure the bead's Rules call out.
+func writeCoverageNote(sink *out.Sink, rep mine.ReasonsReport) {
+	if rep.Failed == 0 {
+		sink.Head("coverage: 0 failed events in range")
+		return
+	}
+	if rep.Uncaptured == rep.Failed {
+		sink.Head("coverage: 0/%d failed events carry a captured reason — not captured (pre-ferret-54q ingest), not \"no failures\"; re-ingest to see reasons",
+			rep.Failed)
+		return
+	}
+	share := float64(rep.Uncaptured) / float64(rep.Failed) * 100
+	sink.Head("coverage: %d/%d failed events (%.0f%%) carry no captured error text",
+		rep.Uncaptured, rep.Failed, share)
 }

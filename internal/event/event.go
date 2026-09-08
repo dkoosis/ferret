@@ -102,6 +102,14 @@ type Event struct {
 	// (result) order. Captured once at ingest, omitempty, no migration — the d01 way.
 	Query   string   `json:"qq,omitempty"`
 	Results []NugHit `json:"rs,omitempty"`
+	// Err is the capped tool_result error text captured at ingest for a failed
+	// (fail|cfail) event — ferret-54q. omitempty, no SchemaVersion bump (the
+	// d01 way, see Query/Results above): a bump would refuse every existing
+	// corpus's Manifest.Compatible() exact-equality check until a full
+	// re-ingest. A row written before this field existed decodes with Err ==
+	// "" — a consumer must read that as "not captured", not "no error text",
+	// since Status alone already says the call failed.
+	Err string `json:"err,omitempty"`
 }
 
 // NugHit is one returned nug in a get_nug result, in rank order (slice position

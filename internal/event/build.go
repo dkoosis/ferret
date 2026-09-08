@@ -307,6 +307,27 @@ func (b *Builder) userLine(src transcript.Source, st *fileState, raw *transcript
 	}
 }
 
+// resultOutcome derives one tool_result's Status and captured error text
+// (ferret-54q). A failed compound chain (segCount > 1) gets cfail, not fail:
+// the result says the invocation failed, not which segment — fail on every
+// segment would invent friction. Err is captured the same way: the failing
+// segment is unknown for cfail, so the one payload's text is what resolve
+// broadcasts to every segment, mirroring Status itself.
+func resultOutcome(blk *transcript.Block, segCount int) (status, errText string) {
+	status = StatusOK
+	if blk.IsError == nil || !*blk.IsError {
+		return status, ""
+	}
+	status = StatusFail
+	if segCount > 1 {
+		status = StatusCFail
+	}
+	if s, ok := resultText(blk.Content); ok {
+		errText = trunc(s, DetailMax)
+	}
+	return status, errText
+}
+
 // resolve applies a tool_result's status and latency to its pending events.
 // A failed compound chain gets cfail, not fail: the result says the invocation
 // failed, not which segment — fail on every segment would invent friction.
@@ -325,13 +346,7 @@ func (b *Builder) resolve(st *fileState, blk *transcript.Block, ts time.Time) {
 		b.resolved[blk.ToolUseID] = struct{}{}
 		return
 	}
-	status := StatusOK
-	if blk.IsError != nil && *blk.IsError {
-		status = StatusFail
-		if len(evs) > 1 {
-			status = StatusCFail
-		}
-	}
+	status, errText := resultOutcome(blk, len(evs))
 	// Attribute the result payload's measured size across the (possibly
 	// compound) events it resolves — this is real context the call returned.
 	// Integer division drops up to n-1 bytes; carry the remainder onto the
@@ -342,6 +357,7 @@ func (b *Builder) resolve(st *fileState, blk *transcript.Block, ts time.Time) {
 	ct, haveCT := st.callTime[blk.ToolUseID]
 	for i, ev := range evs {
 		ev.Status = status
+		ev.Err = errText
 		ev.OutBytes += share
 		if i < rem {
 			ev.OutBytes++

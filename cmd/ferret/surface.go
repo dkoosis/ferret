@@ -106,6 +106,7 @@ var commandSurfaces = map[string]cmdSurface{
 	"fixes subs":      {kind: surfaceLocal},
 	"fixes proposals": {kind: surfaceLocal},
 	"reach":           {kind: surfaceLocal},
+	"floor":           {kind: surfaceLocal},
 }
 
 // normalizeCommand strips kong's argument placeholders so "search <query>"

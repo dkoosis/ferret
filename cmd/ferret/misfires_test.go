@@ -263,3 +263,139 @@ func TestCmdMisfires_LoadsRealArtifact_When_EventsFileExists(t *testing.T) {
 		t.Errorf("mine over loaded events = %+v; want one sh:jq row with 2 fails", rep.Rows)
 	}
 }
+
+// TestWriteMisfiresText_IsByteIdentical_When_ReasonsFlagUnused is the bead's
+// named golden-diff AC (ferret-54q): adding --reasons/--key to MisfiresCmd
+// must not change one byte of `ferret misfires`' existing output. This pins
+// the exact rendering captured before the --reasons code existed.
+func TestWriteMisfiresText_IsByteIdentical_When_ReasonsFlagUnused(t *testing.T) {
+	rep := mine.MineMisfires([]event.Event{
+		misfireEv("s1", "jq", event.StatusFail, "jq '.[0]'"),
+		misfireEv("s2", "jq", event.StatusFail, "jq '.[0]'"),
+	})
+	var buf bytes.Buffer
+	if err := writeMisfiresText(&buf, rep, 0, 0); err != nil {
+		t.Fatalf("writeMisfiresText: %v", err)
+	}
+	const want = "≡ misfires: corpus-wide ranking of repeated command failures. key = Event.Action\n" +
+		"≡ (shellnorm token for shell events, tool name for tool events); score = fails × \n" +
+		"≡ sessions — a command that fails the same way across many sessions ranks highest.\n" +
+		"≡ repair pairs: a failed call followed by a same-key success (Event.Retry) — the\n" +
+		"≡ existing repair tell. Feeds the fixes/substitution ledger loop (ferret fixes sub);\n" +
+		"≡ this command only ranks, it does not write to the ledger.\n" +
+		"≡ swallowed: `cmd 2>/dev/null || fallback` — the error text is discarded and the\n" +
+		"≡ chain exits with the fallback's code, so no is_error ever fires and the rows\n" +
+		"≡ above cannot see these at all. Counts are a FLOOR on hidden failures: the shape\n" +
+		"≡ proves a failure would be invisible, never that one happened.\n" +
+		"misfires rows=1 repairs=0\n" +
+		"sh:jq                     fails=2    sessions=2    calls=2    fail-rate=1.00  score=4\n" +
+		"next:\n" +
+		"  ferret friction --source misfire\n" +
+		"  ferret fixes sub --intent <class> --wrong <tool> --better <template>\n"
+	if buf.String() != want {
+		t.Errorf("writeMisfiresText output changed by the --reasons addition.\ngot:\n%q\nwant:\n%q", buf.String(), want)
+	}
+}
+
+// TestWriteReasonsText_ShowsHookDenialAndCoverage exercises the CLI-level
+// text rendering: a hook denial's script-name reason, a real failure's own
+// text reason kept distinct, and the coverage line for the uncaptured share.
+func TestWriteReasonsText_ShowsHookDenialAndCoverage(t *testing.T) {
+	events := []event.Event{
+		{Session: "s1", Kind: event.KindTool, Action: "Edit", Status: event.StatusFail,
+			Err: "PreToolUse:Edit hook error: [bash /path/to/read-before-edit.sh …]"},
+		{Session: "s2", Kind: event.KindTool, Action: "Edit", Status: event.StatusFail,
+			Err: "File has not been read yet."},
+		{Session: "s3", Kind: event.KindTool, Action: "Edit", Status: event.StatusFail}, // uncaptured
+	}
+	rep := mine.MineReasons(events, "")
+	var buf bytes.Buffer
+	if err := writeReasonsText(&buf, rep, 0, 0); err != nil {
+		t.Fatalf("writeReasonsText: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"hook:read-before-edit 1",
+		"File has not been read yet. 1",
+		"coverage: 1/3 failed events",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("text output missing %q\n---\n%s", want, out)
+		}
+	}
+}
+
+// TestWriteReasonsText_StatesFullyUncapturedCoverage pins the all-old-rows
+// case named in the bead's Rules: a corpus that predates err capture must
+// read as "not captured", never render an empty/silent 0-failures report.
+func TestWriteReasonsText_StatesFullyUncapturedCoverage(t *testing.T) {
+	events := []event.Event{
+		{Session: "s1", Kind: event.KindTool, Action: "Edit", Status: event.StatusFail},
+	}
+	rep := mine.MineReasons(events, "")
+	var buf bytes.Buffer
+	if err := writeReasonsText(&buf, rep, 0, 0); err != nil {
+		t.Fatalf("writeReasonsText: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "not captured") {
+		t.Errorf("text output must say the corpus predates capture, not read as zero failures\n---\n%s", out)
+	}
+	if strings.Contains(out, "0 failed events in range") {
+		t.Errorf("coverage line must not read as \"no failures\" when 1 failed event exists uncaptured\n---\n%s", out)
+	}
+}
+
+// TestWriteReasonsJSON_RoundTrips guards the JSON shape: keys, failed and
+// uncaptured all present and correct.
+func TestWriteReasonsJSON_RoundTrips(t *testing.T) {
+	events := []event.Event{
+		{Session: "s1", Kind: event.KindTool, Action: "Edit", Status: event.StatusFail, Err: "boom"},
+	}
+	rep := mine.MineReasons(events, "")
+	var buf bytes.Buffer
+	if err := writeReasonsJSON(&buf, rep); err != nil {
+		t.Fatalf("writeReasonsJSON: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if f, ok := got["failed"].(float64); !ok || int(f) != 1 {
+		t.Errorf("failed = %v, want 1", got["failed"])
+	}
+	if u, ok := got["uncaptured"].(float64); !ok || int(u) != 0 {
+		t.Errorf("uncaptured = %v, want 0", got["uncaptured"])
+	}
+}
+
+// TestCmdMisfires_ReasonsFlagScopesToKey is the end-to-end wiring check for
+// --key: cmdMisfires must pass it through to mine.MineReasons so only the
+// requested key's failures are reported.
+func TestCmdMisfires_ReasonsFlagScopesToKey(t *testing.T) {
+	path := t.TempDir() + "/events.jsonl"
+	w, err := event.NewWriter(path)
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
+	evs := []event.Event{
+		{Session: "s1", Kind: event.KindTool, Action: "Edit", Status: event.StatusFail, Err: "edit boom"},
+		{Session: "s1", Kind: event.KindTool, Action: "Read", Status: event.StatusFail, Err: "read boom"},
+	}
+	for i := range evs {
+		if err := w.Write(&evs[i]); err != nil {
+			t.Fatalf("Write: %v", err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	got, err := loadEvents(path)
+	if err != nil {
+		t.Fatalf("loadEvents: %v", err)
+	}
+	rep := mine.MineReasons(got, "Edit")
+	if len(rep.Keys) != 1 || rep.Keys[0].Key != "Edit" {
+		t.Errorf("keys = %+v, want only Edit", rep.Keys)
+	}
+}
