@@ -30,7 +30,7 @@ func TestRunFixesProposals_SurfacesBothConfessions_When_SessionHasSelfAudit(t *t
 	})
 
 	var buf bytes.Buffer
-	if err := runFixesProposals(&buf, root, "sess-waste", fmtText); err != nil {
+	if err := runFixesProposals(sessionRun{w: &buf, root: root, session: "sess-waste", format: fmtText}); err != nil {
 		t.Fatalf("runFixesProposals: %v", err)
 	}
 	out := buf.String()
@@ -50,7 +50,7 @@ func TestRunFixesProposals_SurfacesBothConfessions_When_SessionHasSelfAudit(t *t
 	}
 
 	var jbuf bytes.Buffer
-	if err := runFixesProposals(&jbuf, root, "sess-waste", fmtJSON); err != nil {
+	if err := runFixesProposals(sessionRun{w: &jbuf, root: root, session: "sess-waste", format: fmtJSON}); err != nil {
 		t.Fatalf("runFixesProposals json: %v", err)
 	}
 	var res struct {
@@ -81,7 +81,7 @@ func TestRunFixesProposals_ReturnsZero_When_SessionHasNoSelfAudit(t *testing.T) 
 	})
 
 	var buf bytes.Buffer
-	if err := runFixesProposals(&buf, root, "sess-clean", fmtText); err != nil {
+	if err := runFixesProposals(sessionRun{w: &buf, root: root, session: "sess-clean", format: fmtText}); err != nil {
 		t.Fatalf("runFixesProposals: %v", err)
 	}
 	out := buf.String()
@@ -90,7 +90,7 @@ func TestRunFixesProposals_ReturnsZero_When_SessionHasNoSelfAudit(t *testing.T) 
 	}
 
 	var jbuf bytes.Buffer
-	if err := runFixesProposals(&jbuf, root, "sess-clean", fmtJSON); err != nil {
+	if err := runFixesProposals(sessionRun{w: &jbuf, root: root, session: "sess-clean", format: fmtJSON}); err != nil {
 		t.Fatalf("runFixesProposals json: %v", err)
 	}
 	var res struct {
@@ -122,7 +122,7 @@ func TestWriteProposalsText_ShellQuotesExample_When_ConfessionCarriesMetacharact
 	})
 
 	var buf bytes.Buffer
-	if err := runFixesProposals(&buf, root, "sess-evil", fmtText); err != nil {
+	if err := runFixesProposals(sessionRun{w: &buf, root: root, session: "sess-evil", format: fmtText}); err != nil {
 		t.Fatalf("runFixesProposals: %v", err)
 	}
 	out := buf.String()

@@ -13,6 +13,18 @@ import (
 	"github.com/dkoosis/ferret/internal/score"
 )
 
+// sessionRun carries the common positional parameters shared across the 6+
+// cmd/ferret functions that render session data — the output writer, the
+// transcript root, the session prefix, and the output format. Mirroring the
+// searchOpts pattern in search.go, bundling these into a struct decouples
+// command wiring from rendering logic and makes the data clump explicit.
+type sessionRun struct {
+	w       io.Writer
+	root    string
+	session string
+	format  string
+}
+
 // This file is the thin CLI dispatch + render shell over the deterministic
 // segmenter, which lives in internal/score (the shared per-task substrate, per
 // the kuv design doc Decision 2). cmd/ resolves a session prefix to a transcript
@@ -32,7 +44,7 @@ func cmdSegments() error {
 	if err != nil {
 		return err
 	}
-	return segments(os.Stdout, root, cmd.Session, cmd.Format)
+	return segments(sessionRun{w: os.Stdout, root: root, session: cmd.Session, format: cmd.Format})
 }
 
 // segmentSession resolves session (a prefix) to one transcript under root and
@@ -57,16 +69,16 @@ func segmentSession(root, session string) (score.Result, error) {
 
 // segments resolves session (a prefix) to one transcript under root and streams
 // its deterministic task-boundary candidates to w.
-func segments(w io.Writer, root, session, format string) error {
-	res, err := segmentSession(root, session)
+func segments(p sessionRun) error {
+	res, err := segmentSession(p.root, p.session)
 	if err != nil {
 		return err
 	}
 
-	if format == fmtJSON {
-		return writeSegmentsJSON(w, res)
+	if p.format == fmtJSON {
+		return writeSegmentsJSON(p.w, res)
 	}
-	return writeSegmentsText(w, res)
+	return writeSegmentsText(p.w, res)
 }
 
 // writeSegmentsJSON emits the segmentation as indented JSON (the analyst-bundle

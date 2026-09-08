@@ -35,7 +35,7 @@ func runLandmarkSession(t *testing.T, lines []string, format string) string {
 	writeSpineFixture(t, root, "-Users-dev-proj", "s.jsonl", lines)
 	var buf bytes.Buffer
 	// Empty data dir → no corpus → uniform default weights (the bare path).
-	if err := landmarkSession(&buf, root, "s", t.TempDir(), format); err != nil {
+	if err := landmarkSession(sessionRun{w: &buf, root: root, session: "s", format: format}, t.TempDir()); err != nil {
 		t.Fatalf("landmarkSession: %v", err)
 	}
 	return buf.String()

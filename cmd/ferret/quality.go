@@ -63,7 +63,7 @@ func cmdQuality() error {
 		if err != nil {
 			return err
 		}
-		return qualitySessionWithSpec(os.Stdout, root, cmd.Session, cmd.Format, spec)
+		return qualitySessionWithSpec(sessionRun{w: os.Stdout, root: root, session: cmd.Session, format: cmd.Format}, spec)
 	}
 	return qualityCorpus(os.Stdout, root, cmd.Format)
 }
@@ -98,16 +98,16 @@ func readQualitySpec(r io.Reader) (qualitySpec, error) {
 }
 
 // qualitySession segments one session and emits its per-task reference-free axes.
-func qualitySession(w io.Writer, root, session, format string) error {
-	return qualitySessionWithSpec(w, root, session, format, nil)
+func qualitySession(p sessionRun) error {
+	return qualitySessionWithSpec(p, nil)
 }
 
 // qualitySessionWithSpec segments one session and emits its per-task axes; when
 // spec carries conformance results keyed by task index, those tasks' adaptivity is
 // computed from the alignment instead of the reference-free proxy. A nil spec is
 // exactly the reference-free path.
-func qualitySessionWithSpec(w io.Writer, root, session, format string, spec qualitySpec) error {
-	res, err := segmentSession(root, session)
+func qualitySessionWithSpec(p sessionRun, spec qualitySpec) error {
+	res, err := segmentSession(p.root, p.session)
 	if err != nil {
 		return err
 	}
@@ -120,10 +120,10 @@ func qualitySessionWithSpec(w io.Writer, root, session, format string, spec qual
 		}
 		score.ScoreAxesWithConform(&res, aligned)
 	}
-	if format == fmtJSON {
-		return writeQualitySessionJSON(w, res)
+	if p.format == fmtJSON {
+		return writeQualitySessionJSON(p.w, res)
 	}
-	return writeQualitySessionText(w, res)
+	return writeQualitySessionText(p.w, res)
 }
 
 // alignQualitySpec runs each task's conformance spec through conform.Align,

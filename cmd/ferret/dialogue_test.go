@@ -32,7 +32,7 @@ func TestRunDialogueClarifyWiring(t *testing.T) {
 	})
 
 	var buf bytes.Buffer
-	if err := runDialogue(&buf, root, "sess-cq", fmtText); err != nil {
+	if err := runDialogue(sessionRun{w: &buf, root: root, session: "sess-cq", format: fmtText}); err != nil {
 		t.Fatalf("runDialogue: %v", err)
 	}
 	out := buf.String()
@@ -60,7 +60,7 @@ func TestRunDialogueFirstTurnNoPredecessor(t *testing.T) {
 	})
 
 	var buf bytes.Buffer
-	if err := runDialogue(&buf, root, "sess-first", fmtText); err != nil {
+	if err := runDialogue(sessionRun{w: &buf, root: root, session: "sess-first", format: fmtText}); err != nil {
 		t.Fatalf("runDialogue: %v", err)
 	}
 	if out := buf.String(); strings.Contains(out, string(dialogue.MoveClarify)) {
@@ -86,7 +86,7 @@ func TestRunDialogueSkippedTurnClearsPendingQuestion(t *testing.T) {
 	})
 
 	var buf bytes.Buffer
-	if err := runDialogue(&buf, root, "sess-leak", fmtText); err != nil {
+	if err := runDialogue(sessionRun{w: &buf, root: root, session: "sess-leak", format: fmtText}); err != nil {
 		t.Fatalf("runDialogue: %v", err)
 	}
 	if out := buf.String(); strings.Contains(out, string(dialogue.MoveClarify)) {
@@ -109,7 +109,7 @@ func TestRunDialogueShippedTellUpgradesUnknown(t *testing.T) {
 	})
 
 	var buf bytes.Buffer
-	if err := runDialogue(&buf, root, "sess-shipped", fmtText); err != nil {
+	if err := runDialogue(sessionRun{w: &buf, root: root, session: "sess-shipped", format: fmtText}); err != nil {
 		t.Fatalf("runDialogue: %v", err)
 	}
 	out := buf.String()
@@ -156,7 +156,7 @@ func TestRunDialogueTranscriptShapedPasteReportsEmbeddedStats(t *testing.T) {
 	})
 
 	var buf bytes.Buffer
-	if err := runDialogue(&buf, root, "sess-transcript", fmtText); err != nil {
+	if err := runDialogue(sessionRun{w: &buf, root: root, session: "sess-transcript", format: fmtText}); err != nil {
 		t.Fatalf("runDialogue: %v", err)
 	}
 	out := buf.String()
@@ -192,7 +192,7 @@ func TestRunDialoguePlainLongPasteStaysPlain(t *testing.T) {
 	})
 
 	var buf bytes.Buffer
-	if err := runDialogue(&buf, root, "sess-plain-paste", fmtText); err != nil {
+	if err := runDialogue(sessionRun{w: &buf, root: root, session: "sess-plain-paste", format: fmtText}); err != nil {
 		t.Fatalf("runDialogue: %v", err)
 	}
 	out := buf.String()
@@ -219,7 +219,7 @@ func TestRunDialogueShippedTellDoesNotUpgradeRepair(t *testing.T) {
 	})
 
 	var buf bytes.Buffer
-	if err := runDialogue(&buf, root, "sess-repair", fmtText); err != nil {
+	if err := runDialogue(sessionRun{w: &buf, root: root, session: "sess-repair", format: fmtText}); err != nil {
 		t.Fatalf("runDialogue: %v", err)
 	}
 	out := buf.String()
