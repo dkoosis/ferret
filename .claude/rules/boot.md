@@ -1,5 +1,5 @@
 # Boot
-updated: 2026-07-27
+updated: 2026-09-07
 
 *Project working-memory. Maintained for future-me: current state + live frontier + traps that still bite. Resolved lanes pruned — history lives in beads/PRs.*
 
@@ -10,10 +10,10 @@ Phases 1–3 (bbp/kuv/wf9) ALL CLOSED. Route fork resolved as EXTEND (decision n
 ~ dk drives forks himself — hand them crisply, ✗ pre-decide ratified semantics.
 
 ## State
-- main @ `4cf29d5` (#104: 917 omitempty + fk8 judge fan-out), origin synced. PR queue EMPTY.
+- main @ `baecb0a` (#153: bare ferret is the measurement scoreboard). PR queue: #154 (7hr) · #155 (3kj) · #156 (9lm), all open for review 2026-09-07.
 - Scorers live in **`internal/score/`** (landmark/quality/conform/qpp all there — ratified, design-doc D2). New scorers go here.
 - `/team` = one shared tree + loto (worktrees retired). No concurrent `make check`; primary verifies once at wave end.
-- 7hr (param-clump refactor) stays DEFERRED — revisit only if phase 4 leaves cmd/ferret's surface intact.
+- 7hr (param-clump refactor) UNDEFERRED and shipped as #154 — `sessionRun{w, root, session, format}` in segment.go, 13 files, no behavior change.
 
 ## Frontier — where the work is
 
@@ -38,7 +38,7 @@ Phases 1–3 (bbp/kuv/wf9) ALL CLOSED. Route fork resolved as EXTEND (decision n
 Dry fenced grants, zero corrections → trust-the-loop. Surface deviations, ✗ ask permission mid-build. On **open design** dk drives + wants the *why* before a model-changing/destructive call; hand him the approve/merge fork crisply (he ends on "next?"). When dk states a ground-truth fact, verify-then-proceed — ✗ re-litigate.
 
 ## Loose thread
-- read-before-edit/write hookify guard — top ferret-scan burn finding (`Edit!⇝Read` + `Write!⇝Read⇝Write`, ~670k). Build as a hook, log in the ferret fix ledger. Harness-side, not a ferret bead. Done-status unverified.
+- read-before-edit/write hookify guard — RESOLVED 2026-09-07 (ferret-kk7). `read-before-edit@cc-plugins` is enabled in `~/.claude/settings.json`; verified live that an Edit on a file unread this session is refused and the same Edit after a Read passes. Still unlogged in the ferret fix ledger, so the ~670k burn has no measured delta yet: `ferret fixes add --motif 'Edit! ⇝ Read' --fix 'read-before-edit@cc-plugins hook'`.
 
 ## Shipped ledger
 **bbp epic (closed):** agent-initiative scorer bbp.11 (#83/85/87) + no-pushback over-init bbp.18 (#86) · bbp.21 shipped-artifact tell (#91) · bbp.20 query-mode recall roots (#90) · bbp.19 transcript-paste parse (#93) · bbp.17 read-adjacency 5-verdict (#81) · bbp.16 ts→segment join + helped CLI (#79) · bbp.15 judge_fingerprint (#78) · bbp.14 helped adjudicator (#74) · bbp.13/.12/.10/.9 (#56/57/58/59) · bbp.7 v2 taxonomy (#54) · bbp.5 staged Hop1 judge (#53) · spine bbp.1/.2/.3/.4/.6 (#49–52).
