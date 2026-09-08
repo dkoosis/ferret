@@ -14,7 +14,7 @@ Phases 1–4 ALL CLOSED. ferret-097 (close the loop: rank burners/misfires, tune
 - Scorers live in **`internal/score/`** (landmark/quality/conform/qpp all there — ratified, design-doc D2). New scorers go here.
 - `/team` = one shared tree + loto (worktrees retired). No concurrent `make check`; primary verifies once at wave end.
 - 7hr (param-clump refactor) UNDEFERRED and landed — `sessionRun{w, root, session, format}` in `cmd/ferret/segment.go` now carries the clump through the 6+ session-render funcs. New session-render func → take the struct.
-- Bare-`ferret` scoreboard: `--max-bytes` budgets the data rows (they go through `sink.Row`, ✗ `sink.Head`) and Δ is row-capped at `scoreboardCap`. The cap slices an ORDERED `buildDelta` — newest fix first, key ascending for same-day ties — so the row under evaluation survives. New Δ ordering idea → read ferret-yid's trail first; largest-reduction ordering was considered and dropped (a fix that made burn WORSE is the row you most need to see).
+- Bare-`ferret` scoreboard: `--max-bytes` budgets the data rows (they go through `sink.Row`, ✗ `sink.Head`) and Δ is row-capped at `scoreboardCap`. The cap slices `buildDelta`'s ALPHABETICAL key order, so the newest fix can be the row it hides — open bug **ferret-yid**, which wants AddedAt-desc ordering (`internal/mine/scoreboard.go`). Check it before trusting a Δ list: `bd show ferret-yid --short`. Largest-reduction ordering was considered and dropped (a fix that made burn WORSE is the row you most need to see); read ferret-yid's trail before any new ordering idea.
 
 ## Frontier — where the work is
 
