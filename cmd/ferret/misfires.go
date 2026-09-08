@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -8,6 +9,14 @@ import (
 
 	"github.com/dkoosis/ferret/internal/mine"
 	"github.com/dkoosis/ferret/internal/out"
+)
+
+// errByRequiresReasons and errByUnsupported are the ferret-cf9 --by
+// validation failures — static sentinels (err113) wrapped with the
+// offending value below.
+var (
+	errByRequiresReasons = errors.New("--by requires --reasons")
+	errByUnsupported     = errors.New(`--by not supported; only "week"`)
 )
 
 // MisfiresCmd is the kong-ready flag struct for `ferret misfires` (ferret-ct1):
@@ -33,6 +42,12 @@ type MisfiresCmd struct {
 	// flag existed.
 	Reasons bool   `help:"Break each ranked key's failures down by captured error-text reason." name:"reasons"`
 	Key     string `help:"Scope --reasons to one misfire key (Event.Action); omitted = every ranked key." name:"key"`
+	// By adds the ferret-cf9 time axis on top of --reasons: without --by,
+	// output is unchanged from before this flag existed. Only "week" is
+	// supported (the bead's one named axis); requires --reasons because a
+	// week-bucketed histogram is a breakdown OF the reason rows, not a
+	// standalone view.
+	By string `help:"Bucket --reasons by an ISO time axis (supported: week); requires --reasons." name:"by"`
 }
 
 // cmdMisfires wires the kong flags to mine.MineMisfires over the canonical
@@ -40,6 +55,9 @@ type MisfiresCmd struct {
 // --reasons switches to the mine.MineReasons breakdown instead (ferret-54q);
 // the plain ranking below it is untouched either way.
 func cmdMisfires(cmd MisfiresCmd) error {
+	if err := validateMisfiresBy(cmd); err != nil {
+		return err
+	}
 	c, err := fromCommonFlags(cmd.CommonFlags)
 	if err != nil {
 		return err
@@ -54,6 +72,13 @@ func cmdMisfires(cmd MisfiresCmd) error {
 	if err != nil {
 		return err
 	}
+	if cmd.By != "" {
+		rep := mine.MineReasonsByWeek(events, cmd.Key)
+		if c.format == fmtJSON {
+			return writeReasonsWeeklyJSON(os.Stdout, rep)
+		}
+		return writeReasonsWeeklyText(os.Stdout, rep, c.limit, c.maxBytes)
+	}
 	if cmd.Reasons {
 		rep := mine.MineReasons(events, cmd.Key)
 		if c.format == fmtJSON {
@@ -66,6 +91,23 @@ func cmdMisfires(cmd MisfiresCmd) error {
 		return writeMisfiresJSON(os.Stdout, rep, c.limit)
 	}
 	return writeMisfiresText(os.Stdout, rep, c.limit, c.maxBytes)
+}
+
+// validateMisfiresBy enforces the bead's Rule up front, before touching the
+// corpus: --by without --reasons is refused by name, not silently ignored;
+// an unsupported --by value is refused the same way ("week" is the only
+// axis this bead builds).
+func validateMisfiresBy(cmd MisfiresCmd) error {
+	if cmd.By == "" {
+		return nil
+	}
+	if !cmd.Reasons {
+		return fmt.Errorf("%w: got --by %q", errByRequiresReasons, cmd.By)
+	}
+	if cmd.By != "week" {
+		return fmt.Errorf("%w: got %q", errByUnsupported, cmd.By)
+	}
+	return nil
 }
 
 // writeMisfiresJSON emits the ranked bundle as a single JSON document, pre-
@@ -207,7 +249,7 @@ func writeReasonsText(w io.Writer, rep mine.ReasonsReport, limit, maxBytes int) 
 	for _, kr := range rep.Keys {
 		sink.Row("%s", reasonLine(kr))
 	}
-	writeCoverageNote(sink, rep)
+	writeCoverageNote(sink, rep.Failed, rep.Uncaptured)
 	return nil
 }
 
@@ -224,18 +266,75 @@ func reasonLine(kr mine.KeyReasons) string {
 // writeCoverageNote states the report's own coverage: a corpus ingested
 // before event.Err existed decodes every old row with Err == "", and without
 // this line that reads as "no failures" rather than "not captured" — the
-// exact failure the bead's Rules call out.
-func writeCoverageNote(sink *out.Sink, rep mine.ReasonsReport) {
-	if rep.Failed == 0 {
+// exact failure the bead's Rules call out. Shared by the flat and --by week
+// reasons reports (both carry the same Failed/Uncaptured corpus counters).
+func writeCoverageNote(sink *out.Sink, failed, uncaptured int) {
+	if failed == 0 {
 		sink.Head("coverage: 0 failed events in range")
 		return
 	}
-	if rep.Uncaptured == rep.Failed {
+	if uncaptured == failed {
 		sink.Head("coverage: 0/%d failed events carry a captured reason — not captured (pre-ferret-54q ingest), not \"no failures\"; re-ingest to see reasons",
-			rep.Failed)
+			failed)
 		return
 	}
-	share := float64(rep.Uncaptured) / float64(rep.Failed) * 100
+	share := float64(uncaptured) / float64(failed) * 100
 	sink.Head("coverage: %d/%d failed events (%.0f%%) carry no captured error text",
-		rep.Uncaptured, rep.Failed, share)
+		uncaptured, failed, share)
+}
+
+// writeReasonsWeeklyJSON emits the ferret-cf9 --by week bundle as a single
+// JSON document — no row cap, mirroring writeReasonsJSON: a per-key,
+// per-reason, per-week histogram over one corpus is bounded by construction
+// (weeks × reasons × keys), never row-heavy like the misfire tables.
+func writeReasonsWeeklyJSON(w io.Writer, rep mine.WeeklyReasonsReport) error {
+	return out.JSON(w, map[string]any{
+		"weeks":      rep.Weeks,
+		"keys":       rep.Keys,
+		"failed":     rep.Failed,
+		"uncaptured": rep.Uncaptured,
+	})
+}
+
+// writeReasonsWeeklyText emits the bead's named view: one ISO-week histogram
+// line per (key, reason), explicit zeros and uncaptured markers included, in
+// week order — the shape that lets SendMessage's fossil total (340 failures,
+// weekly shape 168/129/43/0) read as "already fixed" instead of "still
+// burning".
+func writeReasonsWeeklyText(w io.Writer, rep mine.WeeklyReasonsReport, limit, maxBytes int) error {
+	sink := out.NewSink(w, limit, maxBytes)
+	defer sink.Close()
+	about(sink,
+		"≡ misfires --reasons --by week: each ranked key's reasons broken down into",
+		"≡ one count per ISO week, in week order. A week with zero occurrences of a",
+		"≡ reason prints 0, not a gap — a decayed reason reads as a run to zero rather",
+		"≡ than vanishing from the table. \"uncaptured\" marks a week whose failures for",
+		"≡ that key carry no captured error text at all (a pre-ferret-54q ingest",
+		"≡ window) — read that as \"not captured\", never as a genuine zero.")
+
+	sink.Head("reasons-by-week keys=%d weeks=%d failed=%d", len(rep.Keys), len(rep.Weeks), rep.Failed)
+	emptyNote(sink, len(rep.Keys), "keys with a captured reason")
+	for _, kr := range rep.Keys {
+		for _, rw := range kr.Reasons {
+			sink.Row("%s", reasonWeekLine(kr.Key, rw))
+		}
+	}
+	writeCoverageNote(sink, rep.Failed, rep.Uncaptured)
+	return nil
+}
+
+// reasonWeekLine renders one (key, reason)'s histogram as "key  reason
+// total=N  <week>=<count> <week>=<count> …", uncaptured weeks spelled out
+// rather than given a numeric placeholder that could be mistaken for a real
+// zero.
+func reasonWeekLine(key string, rw mine.ReasonWeekly) string {
+	parts := make([]string, 0, len(rw.Weeks))
+	for _, b := range rw.Weeks {
+		if b.Uncaptured {
+			parts = append(parts, b.Week+"=uncaptured")
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s=%d", b.Week, b.Count))
+	}
+	return fmt.Sprintf("%-24s  %-40s total=%-4d  %s", key, rw.Reason, rw.Total, strings.Join(parts, " "))
 }
