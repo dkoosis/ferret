@@ -127,14 +127,24 @@ notify() {
 # to /usr/local/bin at setup does not win that race.
 #
 # So: every candidate is asked its version and must match the pin. Nothing that
-# fails to answer, or answers wrong, is trusted. The last resort runs the pinned
-# module through `go run` (the ../itzy model) — version correctness then never
-# depends on PATH order, on any platform, including a dev Mac where the linux
-# prebuilt cannot even execute.
+# fails to answer, or answers wrong, is trusted. The last resort builds the
+# pinned module once to a version-keyed path under .sandbox/bin and execs that
+# — version correctness then never depends on PATH order, on any platform,
+# including a dev Mac where the linux prebuilt cannot even execute.
 #
 # Order: $GOLANGCILINT_BIN (explicit override, unchecked) > committed sandbox
-# prebuilt > PATH binary > `go run <pkg>@<pin>`. The middle two are version-
-# gated; a mismatch demotes the candidate rather than failing the run.
+# prebuilt > PATH binary > version-keyed build in .sandbox/bin (built once,
+# then reused) > `go run <pkg>@<pin>` (only if that build fails). The first
+# three are version-gated; a mismatch demotes the candidate rather than
+# failing the run.
+#
+# ferret-oxt: the build-once path below MUST be resolved before the lock_dir
+# mutex is acquired (call site moved from after the mutex to before it). A
+# cold build compiles golangci-lint from source — free with a warm module
+# cache, minutes when cold — and it used to run while holding the
+# machine-global mutex, so every peer session's make check queued behind the
+# compile. Building outside the mutex and caching the binary by version turns
+# that into a one-time cost that never blocks a peer.
 lint_cmd=()
 
 # Version a candidate reports, empty if it cannot run (wrong OS/arch, absent).
@@ -142,6 +152,52 @@ lint_ver_of() {
   local out=""
   out="$("$1" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" || out=""
   printf '%s' "$out"
+}
+
+# Version-keyed build cache for the pinned binary (ferret-oxt). Building to
+# "golangci-lint-v$pin" rather than a fixed name means a pin bump can never
+# resolve to a stale binary left over from the previous pin — the filename
+# itself encodes the version, and lint_ver_of still re-checks it below as a
+# second guard against a corrupted or hand-placed file.
+pinned_bin_dir="$repo_dir/.sandbox/bin"
+pinned_bin_of() { printf '%s/golangci-lint-v%s' "$pinned_bin_dir" "$1"; }
+
+# Build the pinned golangci-lint to its version-keyed path if not already
+# there, verify its version, and print the path. Called BEFORE the lint mutex
+# is acquired (see call site) so a cold compile never holds up a peer. Two
+# sessions racing a first-ever build of the same version both compile — wasted
+# CPU, not corruption: each builds into a private tmpfile inside
+# pinned_bin_dir and renames (same filesystem, atomic) into place, so a
+# partial/interrupted build never leaves a broken binary at the target path.
+ensure_pinned_build() {
+  local pin="$1" path tmp
+  path="$(pinned_bin_of "$pin")"
+  if [ -x "$path" ] && [ "$(lint_ver_of "$path")" = "$pin" ]; then
+    printf '%s' "$path"
+    return 0
+  fi
+  mkdir -p "$pinned_bin_dir" 2>/dev/null || return 1
+  tmp="$(mktemp "$pinned_bin_dir/.build.XXXXXX" 2>/dev/null)" || return 1
+  if ! GOBIN="$pinned_bin_dir" go install \
+      "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v$pin" \
+      >/dev/null 2>&1; then
+    rm -f "$tmp"
+    return 1
+  fi
+  # `go install` with GOBIN drops the binary at pinned_bin_dir/golangci-lint
+  # (the package's own name), not at our tmpfile — move it there first so the
+  # version check and the final rename both operate on one path.
+  if ! mv -f "$pinned_bin_dir/golangci-lint" "$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if [ "$(lint_ver_of "$tmp")" != "$pin" ]; then
+    rm -f "$tmp"
+    return 1
+  fi
+  chmod +x "$tmp"
+  mv -f "$tmp" "$path" || return 1
+  printf '%s' "$path"
 }
 
 resolve_lint_cmd() {
@@ -181,9 +237,27 @@ resolve_lint_cmd() {
     return
   fi
 
-  notify "lint-locked: PATH golangci-lint is ${ver:-absent}, repo pins $pin — running \`go run ...@v$pin\` instead."
+  local built=""
+  if built="$(ensure_pinned_build "$pin")"; then
+    notify "lint-locked: PATH golangci-lint is ${ver:-absent}, repo pins $pin — using pinned build $built."
+    lint_cmd=("$built")
+    return
+  fi
+
+  # The build itself failed (no network, no module proxy, disk full, …). Fall
+  # back to the old per-run `go run` rather than hard-failing the gate — slow
+  # and compiling under the mutex, but still correct, and still better than no
+  # lint at all.
+  notify "lint-locked: PATH golangci-lint is ${ver:-absent}, repo pins $pin, and building it failed — running \`go run ...@v$pin\` instead (slow path)."
   lint_cmd=(go run "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v$pin")
 }
+
+# Resolve (and, on a cold cache, build) the linter BEFORE the mutex loop below
+# so a compile never happens while the machine-global lock is held (ferret-oxt
+# — see the header note above resolve_lint_cmd). None of the candidates probed
+# here run `golangci-lint run`, only `--version` or a `go install` of a
+# separate binary, so nothing here contends on golangci-lint's own cache lock.
+resolve_lint_cmd
 
 waited=0
 until mkdir "$lock_dir" 2>/dev/null; do
@@ -222,10 +296,6 @@ cleanup() {
   if [ -n "$probe_json" ]; then rm -f "$probe_json" "$probe_out" "$probe_err"; fi
 }
 trap cleanup EXIT
-
-# Resolve the linter only now: the mutex is held, so the `--version` probes
-# below cannot race a peer for golangci-lint's cache (header, line ~62).
-resolve_lint_cmd
 
 # Pass through every arg and preserve golangci-lint's exit code (1 = findings).
 # Anything but `run` goes straight through: --allow-parallel-runners and the

@@ -7,6 +7,9 @@
 .sandbox/bin/**/*.tmp
 .sandbox/bin/**/*.upx
 .sandbox/bin/**/*.000
+# lint-locked's version-keyed golangci-lint build (ferret-oxt) — machine-local,
+# rebuildable from the pin in .sandbox/project.conf, never committed.
+.sandbox/bin/golangci-lint-v*
 .claude/tmp/
 # transient scratch (go-build caches et al. — must never ride git add -A into a PR)
 /.tmp/
