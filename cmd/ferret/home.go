@@ -147,9 +147,10 @@ func writeHomeJSON(w io.Writer, st status, sb mine.Scoreboard) error {
 // sink.Row, so --max-bytes truncates them and Close prints the `… +K more`
 // notice — the header and the section labels stay Head, since a budget that
 // eats the label before the rows would hand the reader unlabelled numbers.
-// Every row carries its own `next:` command — a legal move, not a plan (DK-AXI rule 11) — because this
-// is the terse, no-routing-prose view: the built-in usage report is where
-// recommendations live now (decision feb7162e18b9).
+// Every row carries its own `next:` command — a legal move, not a plan
+// (DK-AXI rule 11) — because this is the terse, no-routing-prose view: the
+// built-in usage report is where recommendations live now (decision
+// feb7162e18b9).
 func writeHomeText(w io.Writer, corpus *mine.Corpus, st status, sb mine.Scoreboard, maxBytes int) error {
 	sink := out.NewSink(w, 0, maxBytes)
 	defer sink.Close()
@@ -186,7 +187,12 @@ func writeHomeText(w io.Writer, corpus *mine.Corpus, st status, sb mine.Scoreboa
 	}
 
 	if sb.BelowCut > 0 {
-		sink.Head("… %d more below the cut: ferret report --lens cmd · ferret friction", sb.BelowCut)
+		// One drill-down per category folded into BelowCut (ferret-yid).
+		// Δ rows started counting toward it in ferret-3kj, and until now the
+		// hint routed only to report/friction — neither of which renders a
+		// hidden Δ row. BelowCut stays one combined figure by design, so the
+		// line names all three rather than splitting the count.
+		sink.Head("… %d more below the cut: ferret report --lens cmd · ferret friction · ferret report --since-fixes", sb.BelowCut)
 	}
 	sink.NextHead("ferret status", "ferret fixes add --motif <tokens> --fix <action>")
 	return nil

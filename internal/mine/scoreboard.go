@@ -127,7 +127,14 @@ func BuildScoreboard(corpus *Corpus, findings []*Finding, waste WasteReport, led
 // into BelowCut is computed from the full set.
 // "after" is the matching finding's current burn, 0 when the motif no longer
 // recurs — the fix worked all the way to elimination, not merely a
-// reduction. Sorted by key so repeated runs are byte-stable (map iteration
+// reduction.
+//
+// Ordered newest fix first (ferret-yid). The section answers "did the fix I
+// just landed work?", and BuildScoreboard keeps only the first rowCap rows —
+// so an alphabetical order, which is what this sorted by until the cap
+// existed, hid today's fix behind whichever motif keys happened to sort
+// early. AddedAt descending puts the fix under evaluation at the top; the key
+// breaks same-day ties, so repeated runs stay byte-stable (map iteration
 // order is not).
 func buildDelta(corpus *Corpus, findings []*Finding, idx map[string]fixes.Entry) []ScoreboardDelta {
 	keys := make([]string, 0, len(idx))
@@ -136,7 +143,13 @@ func buildDelta(corpus *Corpus, findings []*Finding, idx map[string]fixes.Entry)
 			keys = append(keys, key)
 		}
 	}
-	sort.Strings(keys)
+	sort.Slice(keys, func(i, j int) bool {
+		ti, tj := idx[keys[i]].AddedAt, idx[keys[j]].AddedAt
+		if !ti.Equal(tj) {
+			return ti.After(tj)
+		}
+		return keys[i] < keys[j]
+	})
 
 	delta := make([]ScoreboardDelta, 0, len(keys))
 	for _, key := range keys {

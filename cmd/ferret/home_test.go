@@ -308,6 +308,9 @@ func TestWriteHomeText_RendersRoutinesWasteAndDelta_When_ScoreboardIsPopulated(t
 		"sh:git_status", "next: ferret polling",
 		"Δ since fixes:", "Edit! ⇝ Read", "2026-08-12",
 		"36 more below the cut",
+		// Δ rows count toward BelowCut, so the tail line must route to the
+		// command that renders them (ferret-yid), not only report/friction.
+		"ferret report --lens cmd", "ferret friction", "ferret report --since-fixes",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q\n---\n%s", want, got)
