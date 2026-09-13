@@ -83,7 +83,7 @@ dupe: ## Check for code duplication (jscpd; skips if not installed)
 	@if ! command -v jscpd >/dev/null 2>&1; then \
 		echo "dupe: jscpd not installed — skipping (install: npm i -g jscpd)"; \
 	else \
-		TMP_JSCPD=$$(mktemp -d); jscpd . --gitignore --output $$TMP_JSCPD; rm -rf $$TMP_JSCPD; \
+		TMP_JSCPD=$$(mktemp -d); jscpd . --output $$TMP_JSCPD; rm -rf $$TMP_JSCPD; \
 	fi
 
 nilcheck: ## Run nilaway (skips if not installed)

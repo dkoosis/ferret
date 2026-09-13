@@ -188,7 +188,13 @@ func deriveVisibility(dir string) (*AttachVisibility, error) {
 	for i := range recs {
 		r := &recs[i]
 		v, _ := table.price(r.class, r.hookEvent, r.payload)
-		table[AttachSubkey(r.class, r.hookEvent)].PricedBytes += v
+		row, ok := table[AttachSubkey(r.class, r.hookEvent)]
+		if !ok {
+			// classifyRecords built one row per subkey seen in recs, so this
+			// can't happen; guard rather than assume for nilaway's sake.
+			continue
+		}
+		row.PricedBytes += v
 	}
 	return &AttachVisibility{
 		Note: "ferret-z35 attachment visibility, derived from a proxy capture: class names, field paths and byte counts only. " +
