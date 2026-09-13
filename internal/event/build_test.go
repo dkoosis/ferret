@@ -403,6 +403,9 @@ func TestOKCallLeavesErrEmpty(t *testing.T) {
 		toolResultContent("u2", "t1", `"file contents"`),
 	)
 	evs := ingest(t, src)
+	if len(evs) != 1 {
+		t.Fatalf("events = %d, want 1", len(evs))
+	}
 	if evs[0].Err != "" {
 		t.Errorf("Err = %q, want \"\" on a successful call", evs[0].Err)
 	}
