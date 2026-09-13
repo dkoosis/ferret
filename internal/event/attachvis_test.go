@@ -29,8 +29,8 @@ func checkPricing(rows []AttachVisibilityRow, priced func(*AttachVisibilityRow) 
 	visible, invisible := 0, 0
 	for i := range rows {
 		r := &rows[i]
-		if r.VisibleRecords != 0 && r.VisibleRecords != r.Records {
-			continue // mixed: no single bound applies
+		if r.mixed() {
+			continue // no single bound applies
 		}
 		got, text := float64(priced(r)), float64(r.TextBytes)
 		name := AttachSubkey(r.Class, r.HookEvent)
@@ -98,6 +98,7 @@ func TestPrice_CountsSourceFieldsOnce(t *testing.T) {
 		{Class: "hook_success", HookEvent: "SessionStart", Visible: true, SourceFields: []string{"content", "stdout"}},
 		{Class: "hook_success", HookEvent: "PreToolUse"},
 		{Class: "instructions", Visible: true, SourceFields: []string{"files[].content"}},
+		{Class: "prompt_snapshot", Records: 2, VisibleRecords: 1, SourceFields: []string{"systemPrompt[]"}},
 	})
 	cases := []struct {
 		class, hook, payload string
@@ -107,6 +108,8 @@ func TestPrice_CountsSourceFieldsOnce(t *testing.T) {
 		{"hook_success", "SessionStart", `{"content":"abcdef","stdout":"abcdef","command":"x"}`, 6, true},
 		{"hook_success", "PreToolUse", `{"stderr":"abcdef"}`, 0, true},
 		{"instructions", "", `{"files":[{"path":"p","content":"abc"},{"content":"de"}]}`, 5, true},
+		{"instructions", "", `{"files":[{"content":"abc"},{"content":"abc"}]}`, 6, true},
+		{"prompt_snapshot", "", `{"systemPrompt":["abcdef"]}`, 0, false},
 		{"nested_memory", "", `{"content":"abc"}`, 0, false},
 	}
 	for _, c := range cases {
@@ -341,15 +344,15 @@ func addedText(r *attachRecord, reqs []capturedRequest, fields map[string]struct
 	if json.Unmarshal(r.payload, &v) != nil {
 		return 0, 0
 	}
-	seen := map[string]struct{}{}
+	firstPath := map[string]string{} // text → the path that counted it; same rule as price
 	walkLeaves(v, "", func(path, text string) {
 		if len(text) < minLeafText {
 			return
 		}
-		if _, dup := seen[text]; dup {
+		if at, dup := firstPath[text]; dup && at != path {
 			return
 		}
-		seen[text] = struct{}{}
+		firstPath[text] = path
 		all += len(text)
 		probe := jsonProbe(text)
 		if after != nil && bytes.Count(after, probe) > bytes.Count(before, probe) {

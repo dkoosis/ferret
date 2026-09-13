@@ -48,6 +48,12 @@ type AttachVisibilityRow struct {
 	RecordBytes    int      `json:"recordBytes"`
 }
 
+// mixed says the capture saw some of this subkey's records reach a request and
+// some not, so Visible (a majority vote) is no measurement of any one record.
+func (r *AttachVisibilityRow) mixed() bool {
+	return r.VisibleRecords != 0 && r.VisibleRecords != r.Records
+}
+
 // visibilityTable indexes the rows by AttachSubkey.
 type visibilityTable map[string]*AttachVisibilityRow
 
@@ -87,12 +93,15 @@ func AttachSubkey(class, hookEvent string) string {
 }
 
 // price returns how many bytes of a record's text the model sees, and whether
-// the capture covered its subkey at all. A visible subkey counts the strings
-// at its source fields, each distinct string once (a hook record repeats its
-// output under both content and stdout).
+// the capture covered its subkey at all. A mixed subkey is not covered: pricing
+// it hidden would zero the records the capture saw reach a request. A visible
+// subkey counts the strings at its source fields. A string repeated under a
+// second field is one text (a hook record repeats its output under both
+// content and stdout); repeats within one array field are separate texts, each
+// sent.
 func (t visibilityTable) price(class, hookEvent string, payload []byte) (visible int, calibrated bool) {
 	row, ok := t[AttachSubkey(class, hookEvent)]
-	if !ok {
+	if !ok || row.mixed() {
 		return 0, false
 	}
 	if !row.Visible {
@@ -102,13 +111,14 @@ func (t visibilityTable) price(class, hookEvent string, payload []byte) (visible
 	if json.Unmarshal(payload, &v) != nil {
 		return 0, true
 	}
-	seen := map[string]struct{}{}
+	firstField := map[string]string{} // text → the source field that counted it
 	for _, f := range row.SourceFields {
 		walkPath(v, strings.Split(f, "."), func(text string) {
-			if _, dup := seen[text]; !dup {
-				seen[text] = struct{}{}
-				visible += len(text)
+			if at, dup := firstField[text]; dup && at != f {
+				return
 			}
+			firstField[text] = f
+			visible += len(text)
 		})
 	}
 	return visible, true
