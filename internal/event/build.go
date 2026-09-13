@@ -164,12 +164,15 @@ func (b *Builder) attachmentLine(src transcript.Source, st *fileState, raw *tran
 	// An attachment has no tool_use to pair against, so there is no separate
 	// input half to measure — book the whole payload as OutBytes (event.go).
 	n := len(raw.Attachment)
+	contentBytes, hookEvent := attachFields(raw.Attachment)
+	visible, calibrated := attachVisibility.price(class, hookEvent, raw.Attachment)
 	st.events = append(st.events, &Event{
 		Seq: st.seq, Time: ts,
 		Project: src.Project, Session: session(src, raw), Agent: src.Agent,
 		Sidechain: raw.IsSidechain,
-		Kind:      KindAttach, Action: class,
-		Bytes: n, OutBytes: n, ContentBytes: attachContentBytes(raw.Attachment),
+		Kind:      KindAttach, Action: class, Target: hookEvent,
+		Bytes: n, OutBytes: n, ContentBytes: contentBytes,
+		VisibleBytes: visible, Calibrated: calibrated,
 		Version: raw.Version,
 	})
 	b.Stats.Attachments++
@@ -185,17 +188,23 @@ func (b *Builder) attachmentLine(src transcript.Source, st *fileState, raw *tran
 // disclosure toward over-counting — the same direction Bytes above already
 // takes, and for the same reason (ferret-wmb).
 type attachContent struct {
-	Content string `json:"content"`
+	Content   string `json:"content"`
+	HookEvent string `json:"hookEvent"`
 }
 
-// attachContentBytes reads the disclosed content-bearing byte count out of a
-// raw attachment payload. A decode failure (malformed JSON already counted as
-// a DecodeErr by the cheap AttachClass probe above) or an absent "content" key
-// both read as 0 — the honest answer for a class that discloses no content.
-func attachContentBytes(payload []byte) int {
+// attachFields reads the disclosed content-bearing byte count and the hook
+// event out of a raw attachment payload. A decode failure (malformed JSON
+// already counted as a DecodeErr by the cheap AttachClass probe above) or an
+// absent key reads as 0 / "" — the honest answer for a class that discloses
+// neither.
+//
+// The hook event is kept because visibility turns on it, not on the class:
+// in the ferret-z35 capture a SessionStart hook_success reached every request
+// and a PostToolUse hook_success with the same shape reached none.
+func attachFields(payload []byte) (contentBytes int, hookEvent string) {
 	var c attachContent
 	_ = json.Unmarshal(payload, &c) // best-effort; absence/mismatch just reads ""
-	return len(c.Content)
+	return len(c.Content), c.HookEvent
 }
 
 // isDuplicate dedups by message UUID across the whole ingest: resumed and

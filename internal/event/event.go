@@ -86,7 +86,16 @@ type Event struct {
 	// KindAttach events, where it exists to DISCLOSE how much of Bytes a model
 	// actually sees; Bytes itself stays the whole serialized record and stays
 	// the ranking key (ferret-wmb). Zero and not meaningful on any other Kind.
-	ContentBytes int    `json:"cb,omitempty"`
+	ContentBytes int `json:"cb,omitempty"`
+	// VisibleBytes is the part of a KindAttach record's text the model sees,
+	// priced at ingest from the ferret-z35 capture's visibility table
+	// (attachvis.go): the strings at the fields the capture saw reach a
+	// request, or 0 for a class and hook event whose text never did.
+	// Calibrated says the table covered this record at all; without it,
+	// VisibleBytes == 0 means "unknown", not "hidden". Target carries the hook
+	// event, which the table is keyed by.
+	VisibleBytes int    `json:"vb,omitempty"`
+	Calibrated   bool   `json:"cal,omitempty"`
 	Skill        string `json:"skill,omitempty"`
 	Plugin       string `json:"plug,omitempty"`
 	MCP          string `json:"mcp,omitempty"`

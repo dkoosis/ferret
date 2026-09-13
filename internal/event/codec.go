@@ -58,7 +58,10 @@ func removeTmp(tmp string) {
 //	3 — Event.Bytes splits into InBytes/OutBytes (ferret-e4g); Bytes itself is
 //	    unchanged (InBytes+OutBytes), but an old corpus decodes both new fields
 //	    as zero, which is silently wrong rather than absent.
-const SchemaVersion = 3
+//	4 — KindAttach events carry VisibleBytes/Calibrated and burn ranks by them
+//	    (ferret-z35); an old corpus decodes every attachment as uncalibrated
+//	    and ranks it at record bytes, a changed accounting rule.
+const SchemaVersion = 4
 
 // Provenance is what a number was measured WITH — as distinct from what it was
 // measured OVER, which is Root and CreatedAt.
