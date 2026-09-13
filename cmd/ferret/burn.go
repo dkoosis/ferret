@@ -80,13 +80,14 @@ func writeBurnText(w io.Writer, res *mine.BurnResult, limit, maxBytes int) error
 		"≡ bytes = event.Bytes (tool_use input + tool_result content) summed over every call — measured, not modeled. This is what enters the request body, so it is what ranks (ferret-noj).",
 		"≡ bytes/call is the per-call toll a \"should I stop running this?\" decision turns on; the two columns disagree when a cheap command is called constantly.",
 		"≡ shell rows are shellnorm-normalized (sh:git_commit, ...), tool rows keyed by tool name, attachment classes by at:class.",
-		"≡ an at:* row's bytes are the WHOLE serialized attachment record, not the content a model actually sees — that is deliberate (ferret-rfc), not a bug. A row marked ⚠ over-count exceeds its disclosed content bytes by more than 2x; read its bytes as an upper bound on injected context, not the figure itself (ferret-wmb).")
+		"≡ an at:* row's bytes are the WHOLE serialized attachment record, not the content a model actually sees — that is deliberate (ferret-rfc), not a bug. A row marked ⚠ over-count exceeds its disclosed content bytes by more than 2x; read its bytes as an upper bound on injected context, not the figure itself (ferret-wmb).",
+		"≡ an at:* row's ~tok figure is the text the model sees, priced per class and hook event from a proxy capture of real API requests (ferret-z35, internal/event/attach-visibility.json); the row ranks by it. A record's own content field does not say whether the model sees it: a PostToolUse hook's content reached no request in the capture. \"not calibrated\" = a class the capture never produced, ranked at record bytes.")
 	sink.Head("burn events=%d sessions=%d rows=%d", res.Events, res.Sessions, len(res.Rows))
 	emptyNote(sink, len(res.Rows), "commands")
 	for i := range res.Rows {
 		r := &res.Rows[i] // index-range: BurnRow carries a map field, value-range trips rangeValCopy
 		sink.Row("%10s bytes  %8s/call  %6d calls  %4d sess  %s%s",
-			humanBytes(r.Bytes), humanBytes(int(r.BytesPerCall)), r.Calls, r.Sessions, r.Key, overcountNote(r))
+			humanBytes(r.Bytes), humanBytes(int(r.BytesPerCall)), r.Calls, r.Sessions, r.Key, attachNote(r))
 	}
 	// Legal moves, not a plan (DK-AXI rule 11): gross cost is not waste — the
 	// merged view says how much of it bought nothing.
@@ -94,6 +95,24 @@ func writeBurnText(w io.Writer, res *mine.BurnResult, limit, maxBytes int) error
 		sink.NextHead("ferret friction")
 	}
 	return nil
+}
+
+// attachNote renders an at:* row's suffix. A calibrated row shows the tokens
+// the model sees beside its record bytes, and the over-count warning no longer
+// applies to its rank. An uncalibrated row says so and keeps the ferret-wmb
+// disclosure.
+func attachNote(r *mine.BurnRow) string {
+	switch r.Pricing {
+	case mine.PricingCalibrated:
+		note := "  ~" + humanCount(int64(*r.VisibleTokens)) + " tok visible"
+		if r.UncalibratedBytes > 0 {
+			note += " + " + humanBytes(r.UncalibratedBytes) + " not calibrated"
+		}
+		return note
+	case mine.PricingUncalibrated:
+		return "  " + mine.PricingUncalibrated + overcountNote(r)
+	}
+	return overcountNote(r)
 }
 
 // overcountNote renders the ferret-wmb disclosure suffix for a row the miner

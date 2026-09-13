@@ -1,0 +1,163 @@
+{
+  "note": "ferret-z35 attachment visibility, derived from a proxy capture: class names, field paths and byte counts only. Regenerate with TestRegenAttachVisibility; the capture itself is never committed.",
+  "capture": "z35-20260913",
+  "claudeCode": "2.1.270",
+  "subkeys": [
+    {
+      "class": "agent_listing_delta",
+      "records": 1,
+      "visibleRecords": 1,
+      "visible": true,
+      "sourceFields": [
+        "addedLines[]"
+      ],
+      "textBytes": 1457,
+      "pricedBytes": 1457,
+      "recordBytes": 1661
+    },
+    {
+      "class": "date",
+      "records": 1,
+      "visibleRecords": 0,
+      "visible": false,
+      "textBytes": 0,
+      "pricedBytes": 0,
+      "recordBytes": 35
+    },
+    {
+      "class": "environment",
+      "records": 1,
+      "visibleRecords": 1,
+      "visible": true,
+      "sourceFields": [
+        "snapshot.workingDirectory"
+      ],
+      "textBytes": 110,
+      "pricedBytes": 110,
+      "recordBytes": 300
+    },
+    {
+      "class": "hook_success",
+      "hookEvent": "PostToolUse",
+      "records": 14,
+      "visibleRecords": 0,
+      "visible": false,
+      "textBytes": 119924,
+      "pricedBytes": 0,
+      "recordBytes": 122773
+    },
+    {
+      "class": "hook_success",
+      "hookEvent": "PreToolUse",
+      "records": 14,
+      "visibleRecords": 0,
+      "visible": false,
+      "textBytes": 60816,
+      "pricedBytes": 0,
+      "recordBytes": 63644
+    },
+    {
+      "class": "hook_success",
+      "hookEvent": "SessionStart",
+      "records": 1,
+      "visibleRecords": 1,
+      "visible": true,
+      "sourceFields": [
+        "command",
+        "content",
+        "stdout"
+      ],
+      "textBytes": 8569,
+      "pricedBytes": 8569,
+      "recordBytes": 8785
+    },
+    {
+      "class": "hook_success",
+      "hookEvent": "UserPromptSubmit",
+      "records": 3,
+      "visibleRecords": 3,
+      "visible": true,
+      "sourceFields": [
+        "content",
+        "stdout"
+      ],
+      "textBytes": 25320,
+      "pricedBytes": 25320,
+      "recordBytes": 26335
+    },
+    {
+      "class": "instructions",
+      "records": 1,
+      "visibleRecords": 1,
+      "visible": true,
+      "sourceFields": [
+        "files[].content",
+        "files[].path"
+      ],
+      "textBytes": 220,
+      "pricedBytes": 220,
+      "recordBytes": 297
+    },
+    {
+      "class": "model",
+      "records": 1,
+      "visibleRecords": 1,
+      "visible": true,
+      "sourceFields": [
+        "text"
+      ],
+      "textBytes": 127,
+      "pricedBytes": 127,
+      "recordBytes": 254
+    },
+    {
+      "class": "prompt_snapshot",
+      "records": 2,
+      "visibleRecords": 1,
+      "visible": false,
+      "sourceFields": [
+        "systemPrompt[]"
+      ],
+      "textBytes": 179540,
+      "pricedBytes": 0,
+      "recordBytes": 351030
+    },
+    {
+      "class": "remote_session_change",
+      "records": 1,
+      "visibleRecords": 1,
+      "visible": true,
+      "sourceFields": [
+        "commit",
+        "pr"
+      ],
+      "textBytes": 120,
+      "pricedBytes": 120,
+      "recordBytes": 248
+    },
+    {
+      "class": "session_context",
+      "records": 1,
+      "visibleRecords": 1,
+      "visible": true,
+      "sourceFields": [
+        "context.userEmail"
+      ],
+      "textBytes": 264,
+      "pricedBytes": 264,
+      "recordBytes": 317
+    },
+    {
+      "class": "skill_listing",
+      "records": 1,
+      "visibleRecords": 1,
+      "visible": true,
+      "sourceFields": [
+        "content"
+      ],
+      "textBytes": 6115,
+      "pricedBytes": 6115,
+      "recordBytes": 6469
+    }
+  ]
+}

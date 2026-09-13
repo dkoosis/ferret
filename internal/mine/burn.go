@@ -45,7 +45,63 @@ type BurnRow struct {
 	// way (ferret-wmb Rules — the fix is not a per-class content allowlist).
 	Overcount bool `json:"overcount,omitempty"`
 
-	sessions map[string]struct{} // distinct-session accumulator; collapsed into Sessions at result time
+	// VisibleTokens is an at:* row's model-visible tokens: the visible bytes
+	// ingest priced from the ferret-z35 capture (event.Event.VisibleBytes)
+	// over BytesPerToken, summed over the records the capture's table covers.
+	// Nil on a tool/shell row and on an at:* row with no covered record. A
+	// pointer so zero — the answer for a hook the model never sees — survives
+	// omitempty.
+	VisibleTokens *int `json:"visibleTokens,omitempty"`
+	// UncalibratedBytes is the record bytes of an at:* row's records the table
+	// does not cover: a class or hook event the capture never produced. That
+	// part ranks at record bytes, as before.
+	UncalibratedBytes int `json:"uncalibratedBytes,omitempty"`
+	// Pricing says what an at:* row ranks by: PricingCalibrated when the table
+	// covered any of its records, PricingUncalibrated when it covered none.
+	Pricing string `json:"pricing,omitempty"`
+
+	visibleBytes int                 // covered records' visible bytes; VisibleTokens is this over BytesPerToken
+	calibrated   int                 // covered records
+	sessions     map[string]struct{} // distinct-session accumulator; collapsed into Sessions at result time
+}
+
+// The two values of BurnRow.Pricing.
+const (
+	PricingCalibrated   = "calibrated"
+	PricingUncalibrated = "not calibrated"
+)
+
+// rankBytes is the row's ranking key in bytes: record bytes for a tool, shell
+// or uncalibrated at:* row; for a calibrated at:* row, the bytes the model
+// sees plus the record bytes of whatever the table did not cover.
+func (r *BurnRow) rankBytes() int {
+	if r.VisibleTokens == nil {
+		return r.Bytes
+	}
+	return r.visibleBytes + r.UncalibratedBytes
+}
+
+// addAttach folds one attachment event's calibration into its row.
+func (r *BurnRow) addAttach(ev *event.Event) {
+	if !ev.Calibrated {
+		r.UncalibratedBytes += ev.Bytes
+		return
+	}
+	r.visibleBytes += ev.VisibleBytes
+	r.calibrated++
+}
+
+// priceAttach settles an at:* row's pricing once every event is folded.
+func (r *BurnRow) priceAttach() {
+	if !strings.HasPrefix(r.Key, "at:") {
+		return
+	}
+	if r.calibrated == 0 {
+		r.Pricing = PricingUncalibrated
+		return
+	}
+	tokens := r.visibleBytes / BytesPerToken
+	r.VisibleTokens, r.Pricing = &tokens, PricingCalibrated
 }
 
 // BurnResult is the corpus-wide ranked burn table plus the totals it was
@@ -120,6 +176,9 @@ func Burn(eventsPath string) (*BurnResult, error) {
 		r.Calls++
 		r.Bytes += ev.Bytes
 		r.ContentBytes += ev.ContentBytes
+		if ev.Kind == event.KindAttach {
+			r.addAttach(ev)
+		}
 		r.sessions[ev.Session] = struct{}{}
 		return nil
 	})
@@ -135,6 +194,7 @@ func Burn(eventsPath string) (*BurnResult, error) {
 			r.BytesPerCall = float64(r.Bytes) / float64(r.Calls)
 		}
 		r.Overcount = isOvercounted(r.Key, r.Bytes, r.ContentBytes)
+		r.priceAttach()
 		res.Rows = append(res.Rows, *r)
 	}
 	sort.Slice(res.Rows, func(i, j int) bool { return burnLess(&res.Rows[i], &res.Rows[j]) })
@@ -148,8 +208,8 @@ func Burn(eventsPath string) (*BurnResult, error) {
 // Pointer receivers, not values: BurnRow carries a map field, and a
 // value-range/value-param over it trips rangeValCopy on a hot struct.
 func burnLess(a, b *BurnRow) bool {
-	if a.Bytes != b.Bytes {
-		return a.Bytes > b.Bytes
+	if ra, rb := a.rankBytes(), b.rankBytes(); ra != rb {
+		return ra > rb
 	}
 	return a.Key < b.Key
 }

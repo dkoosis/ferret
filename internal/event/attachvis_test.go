@@ -1,0 +1,402 @@
+package event
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"testing"
+	"time"
+
+	"github.com/dkoosis/ferret/internal/transcript"
+)
+
+// ferret-z35. The capture (one Claude Code session through a logging proxy:
+// transcript.jsonl + requests/, never committed) lives under
+// ~/.ferret/calibration/. Regenerate the committed table from it:
+//
+//	FERRET_CALIB_DIR=~/.ferret/calibration/z35-20260913 go test ./internal/event -run TestRegenAttachVisibility
+const attachVisibilityPath = "attach-visibility.json"
+
+// Within the ferret-z35 tolerances, per subkey of the capture: a visible one
+// prices at ≥50% of the text the capture saw it add, an invisible one at ≤5%
+// of the text it carried. priced picks the pricing under test. Both sides must
+// be present, or the check proves nothing.
+func checkPricing(rows []AttachVisibilityRow, priced func(*AttachVisibilityRow) int) []string {
+	var fails []string
+	visible, invisible := 0, 0
+	for i := range rows {
+		r := &rows[i]
+		if r.VisibleRecords != 0 && r.VisibleRecords != r.Records {
+			continue // mixed: no single bound applies
+		}
+		got, text := float64(priced(r)), float64(r.TextBytes)
+		name := AttachSubkey(r.Class, r.HookEvent)
+		if r.Visible {
+			visible++
+			if got < 0.5*text {
+				fails = append(fails, fmt.Sprintf("%s visible: priced %.0fB < 50%% of %.0fB", name, got, text))
+			}
+			continue
+		}
+		invisible++
+		if got > 0.05*text {
+			fails = append(fails, fmt.Sprintf("%s invisible: priced %.0fB > 5%% of %.0fB", name, got, text))
+		}
+	}
+	if visible == 0 || invisible == 0 {
+		fails = append(fails, fmt.Sprintf("%d visible and %d invisible subkeys checked; each side needs ≥1", visible, invisible))
+	}
+	return fails
+}
+
+func committedVisibility(t *testing.T) *AttachVisibility {
+	t.Helper()
+	var av AttachVisibility
+	if err := json.Unmarshal(attachVisibilityJSON, &av); err != nil {
+		t.Fatal(err)
+	}
+	return &av
+}
+
+func TestAttachVisibility_PricingMatchesCapture(t *testing.T) {
+	av := committedVisibility(t)
+	for _, f := range checkPricing(av.Subkeys, func(r *AttachVisibilityRow) int { return r.PricedBytes }) {
+		t.Error(f)
+	}
+	if len(checkPricing(av.Subkeys, func(r *AttachVisibilityRow) int { return r.RecordBytes })) == 0 {
+		t.Error("record-byte pricing passes the capture check: it cannot tell a measurement from the old ranking")
+	}
+}
+
+// The docs say a PreToolUse hook exiting 0 never shows its output to the model.
+func TestAttachVisibility_PreToolUseHookIsHidden(t *testing.T) {
+	for _, r := range committedVisibility(t).Subkeys {
+		if r.Class == "hook_success" && r.HookEvent == "PreToolUse" {
+			if r.Visible {
+				t.Error("PreToolUse exit-0 stderr reached a request: the docs finding is wrong — record it on ferret-z35")
+			}
+			return
+		}
+	}
+	t.Error("table has no hook_success/PreToolUse row")
+}
+
+func TestAttachVisibility_CarriesNoAuth(t *testing.T) {
+	low := bytes.ToLower(attachVisibilityJSON)
+	for _, bad := range []string{"x-api-key", "authorization"} {
+		if bytes.Contains(low, []byte(bad)) {
+			t.Errorf("table contains %q", bad)
+		}
+	}
+}
+
+func TestPrice_CountsSourceFieldsOnce(t *testing.T) {
+	table := tableOf([]AttachVisibilityRow{
+		{Class: "hook_success", HookEvent: "SessionStart", Visible: true, SourceFields: []string{"content", "stdout"}},
+		{Class: "hook_success", HookEvent: "PreToolUse"},
+		{Class: "instructions", Visible: true, SourceFields: []string{"files[].content"}},
+	})
+	cases := []struct {
+		class, hook, payload string
+		visible              int
+		calibrated           bool
+	}{
+		{"hook_success", "SessionStart", `{"content":"abcdef","stdout":"abcdef","command":"x"}`, 6, true},
+		{"hook_success", "PreToolUse", `{"stderr":"abcdef"}`, 0, true},
+		{"instructions", "", `{"files":[{"path":"p","content":"abc"},{"content":"de"}]}`, 5, true},
+		{"nested_memory", "", `{"content":"abc"}`, 0, false},
+	}
+	for _, c := range cases {
+		v, cal := table.price(c.class, c.hook, []byte(c.payload))
+		if v != c.visible || cal != c.calibrated {
+			t.Errorf("%s/%s: price = %d,%v want %d,%v", c.class, c.hook, v, cal, c.visible, c.calibrated)
+		}
+	}
+}
+
+func TestAttachmentEvent_CarriesHookEventAndPrice(t *testing.T) {
+	prev := attachVisibility
+	attachVisibility = tableOf([]AttachVisibilityRow{
+		{Class: "hook_success", HookEvent: "UserPromptSubmit", Visible: true, SourceFields: []string{"stdout"}},
+		{Class: "hook_success", HookEvent: "PreToolUse"},
+	})
+	t.Cleanup(func() { attachVisibility = prev })
+
+	src := writeTranscript(t,
+		attachLine("a1", "hook_success", `,"hookEvent":"PreToolUse","stderr":"hidden text"`),
+		attachLine("a2", "hook_success", `,"hookEvent":"UserPromptSubmit","stdout":"shown"`),
+		attachLine("a3", "nested_memory", `,"content":"never captured"`),
+	)
+	var evs []*Event
+	if err := NewBuilder().File(src, func(ev *Event) { evs = append(evs, ev) }); err != nil {
+		t.Fatal(err)
+	}
+	want := []struct {
+		target     string
+		visible    int
+		calibrated bool
+	}{{"PreToolUse", 0, true}, {"UserPromptSubmit", 5, true}, {"", 0, false}}
+	if len(evs) != len(want) {
+		t.Fatalf("events = %d, want %d", len(evs), len(want))
+	}
+	for i, w := range want {
+		if evs[i].Target != w.target || evs[i].VisibleBytes != w.visible || evs[i].Calibrated != w.calibrated {
+			t.Errorf("event %d: target=%q visible=%d calibrated=%v, want %q %d %v",
+				i, evs[i].Target, evs[i].VisibleBytes, evs[i].Calibrated, w.target, w.visible, w.calibrated)
+		}
+	}
+}
+
+func TestRegenAttachVisibility(t *testing.T) {
+	dir := os.Getenv("FERRET_CALIB_DIR")
+	if dir == "" {
+		t.Skip("FERRET_CALIB_DIR unset: regenerating needs the capture, which is never committed")
+	}
+	av, err := deriveVisibility(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fails := checkPricing(av.Subkeys, func(r *AttachVisibilityRow) int { return r.PricedBytes }); len(fails) > 0 {
+		t.Fatalf("derived table fails its own capture: %v", fails)
+	}
+	b, err := json.MarshalIndent(av, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(attachVisibilityPath, append(b, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func deriveVisibility(dir string) (*AttachVisibility, error) {
+	reqs, err := loadRequests(filepath.Join(dir, "requests"))
+	if err != nil {
+		return nil, err
+	}
+	recs, version, err := loadAttachRecords(filepath.Join(dir, "transcript.jsonl"))
+	if err != nil {
+		return nil, err
+	}
+	rows := classifyRecords(recs, reqs)
+	table := tableOf(rows)
+	for i := range recs {
+		r := &recs[i]
+		v, _ := table.price(r.class, r.hookEvent, r.payload)
+		table[AttachSubkey(r.class, r.hookEvent)].PricedBytes += v
+	}
+	return &AttachVisibility{
+		Note: "ferret-z35 attachment visibility, derived from a proxy capture: class names, field paths and byte counts only. " +
+			"Regenerate with TestRegenAttachVisibility; the capture itself is never committed.",
+		Capture: filepath.Base(dir), ClaudeCode: version, Subkeys: rows,
+	}, nil
+}
+
+// capturedRequest is one main-thread request body and its UTC time of day,
+// read from the proxy's file name (NNNN-HHMMSS.mmm_path.json).
+type capturedRequest struct {
+	tod  time.Duration
+	body []byte
+}
+
+// minMainRequest drops side calls (session titles and the like, a few KB):
+// every main-thread request carries the system prompt and tool list.
+const minMainRequest = 20000
+
+func loadRequests(dir string) ([]capturedRequest, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var reqs []capturedRequest
+	for _, e := range entries {
+		name := e.Name()
+		if len(name) < 15 {
+			continue
+		}
+		clock, err := time.Parse("150405.000", name[5:15])
+		if err != nil {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return nil, err
+		}
+		if len(body) >= minMainRequest {
+			reqs = append(reqs, capturedRequest{tod: timeOfDay(clock), body: body})
+		}
+	}
+	sort.Slice(reqs, func(i, j int) bool { return reqs[i].tod < reqs[j].tod })
+	return reqs, nil
+}
+
+func timeOfDay(t time.Time) time.Duration {
+	t = t.UTC()
+	return time.Duration(t.Hour())*time.Hour + time.Duration(t.Minute())*time.Minute +
+		time.Duration(t.Second())*time.Second + time.Duration(t.Nanosecond())
+}
+
+type attachRecord struct {
+	tod       time.Duration
+	class     string
+	hookEvent string
+	payload   json.RawMessage
+}
+
+func loadAttachRecords(path string) (recs []attachRecord, version string, err error) {
+	err = transcript.ReadLines(path, func(line []byte) error {
+		if rec, v, ok := parseAttachRecord(line); ok {
+			recs = append(recs, rec)
+			if v != "" {
+				version = v
+			}
+		}
+		return nil
+	})
+	return recs, version, err
+}
+
+// parseAttachRecord decodes one transcript line; ok is false for any line that
+// is not a decodable attachment.
+func parseAttachRecord(line []byte) (rec attachRecord, version string, ok bool) {
+	var raw struct {
+		Type       string          `json:"type"`
+		Timestamp  time.Time       `json:"timestamp"`
+		Version    string          `json:"version"`
+		Attachment json.RawMessage `json:"attachment"`
+	}
+	if json.Unmarshal(line, &raw) != nil || raw.Type != "attachment" {
+		return rec, "", false
+	}
+	var head struct {
+		Type      string `json:"type"`
+		HookEvent string `json:"hookEvent"`
+	}
+	if json.Unmarshal(raw.Attachment, &head) != nil {
+		return rec, "", false
+	}
+	return attachRecord{tod: timeOfDay(raw.Timestamp), class: head.Type,
+		hookEvent: head.HookEvent, payload: raw.Attachment}, raw.Version, true
+}
+
+// minLeafText skips ids, names and flags: a string this short matches request
+// bodies by accident.
+const minLeafText = 32
+
+func classifyRecords(recs []attachRecord, reqs []capturedRequest) []AttachVisibilityRow {
+	bySubkey := map[string]*AttachVisibilityRow{}
+	fields := map[string]map[string]struct{}{}
+	for i := range recs {
+		r := &recs[i]
+		k := AttachSubkey(r.class, r.hookEvent)
+		row, ok := bySubkey[k]
+		if !ok {
+			row = &AttachVisibilityRow{Class: r.class, HookEvent: r.hookEvent}
+			bySubkey[k] = row
+			fields[k] = map[string]struct{}{}
+		}
+		row.Records++
+		row.RecordBytes += len(r.payload)
+		added, all := addedText(r, reqs, fields[k])
+		if added > 0 {
+			row.VisibleRecords++
+			row.TextBytes += added
+		} else {
+			row.TextBytes += all
+		}
+	}
+	rows := make([]AttachVisibilityRow, 0, len(bySubkey))
+	for k, row := range bySubkey {
+		row.Visible = row.VisibleRecords*2 > row.Records
+		for f := range fields[k] {
+			row.SourceFields = append(row.SourceFields, f)
+		}
+		sort.Strings(row.SourceFields)
+		rows = append(rows, *row)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		return AttachSubkey(rows[i].Class, rows[i].HookEvent) < AttachSubkey(rows[j].Class, rows[j].HookEvent)
+	})
+	return rows
+}
+
+// addedText measures one record against the requests around it: the bytes of
+// its text the next request carries more copies of than the previous one, and
+// the bytes of all its text. Counts, not presence: a hook that prints the same
+// text every turn finds its earlier copies in the history. Fields whose text
+// was added go into fields.
+func addedText(r *attachRecord, reqs []capturedRequest, fields map[string]struct{}) (added, all int) {
+	var before, after []byte
+	for i := range reqs {
+		if reqs[i].tod <= r.tod {
+			before = reqs[i].body
+			continue
+		}
+		after = reqs[i].body
+		break
+	}
+	var v any
+	if json.Unmarshal(r.payload, &v) != nil {
+		return 0, 0
+	}
+	seen := map[string]struct{}{}
+	walkLeaves(v, "", func(path, text string) {
+		if len(text) < minLeafText {
+			return
+		}
+		if _, dup := seen[text]; dup {
+			return
+		}
+		seen[text] = struct{}{}
+		all += len(text)
+		probe := jsonProbe(text)
+		if after != nil && bytes.Count(after, probe) > bytes.Count(before, probe) {
+			added += len(text)
+			fields[path] = struct{}{}
+		}
+	})
+	return added, all
+}
+
+// walkLeaves visits every string with its source-field path, in the syntax
+// walkPath reads back.
+func walkLeaves(v any, path string, fn func(path, text string)) {
+	switch x := v.(type) {
+	case string:
+		fn(path, x)
+	case map[string]any:
+		for k, child := range x {
+			p := k
+			if path != "" {
+				p = path + "." + k
+			}
+			walkLeaves(child, p, fn)
+		}
+	case []any:
+		for _, child := range x {
+			walkLeaves(child, path+"[]", fn)
+		}
+	}
+}
+
+// jsonProbe is a 48-byte window from the middle of text as it appears inside a
+// JSON string in a request body. HTML escaping is off: the harness does not
+// escape < and >, and the probe must match its bytes.
+func jsonProbe(text string) []byte {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(text); err != nil {
+		return []byte(text) // a string always encodes; never reached
+	}
+	s := bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
+	s = s[1 : len(s)-1]
+	const window = 48
+	if len(s) <= window {
+		return s
+	}
+	mid := (len(s) - window) / 2
+	return s[mid : mid+window]
+}
