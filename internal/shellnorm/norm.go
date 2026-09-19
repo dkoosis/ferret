@@ -53,6 +53,22 @@ type Segment struct {
 	// untruncated statement once at ingest recovers all of them, and spares
 	// every later report run one shell parse per event.
 	Flags []string
+	// Unmeasured marks a segment whose own exit code the tool_result's
+	// is_error bit cannot carry (ferret-wbv). Two shapes set it:
+	//   - a pipeline stage that is not the pipeline's last stage — bash's $?
+	//     (without pipefail) is the LAST stage's exit code only, so
+	//     `mnemd amend x | head -3` returning is_error=false tells us nothing
+	//     about mnemd, which may have exited nonzero.
+	//   - a `;`-list statement that is not the list's last statement — same
+	//     reasoning, $? is the last statement executed.
+	// `&&`/`||` chains are deliberately NOT marked: a zero exit there proves
+	// every member ran and succeeded (short-circuit), and a nonzero exit
+	// already gets the ambiguous StatusCFail treatment — no member's status
+	// is worse than "unknown which one," which Unmeasured does not improve on.
+	// Once true it is never cleared: a segment embedded in an outer list or
+	// pipe as a non-last member stays unmeasured even if its own inner
+	// structure would otherwise call it "last."
+	Unmeasured bool
 }
 
 // subcmdTools take a significant first subcommand worth keeping.
@@ -89,10 +105,7 @@ func Split(command string) (segs []Segment, fallback bool) {
 		return nil, true
 	}
 	printer := syntax.NewPrinter()
-	for _, st := range file.Stmts {
-		segs = append(segs, fromStmt(st, printer, 0)...)
-	}
-	return segs, false
+	return fromStmts(file.Stmts, printer, 0), false
 }
 
 func fromStmt(st *syntax.Stmt, pr *syntax.Printer, depth int) []Segment {
@@ -140,16 +153,53 @@ func fromBinaryCmd(c *syntax.BinaryCmd, pr *syntax.Printer, depth int) []Segment
 		}
 		return append(left, fromStmt(c.Y, pr, depth+1)...)
 	case syntax.Pipe, syntax.PipeAll:
-		// a pipeline collapses to its first non-trivial command
-		if left := fromStmt(c.X, pr, depth+1); len(left) > 0 {
-			markPiped(left)
-			return left
-		}
-		right := fromStmt(c.Y, pr, depth+1)
-		markPiped(right)
-		return right
+		return fromPipeChain(c, pr, depth)
 	}
 	return nil
+}
+
+// fromPipeChain flattens a left-associative pipe chain (`a | b | c` parses as
+// Pipe(Pipe(a,b), c)) into its ordered stages, then collapses to the segments
+// of the FIRST non-trivial stage — the collapse behavior fromBinaryCmd always
+// had. What is new (ferret-wbv) is Unmeasured: bash's $? for a pipeline
+// (without pipefail) is the LAST stage's exit code, so a kept stage that
+// isn't also the chain's last stage has no exit code the tool_result's
+// is_error bit can describe, whichever way is_error came out.
+func fromPipeChain(top *syntax.BinaryCmd, pr *syntax.Printer, depth int) []Segment {
+	stages := flattenPipe(top)
+	for i, st := range stages {
+		segs := fromStmt(st, pr, depth+1)
+		if len(segs) == 0 {
+			continue // trivial stage (e.g. `cd x | ...`) — try the next one
+		}
+		markPiped(segs)
+		if i != len(stages)-1 {
+			markUnmeasured(segs)
+		}
+		return segs
+	}
+	return nil
+}
+
+// flattenPipe walks a|b|c's left-associative AST spine (Pipe(Pipe(a,b), c))
+// and returns its stages in left-to-right source order — the ordering
+// fromPipeChain needs to know which stage is the chain's last.
+func flattenPipe(top *syntax.BinaryCmd) []*syntax.Stmt {
+	var rev []*syntax.Stmt
+	cur := top
+	for {
+		rev = append(rev, cur.Y)
+		if xbc, ok := cur.X.Cmd.(*syntax.BinaryCmd); ok && (xbc.Op == syntax.Pipe || xbc.Op == syntax.PipeAll) {
+			cur = xbc
+			continue
+		}
+		rev = append(rev, cur.X)
+		break
+	}
+	for i, j := 0, len(rev)-1; i < j; i, j = i+1, j-1 {
+		rev[i], rev[j] = rev[j], rev[i]
+	}
+	return rev
 }
 
 // recurseCap reports whether depth has hit maxRecurseDepth — pathologically
@@ -162,12 +212,35 @@ func recurseCap(st *syntax.Stmt, pr *syntax.Printer, depth int) ([]Segment, bool
 	return nil, false
 }
 
+// fromStmts walks a `;`-list (top-level statements, or a block/subshell/
+// if/while/for body) and marks every statement but the last Unmeasured
+// (ferret-wbv): bash's $? after the list finishes is the LAST statement's
+// exit code, so an earlier statement's own outcome is invisible to the
+// tool_result's is_error bit regardless of what it was. This is an
+// approximation for if/while/for bodies (Cond and Then/Do are two separate
+// fromStmts calls in fromStmt, each treating its own tail as "last" even
+// though the overall construct continues afterward) — the same posture
+// markSwallowedArm already documents taking for those shapes.
 func fromStmts(sts []*syntax.Stmt, pr *syntax.Printer, depth int) []Segment {
 	out := make([]Segment, 0, len(sts))
-	for _, st := range sts {
-		out = append(out, fromStmt(st, pr, depth)...)
+	for i, st := range sts {
+		segs := fromStmt(st, pr, depth)
+		if i != len(sts)-1 {
+			markUnmeasured(segs)
+		}
+		out = append(out, segs...)
 	}
 	return out
+}
+
+// markUnmeasured flags every segment as Unmeasured — additive (never clears
+// an already-true bit), since a segment can be folded unmeasured for more
+// than one reason (a non-last pipe stage that is also a non-last `;`-list
+// statement).
+func markUnmeasured(segs []Segment) {
+	for i := range segs {
+		segs[i].Unmeasured = true
+	}
 }
 
 func fromCall(c *syntax.CallExpr, st *syntax.Stmt, pr *syntax.Printer) (Segment, bool) {

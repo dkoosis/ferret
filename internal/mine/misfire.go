@@ -90,6 +90,12 @@ type MisfireReport struct {
 	Rows      []MisfireRow `json:"rows"`
 	Repairs   []RepairPair `json:"repairs"`
 	Swallowed []SwallowRow `json:"swallowed"`
+	// Unmeasured is a corpus-wide uncertainty line (ferret-wbv), the same
+	// posture Swallowed already has: tool|shell events whose Status is
+	// event.StatusUnmeasured (a non-last pipe stage or `;`-list statement —
+	// its own exit code the tool_result never carried) — not counted as a
+	// fail anywhere above, and not countable as a success either.
+	Unmeasured int `json:"unmeasured"`
 }
 
 // misfireAgg accumulates one Action key's totals as the corpus walk streams
@@ -124,11 +130,16 @@ func MineMisfires(events []event.Event) MisfireReport {
 	aggs := map[string]*misfireAgg{}
 	pending := map[failKey]string{} // → last fail's Detail (raw text, possibly "")
 	pairCounts := map[string]*RepairPair{}
+	unmeasured := 0
 
 	for i := range events {
 		ev := &events[i]
 		if ev.Kind != event.KindTool && ev.Kind != event.KindShell {
 			continue
+		}
+		if ev.Status == event.StatusUnmeasured {
+			unmeasured++
+			continue // no verdict to fold into any aggregate — counted only
 		}
 		key := misfireKey(ev)
 		a := aggs[key]
@@ -143,9 +154,10 @@ func MineMisfires(events []event.Event) MisfireReport {
 	}
 
 	return MisfireReport{
-		Rows:      rankMisfires(aggs),
-		Repairs:   rankRepairs(pairCounts),
-		Swallowed: rankSwallows(aggs),
+		Rows:       rankMisfires(aggs),
+		Repairs:    rankRepairs(pairCounts),
+		Swallowed:  rankSwallows(aggs),
+		Unmeasured: unmeasured,
 	}
 }
 

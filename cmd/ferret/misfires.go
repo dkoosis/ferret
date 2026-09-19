@@ -132,6 +132,7 @@ func writeMisfiresJSON(w io.Writer, rep mine.MisfireReport, limit int) error {
 		keyTotal:         rowsTotal,
 		"repairsTotal":   repairsTotal,
 		"swallowedTotal": swallowedTotal,
+		"unmeasured":     rep.Unmeasured,
 	})
 }
 
@@ -162,6 +163,7 @@ func writeMisfiresText(w io.Writer, rep mine.MisfireReport, limit, maxBytes int)
 
 	writeRepairSection(sink, rep.Repairs)
 	writeSwallowSection(sink, rep.Swallowed)
+	writeUnmeasuredLine(sink, rep.Unmeasured)
 	// Legal moves, not a plan (DK-AXI rule 11): price these failures against
 	// the other detectors, or record a repair pair as a substitution.
 	if len(rep.Rows) > 0 {
@@ -193,6 +195,17 @@ func writeSwallowSection(sink *out.Sink, swallowed []mine.SwallowRow) {
 	for _, row := range swallowed {
 		swallowRow(sink, row)
 	}
+}
+
+// writeUnmeasuredLine prints the ferret-wbv uncertainty line — the same
+// posture writeSwallowSection has for swallowed errors: named calls this
+// corpus cannot resolve to ok or fail (a non-last pipe stage or `;`-list
+// statement), so misfires never silently counts them either way.
+func writeUnmeasuredLine(sink *out.Sink, unmeasured int) {
+	if unmeasured == 0 {
+		return
+	}
+	sink.Head("unmeasured: %d calls whose own exit code the result can't carry (not counted as fail or ok)", unmeasured)
 }
 
 // swallowRow renders one swallowed-error row, appending the exemplar command
