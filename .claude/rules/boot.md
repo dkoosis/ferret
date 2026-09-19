@@ -32,7 +32,6 @@ Phases 1–4 ALL CLOSED. ferret-097 (close the loop: rank burners/misfires, tune
 - **agent_id/agent_type are the ONLY parent↔subagent discriminator** — `session_id` + `transcript_path` are SHARED (claude-code-guide-confirmed). Anything keying retrieval/attribution per-agent MUST carry `agent_id`.
 - **/team shared-tree clobber** — a wave agent relocating a *peer's* untracked files via a flat-basename scratch dir can silently destroy untracked work (lost kuv.10's `internal/score/landmark.go`, 6-19). Filed **`ccp-l1nf`** (cc-plugins, P1). loto is a no-op *within* a wave (shared identity); write-set disjointness is the only guard, leaky for untracked files. ✗ reach outside your write-set.
 - **Branch-staleness diff** — a branch that LOOKS like a huge diff vs main is usually a stale merge-base fooling the *three-dot* diff. Real tell = two-dot tree diff: `git diff main <branch>`.
-- **`codex-review.yml` fails at infra level** (~30s run, no review posted) — recurring; the `@codex review` comment trigger doesn't land a verdict. ✗ wait on it or treat as a gate. `make check` (local) is the gate (ci-on-demand.md).
 - **Hot-struct lint tail** — adding fields to a hot struct (`mine.Finding`) trips `rangeValCopy` on *existing* value-range loops; integration beads push a func past gocognit 15. Cheap to fix at wave verify (index-range + helper-extract), expect it.
 
 ## dk read (stable, 30+ sessions)
