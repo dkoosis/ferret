@@ -317,24 +317,55 @@ func (b *Builder) userLine(src transcript.Source, st *fileState, raw *transcript
 }
 
 // resultOutcome derives one tool_result's Status and captured error text
-// (ferret-54q). A failed compound chain (segCount > 1) gets cfail, not fail:
-// the result says the invocation failed, not which segment — fail on every
-// segment would invent friction. Err is captured the same way: the failing
-// segment is unknown for cfail, so the one payload's text is what resolve
-// broadcasts to every segment, mirroring Status itself.
-func resultOutcome(blk *transcript.Block, segCount int) (status, errText string) {
+// (ferret-54q). measuredCount is the number of this call's events whose own
+// exit code the result CAN describe — every Unmeasured segment (a non-last
+// pipe stage or `;`-list statement, ferret-wbv) is excluded by the caller
+// before this is computed, since Unmeasured always wins regardless of what
+// this returns. A failed chain with measuredCount > 1 (an `&&`/`||` chain,
+// where every member is a live candidate) gets cfail, not fail: the result
+// says the invocation failed, not which member — fail on every member would
+// invent friction. Err is captured the same way: the failing member is
+// unknown for cfail, so the one payload's text is what resolve broadcasts to
+// every measured segment, mirroring Status itself.
+func resultOutcome(blk *transcript.Block, measuredCount int) (status, errText string) {
 	status = StatusOK
 	if blk.IsError == nil || !*blk.IsError {
 		return status, ""
 	}
 	status = StatusFail
-	if segCount > 1 {
+	if measuredCount > 1 {
 		status = StatusCFail
 	}
 	if s, ok := resultText(blk.Content); ok {
 		errText = trunc(s, DetailMax)
 	}
 	return status, errText
+}
+
+// measuredCount counts evs whose own exit code the result CAN describe —
+// resultOutcome's cfail-vs-fail branch, and the Unmeasured override
+// applyOutcome performs afterward, both key off it (ferret-wbv).
+func measuredCount(evs []*Event) int {
+	n := 0
+	for _, ev := range evs {
+		if !ev.unmeasured {
+			n++
+		}
+	}
+	return n
+}
+
+// applyOutcome sets one event's Status (and Err, when measured) from the
+// call-level outcome resolve() computed — except an Unmeasured event, which
+// always gets StatusUnmeasured regardless of what the call-level outcome
+// says, since its own exit code was never what produced that outcome.
+func applyOutcome(ev *Event, status, errText string) {
+	if ev.unmeasured {
+		ev.Status = StatusUnmeasured
+		return
+	}
+	ev.Status = status
+	ev.Err = errText
 }
 
 // resolve applies a tool_result's status and latency to its pending events.
@@ -355,7 +386,7 @@ func (b *Builder) resolve(st *fileState, blk *transcript.Block, ts time.Time) {
 		b.resolved[blk.ToolUseID] = struct{}{}
 		return
 	}
-	status, errText := resultOutcome(blk, len(evs))
+	status, errText := resultOutcome(blk, measuredCount(evs))
 	// Attribute the result payload's measured size across the (possibly
 	// compound) events it resolves — this is real context the call returned.
 	// Integer division drops up to n-1 bytes; carry the remainder onto the
@@ -365,8 +396,7 @@ func (b *Builder) resolve(st *fileState, blk *transcript.Block, ts time.Time) {
 	rem := len(blk.Content) % n
 	ct, haveCT := st.callTime[blk.ToolUseID]
 	for i, ev := range evs {
-		ev.Status = status
-		ev.Err = errText
+		applyOutcome(ev, status, errText)
 		ev.OutBytes += share
 		if i < rem {
 			ev.OutBytes++
@@ -546,24 +576,9 @@ func (b *Builder) fromToolUse(src transcript.Source, raw *transcript.Raw, blk *t
 			return []*Event{&ev}
 		}
 		out := make([]*Event, 0, len(segs))
+		compound := len(segs) > 1
 		for _, seg := range segs {
-			ev := base
-			ev.Kind = KindShell
-			ev.Action = seg.Cmd
-			ev.Detail = trunc(seg.Raw, DetailMax)
-			// Shell input is the segment's own text — there is no separate
-			// envelope the way a tool call's blk.Input is one (event.go InBytes).
-			ev.InBytes = len(seg.Raw)
-			ev.Bytes = ev.InBytes // no tool_result share applied yet; resolve() adds it
-			ev.Compound = len(segs) > 1
-			ev.Swallow = seg.Swallowed
-			ev.Pipe = seg.Piped
-			// Flags comes from the parsed statement, not from ev.Detail: the
-			// trunc above would cut a long command's option list off first
-			// (event.go Flags, ferret-dep).
-			ev.Flags = seg.Flags
-			ev.Query = trixiCLIQuery(seg.Cmd, seg.Raw)
-			out = append(out, &ev)
+			out = append(out, shellSegmentEvent(base, seg, compound))
 		}
 		return out
 	}
@@ -578,6 +593,30 @@ func (b *Builder) fromToolUse(src transcript.Source, raw *transcript.Raw, blk *t
 	ev.Bytes = ev.InBytes // no tool_result share applied yet; resolve() adds it
 	ev.Query = getNugQuery(blk.Name, input)
 	return []*Event{&ev}
+}
+
+// shellSegmentEvent builds one shell Event from a shellnorm.Segment, cloning
+// base per segment — extracted from fromToolUse to keep it under the
+// funlen ceiling.
+func shellSegmentEvent(base Event, seg shellnorm.Segment, compound bool) *Event {
+	ev := base
+	ev.Kind = KindShell
+	ev.Action = seg.Cmd
+	ev.Detail = trunc(seg.Raw, DetailMax)
+	// Shell input is the segment's own text — there is no separate
+	// envelope the way a tool call's blk.Input is one (event.go InBytes).
+	ev.InBytes = len(seg.Raw)
+	ev.Bytes = ev.InBytes // no tool_result share applied yet; resolve() adds it
+	ev.Compound = compound
+	ev.Swallow = seg.Swallowed
+	ev.Pipe = seg.Piped
+	ev.unmeasured = seg.Unmeasured
+	// Flags comes from the parsed statement, not from ev.Detail: the
+	// trunc above would cut a long command's option list off first
+	// (event.go Flags, ferret-dep).
+	ev.Flags = seg.Flags
+	ev.Query = trixiCLIQuery(seg.Cmd, seg.Raw)
+	return &ev
 }
 
 // toolGetNug is the trixi search tool whose query-mode calls are retrieval

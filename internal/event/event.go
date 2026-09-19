@@ -17,10 +17,16 @@ type Event struct {
 	Action    string    `json:"act"` // tool name; for shell: normalized command
 	Target    string    `json:"tgt,omitempty"`
 	Detail    string    `json:"d,omitempty"`  // raw command segment, truncated
-	Status    string    `json:"st,omitempty"` // ok | fail | cfail | none (no paired result)
-	DurMS     int64     `json:"ms,omitempty"` // tool_use → tool_result latency
-	Retry     bool      `json:"rt,omitempty"` // same action+target shortly after a failure
-	Compound  bool      `json:"cp,omitempty"` // segment of a split compound bash chain
+	Status    string    `json:"st,omitempty"` // ok | fail | cfail | unmeasured | none (no paired result)
+	// unmeasured is set at ingest from shellnorm.Segment.Unmeasured — a
+	// non-last pipe stage or `;`-list statement whose own exit code the
+	// tool_result's is_error bit cannot carry (ferret-wbv). resolve() reads
+	// it to force Status to StatusUnmeasured regardless of is_error. Not
+	// serialized: what it records is fully carried by Status itself.
+	unmeasured bool
+	DurMS      int64 `json:"ms,omitempty"` // tool_use → tool_result latency
+	Retry      bool  `json:"rt,omitempty"` // same action+target shortly after a failure
+	Compound   bool  `json:"cp,omitempty"` // segment of a split compound bash chain
 	// Swallow marks a shell segment in the left arm of `cmd 2>/dev/null ||
 	// fallback` (ferret-cax) — a failure that is structurally invisible to
 	// Status, because the error text is discarded and the chain exits with the
@@ -152,7 +158,13 @@ const (
 	StatusOK    = "ok"
 	StatusFail  = "fail"
 	StatusCFail = "cfail" // compound shell chain failed; failing segment unknown
-	StatusNone  = "none"
+	// StatusUnmeasured marks a segment whose own exit code the tool_result's
+	// is_error bit cannot carry at all (ferret-wbv) — a non-last pipe stage
+	// or `;`-list statement. Unlike StatusCFail (this call failed, which
+	// segment is unknown), unmeasured segments carry no verdict whatsoever:
+	// no consumer may count one as a failure or as a success.
+	StatusUnmeasured = "unmeasured"
+	StatusNone       = "none"
 )
 
 // Stats accumulates ingest health counters.

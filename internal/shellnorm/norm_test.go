@@ -245,6 +245,42 @@ func TestSplitMarksPipedSegment(t *testing.T) {
 	}
 }
 
+// TestSplitMarksUnmeasuredSegment covers ferret-wbv: a segment whose own exit
+// code the tool_result's is_error bit cannot carry — a non-last pipe stage,
+// or a non-last statement of a `;`-list. `&&`/`||` chains are deliberately
+// untouched (Rule: they "keep today's behavior").
+func TestSplitMarksUnmeasuredSegment(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want []bool // parallel to the returned segments
+	}{
+		{"two-stage pipe, first kept, not last stage", "mnemd amend x | head -3", []bool{true}},
+		{"trivial left, right kept IS the last stage", "cd x | rg foo", []bool{false}},
+		{"three-stage pipe, first kept, not last stage", "a | b | c", []bool{true}},
+		{"semicolon list: first unmeasured, last measured", "a; b", []bool{true, false}},
+		{"and-chain: neither marked, even on failure path", "a && b", []bool{false, false}},
+		{"single command: measured", "go test ./...", []bool{false}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			segs, fb := Split(c.in)
+			if fb {
+				t.Fatalf("unexpected fallback for %q", c.in)
+			}
+			if len(segs) != len(c.want) {
+				t.Fatalf("Split(%q) = %v, want %d segments", c.in, cmds(segs), len(c.want))
+			}
+			for i, want := range c.want {
+				if segs[i].Unmeasured != want {
+					t.Errorf("Split(%q)[%d] (%s).Unmeasured = %v, want %v",
+						c.in, i, segs[i].Cmd, segs[i].Unmeasured, want)
+				}
+			}
+		})
+	}
+}
+
 // TestArgv covers the shellnorm.Argv helper (ferret-cax item 3): the literal
 // argv of a plain, single, redirect-free command, or plain=false whenever the
 // text carries a shape a substitution detector cannot safely reason about —

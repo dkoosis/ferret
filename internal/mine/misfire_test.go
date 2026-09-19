@@ -342,3 +342,39 @@ func TestMineMisfires_SurfacesKnownJQBdShowMotif_When_CorpusReproducesFerret67o(
 		t.Errorf("fails = %d, want 130", top.Fails)
 	}
 }
+
+// TestMineMisfires_CountsUnmeasuredSeparately_When_StatusIsUnmeasured is the
+// ferret-wbv rollup: an unmeasured call is neither a fail nor an ok, so it
+// must not appear in Rows/Repairs at all — only in the dedicated counter.
+func TestMineMisfires_CountsUnmeasuredSeparately_When_StatusIsUnmeasured(t *testing.T) {
+	events := []event.Event{
+		ev("s1", event.KindShell, "mnemd", "", event.StatusUnmeasured, "mnemd amend x"),
+		ev("s1", event.KindShell, "mnemd", "", event.StatusUnmeasured, "mnemd amend y"),
+		ev("s2", event.KindShell, "jq", "", event.StatusFail, "jq '.[0]'"),
+	}
+	rep := MineMisfires(events)
+	if rep.Unmeasured != 2 {
+		t.Errorf("Unmeasured = %d, want 2", rep.Unmeasured)
+	}
+	for _, row := range rep.Rows {
+		if row.Key == "sh:mnemd" {
+			t.Errorf("unmeasured key %q leaked into Rows: %+v", row.Key, row)
+		}
+	}
+}
+
+// TestMineMisfires_UnmeasuredRetryDoesNotCloseRepairPair is the AC's last
+// bullet: a StatusUnmeasured event with Retry=true must not close a pending
+// failure into a repair pair — only a genuine StatusOK does that. Mirrors
+// finish()'s own rule that an unhandled status (here, unmeasured) neither
+// opens nor closes the retry window.
+func TestMineMisfires_UnmeasuredRetryDoesNotCloseRepairPair(t *testing.T) {
+	failedEv := ev("s1", event.KindShell, "jq", "", event.StatusFail, "jq '.[0]'")
+	unmeasuredEv := ev("s1", event.KindShell, "jq", "", event.StatusUnmeasured, "jq '.[0]' | head")
+	unmeasuredEv.Retry = true
+
+	rep := MineMisfires([]event.Event{failedEv, unmeasuredEv})
+	if len(rep.Repairs) != 0 {
+		t.Errorf("repairs = %+v, want none — an unmeasured retry proves nothing was fixed", rep.Repairs)
+	}
+}

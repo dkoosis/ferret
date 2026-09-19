@@ -1222,3 +1222,87 @@ func TestAttachmentsAreNotCountedUnpaired(t *testing.T) {
 		}
 	}
 }
+
+// --- ferret-wbv: a status the transcript's is_error bit cannot support -----
+
+// TestPipeNonLastStageOKIsUnmeasured is the bead's own motivating example:
+// `mnemd amend x | head -3` returning is_error=false tells us nothing about
+// mnemd's exit code (bash's $? without pipefail is head's), so the kept
+// mnemd segment must not read as "ok".
+func TestPipeNonLastStageOKIsUnmeasured(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"mnemd amend x | head -3"}`),
+		toolResult("u2", "t1", false),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 1 {
+		t.Fatalf("events = %d, want 1 (pipe collapses to the kept stage)", len(evs))
+	}
+	if evs[0].Action != "mnemd" {
+		t.Fatalf("Action = %q, want %q", evs[0].Action, "mnemd")
+	}
+	if evs[0].Status != StatusUnmeasured {
+		t.Errorf("status = %q, want %q — head's exit, not mnemd's, is what is_error describes", evs[0].Status, StatusUnmeasured)
+	}
+}
+
+// TestPipeNonLastStageFailedIsUnmeasuredNotFail is the AC's second fixture:
+// `bd list | rg nope` returning is_error=true records the bd segment
+// unmeasured, not fail — the failure (if any) may be rg's, not bd's.
+func TestPipeNonLastStageFailedIsUnmeasuredNotFail(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"bd list | rg nope"}`),
+		toolResult("u2", "t1", true),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 1 {
+		t.Fatalf("events = %d, want 1", len(evs))
+	}
+	if evs[0].Action != "bd_list" {
+		t.Fatalf("Action = %q, want %q", evs[0].Action, "bd_list")
+	}
+	if evs[0].Status != StatusUnmeasured {
+		t.Errorf("status = %q, want %q — rg's exit, not bd's, is what is_error describes", evs[0].Status, StatusUnmeasured)
+	}
+}
+
+// TestAndChainStillOKOnSuccess pins the Rule's explicit carve-out: `a && b`
+// with is_error=false keeps recording both segments ok, unaffected by
+// Unmeasured — a zero exit there proves every member ran and succeeded.
+func TestAndChainStillOKOnSuccess(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"go vet ./... && go build ./..."}`),
+		toolResult("u2", "t1", false),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 2 {
+		t.Fatalf("events = %d, want 2", len(evs))
+	}
+	for _, ev := range evs {
+		if ev.Status != StatusOK {
+			t.Errorf("%s: status = %q, want %q", ev.Action, ev.Status, StatusOK)
+		}
+	}
+}
+
+// TestSemicolonListLastMeasuredFirstUnmeasured is the AC's `a; b` fixture:
+// bash's $? after a `;`-list is the LAST statement's exit code, so a failed
+// result names b (real status, not the ambiguous cfail) while a — whose own
+// outcome the result cannot describe — reads unmeasured.
+func TestSemicolonListLastMeasuredFirstUnmeasured(t *testing.T) {
+	src := writeTranscript(t,
+		toolUse("u1", "t1", "Bash", `{"command":"go vet ./...; go build ./..."}`),
+		toolResult("u2", "t1", true),
+	)
+	evs := ingest(t, src)
+	if len(evs) != 2 {
+		t.Fatalf("events = %d, want 2", len(evs))
+	}
+	if evs[0].Status != StatusUnmeasured {
+		t.Errorf("first (%s): status = %q, want %q", evs[0].Action, evs[0].Status, StatusUnmeasured)
+	}
+	if evs[1].Status != StatusFail {
+		t.Errorf("last (%s): status = %q, want %q — its own exit code IS what is_error describes",
+			evs[1].Action, evs[1].Status, StatusFail)
+	}
+}
