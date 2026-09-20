@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"text/tabwriter"
 	"time"
 
 	"github.com/dkoosis/ferret/internal/transcript"
@@ -21,6 +22,12 @@ import (
 // directories joined like $PATH:
 //
 //	FERRET_CALIB_DIR=~/.ferret/calibration/z35-20260913:~/.ferret/calibration/0qo-20260919 go test ./internal/event -run TestRegenAttachVisibility
+//
+// The merged table hides a disagreement between captures: mergeRows keeps the
+// first one's row. To read each capture's own rows side by side (ferret-cwb),
+// nothing written, nothing edited:
+//
+//	FERRET_CALIB_DIR=... go test ./internal/event -run TestShowAttachCaptures -v
 const attachVisibilityPath = "attach-visibility.json"
 
 // Within the ferret-z35 tolerances, per subkey of the capture: a visible one
@@ -192,6 +199,56 @@ func TestMergeRows_LaterCaptureOnlyFillsGaps(t *testing.T) {
 	}
 }
 
+func TestFormatCaptureRows_ShowsEachCaptureBySubkey(t *testing.T) {
+	names := []string{"cap-a", "cap-b"}
+	captures := [][]AttachVisibilityRow{
+		{
+			{Class: "hook_success", HookEvent: "SessionStart", Records: 1, MeasuredRecords: 1, VisibleRecords: 1, Visible: true, SourceFields: []string{"content", "stdout"}},
+			{Class: "environment", Records: 1},
+		},
+		{
+			{Class: "hook_success", HookEvent: "SessionStart", Records: 4, MeasuredRecords: 4, VisibleRecords: 2, SourceFields: []string{"stdout"}},
+		},
+	}
+	got := formatCaptureRows(names, captures)
+	rows := map[string]string{} // "subkey capture" → the rest of its line, whitespace squeezed
+	var subkey string
+	for _, line := range strings.Split(strings.TrimRight(got, "\n"), "\n")[1:] {
+		f := strings.Fields(line)
+		if line[0] != ' ' {
+			subkey, f = f[0], f[1:]
+		}
+		rows[subkey+" "+f[0]] = strings.Join(f[1:], " ")
+	}
+	want := map[string]string{
+		"environment cap-a":               "1 0 0 false -",
+		"environment cap-b":               "not seen",
+		"hook_success/SessionStart cap-a": "1 1 1 true content,stdout",
+		"hook_success/SessionStart cap-b": "4 4 2 false stdout",
+	}
+	if !reflect.DeepEqual(rows, want) {
+		t.Errorf("rows = %q\nwant %q\nfull output:\n%s", rows, want, got)
+	}
+}
+
+// ferret-cwb: prints, writes nothing. Skips without the captures, like Regen.
+func TestShowAttachCaptures(t *testing.T) {
+	dirs := filepath.SplitList(os.Getenv("FERRET_CALIB_DIR"))
+	if len(dirs) == 0 {
+		t.Skip("FERRET_CALIB_DIR unset: showing per-capture rows needs the captures, which are never committed")
+	}
+	names := make([]string, len(dirs))
+	captures := make([][]AttachVisibilityRow, len(dirs))
+	for i, dir := range dirs {
+		rows, _, err := deriveCapture(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		names[i], captures[i] = filepath.Base(dir), rows
+	}
+	fmt.Print(formatCaptureRows(names, captures))
+}
+
 func TestRegenAttachVisibility(t *testing.T) {
 	dirs := filepath.SplitList(os.Getenv("FERRET_CALIB_DIR"))
 	if len(dirs) == 0 {
@@ -263,6 +320,52 @@ func deriveCapture(dir string) (rows []AttachVisibilityRow, version string, err 
 		row.PricedBytes += v
 	}
 	return rows, version, nil
+}
+
+// formatCaptureRows lays each capture's own derived rows out by subkey, one
+// line per capture under it, so where two captures disagree both sets of numbers
+// are on the page. A capture that never saw a subkey says so. It is a view of
+// what deriveCapture returns and derives nothing itself.
+func formatCaptureRows(names []string, captures [][]AttachVisibilityRow) string {
+	bySubkey := make([]map[string]*AttachVisibilityRow, len(captures))
+	seen := map[string]struct{}{}
+	for i := range captures {
+		bySubkey[i] = map[string]*AttachVisibilityRow{}
+		for j := range captures[i] {
+			r := &captures[i][j]
+			k := AttachSubkey(r.Class, r.HookEvent)
+			bySubkey[i][k] = r
+			seen[k] = struct{}{}
+		}
+	}
+	subkeys := make([]string, 0, len(seen))
+	for k := range seen {
+		subkeys = append(subkeys, k)
+	}
+	sort.Strings(subkeys)
+
+	var buf bytes.Buffer
+	w := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "subkey\tcapture\trecords\tmeasured\tvisible\tvisible?\tsource fields")
+	for _, k := range subkeys {
+		label := k
+		for i, name := range names {
+			if r, ok := bySubkey[i][k]; ok {
+				src := "-"
+				if len(r.SourceFields) > 0 {
+					src = strings.Join(r.SourceFields, ",")
+				}
+				fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%d\t%t\t%s\n", label, name, r.Records, r.MeasuredRecords, r.VisibleRecords, r.Visible, src)
+			} else {
+				// Empty cells keep the row as wide as the others, or tabwriter
+				// ends the column block here and the table loses its alignment.
+				fmt.Fprintf(w, "%s\t%s\tnot seen\t\t\t\t\n", label, name)
+			}
+			label = ""
+		}
+	}
+	_ = w.Flush() // a bytes.Buffer does not fail
+	return buf.String()
 }
 
 // mergeRows adds to earlier the subkeys only later measured. A subkey both
