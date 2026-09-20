@@ -37,22 +37,37 @@ type AttachVisibility struct {
 // after the record carries more copies of that text than the last one before
 // it. A record that snapshots text already sent (prompt_snapshot's system
 // prompt) is not visible.
+//
+// MeasuredRecords is the records that carried text long enough to look for at
+// all; the rest are no evidence either way. The 0qo capture ran in
+// /Users/dkoosis/Projects/ferret, so its one environment record held no string
+// of 32 bytes and read as invisible, disagreeing with a capture whose working
+// directory was a 110-byte scratchpad path. Visible votes over the measured
+// records, and a row that measured none is not a measurement (unmeasured).
 type AttachVisibilityRow struct {
-	Class          string   `json:"class"`
-	HookEvent      string   `json:"hookEvent,omitempty"`
-	Records        int      `json:"records"`
-	VisibleRecords int      `json:"visibleRecords"`
-	Visible        bool     `json:"visible"`
-	SourceFields   []string `json:"sourceFields,omitempty"` // "files[].content": dot = key, [] = each element
-	TextBytes      int      `json:"textBytes"`              // visible: text found added; invisible: all text the records carried
-	PricedBytes    int      `json:"pricedBytes"`            // what ingest's pricing gives the same records
-	RecordBytes    int      `json:"recordBytes"`
+	Class           string   `json:"class"`
+	HookEvent       string   `json:"hookEvent,omitempty"`
+	Records         int      `json:"records"`
+	MeasuredRecords int      `json:"measuredRecords"`
+	VisibleRecords  int      `json:"visibleRecords"`
+	Visible         bool     `json:"visible"`
+	SourceFields    []string `json:"sourceFields,omitempty"` // "files[].content": dot = key, [] = each element
+	TextBytes       int      `json:"textBytes"`              // visible: text found added; invisible: all text the records carried
+	PricedBytes     int      `json:"pricedBytes"`            // what ingest's pricing gives the same records
+	RecordBytes     int      `json:"recordBytes"`
 }
 
-// mixed says the capture saw some of this subkey's records reach a request and
-// some not, so Visible (a majority vote) is no measurement of any one record.
+// mixed says the capture saw some of this subkey's measured records reach a
+// request and some not, so Visible (a majority vote) is no measurement of any
+// one record.
 func (r *AttachVisibilityRow) mixed() bool {
-	return r.VisibleRecords != 0 && r.VisibleRecords != r.Records
+	return r.VisibleRecords != 0 && r.VisibleRecords != r.MeasuredRecords
+}
+
+// unmeasured says no record of this subkey carried text the capture could look
+// for, so Visible=false is the absence of evidence, not a finding of hidden.
+func (r *AttachVisibilityRow) unmeasured() bool {
+	return r.MeasuredRecords == 0
 }
 
 // visibilityTable indexes the rows by AttachSubkey.
@@ -102,7 +117,7 @@ func AttachSubkey(class, hookEvent string) string {
 // sent.
 func (t visibilityTable) price(class, hookEvent string, payload []byte) (visible int, calibrated bool) {
 	row, ok := t[AttachSubkey(class, hookEvent)]
-	if !ok || row.mixed() {
+	if !ok || row.mixed() || row.unmeasured() {
 		return 0, false
 	}
 	if !row.Visible {
@@ -114,7 +129,13 @@ func (t visibilityTable) price(class, hookEvent string, payload []byte) (visible
 	}
 	firstField := map[string]string{} // text → the source field that counted it
 	for _, f := range row.SourceFields {
+		if hookRouting(class, f) {
+			continue
+		}
 		walkPath(v, strings.Split(f, "."), func(text string) {
+			if hookControlJSON(class, f, text) {
+				return
+			}
 			if at, dup := firstField[text]; dup && at != f {
 				return
 			}
@@ -123,6 +144,71 @@ func (t visibilityTable) price(class, hookEvent string, payload []byte) (visible
 		})
 	}
 	return visible, true
+}
+
+// hookRouting reports whether a hook record's field is the harness's own
+// routing metadata rather than any text the model could be shown: the tool-use
+// id, the hook's configured command line, and its name (build.go's
+// attachmentLine names the same three).
+//
+// They are excluded because they match a request body by accident. In
+// z35-20260913 the SessionStart hook's command read as visible: it names a
+// /private/tmp scratchpad path that the system prompt carries as the working
+// directory, so a 48-byte window of it is in every request whatever the hook
+// did. In 0qo-20260919 no command of four SessionStart hooks reached any
+// request.
+func hookRouting(class, path string) bool {
+	if !strings.HasPrefix(class, "hook_") {
+		return false
+	}
+	switch path {
+	case "toolUseID", "command", "hookName":
+		return true
+	}
+	return false
+}
+
+// hookControlJSON reports whether a hook record's text is the JSON control
+// object the harness reads instead of showing. A hook that answers with
+// {"hookSpecificOutput":{"additionalContext":"..."}} has its stdout consumed:
+// the harness re-emits the text as its own hook_additional_context record,
+// which this table prices on its own row. Counting the stdout as well would
+// price the same text twice, once escaped and once not.
+//
+// Only the stdout field carries that control object, and only when it holds a
+// key the harness reads. A decoded hook_additional_context record whose own
+// content happens to be JSON-shaped, or a hook's stdout that is a JSON object
+// the harness does not consume, is text the model sees, so it is priced.
+//
+// Measured in 0qo-20260919. Of four SessionStart hooks, the one that printed
+// plain text had every byte of its stdout reach all four requests; of the three
+// whose stdout was a JSON object, two had no byte of it reach any request, and
+// the third matched only a 48-byte window that fell inside a run of prose its
+// own decoded hook_additional_context record carries verbatim.
+func hookControlJSON(class, path, text string) bool {
+	if !strings.HasPrefix(class, "hook_") || path != "stdout" {
+		return false
+	}
+	t := strings.TrimSpace(text)
+	if !strings.HasPrefix(t, "{") {
+		return false
+	}
+	var obj map[string]any
+	if json.Unmarshal([]byte(t), &obj) != nil {
+		return false
+	}
+	for _, k := range hookControlKeys {
+		if _, ok := obj[k]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// hookControlKeys are the top-level keys the harness reads out of a hook's
+// stdout. An object carrying none of them was never consumed as control.
+var hookControlKeys = []string{
+	"hookSpecificOutput", "continue", "stopReason", "suppressOutput", "decision", "systemMessage",
 }
 
 // walkPath calls fn on every string at a source-field path. A segment's
