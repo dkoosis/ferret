@@ -100,6 +100,7 @@ func TestPrice_CountsSourceFieldsOnce(t *testing.T) {
 	table := tableOf([]AttachVisibilityRow{
 		{Class: "hook_success", HookEvent: "SessionStart", Records: 1, MeasuredRecords: 1, VisibleRecords: 1, Visible: true, SourceFields: []string{"content", "stdout"}},
 		{Class: "hook_success", HookEvent: "PreToolUse", Records: 1, MeasuredRecords: 1},
+		{Class: "hook_additional_context", HookEvent: "SessionStart", Records: 1, MeasuredRecords: 1, VisibleRecords: 1, Visible: true, SourceFields: []string{"content"}},
 		{Class: "instructions", Records: 1, MeasuredRecords: 1, VisibleRecords: 1, Visible: true, SourceFields: []string{"files[].content"}},
 		{Class: "prompt_snapshot", Records: 2, MeasuredRecords: 2, VisibleRecords: 1, SourceFields: []string{"systemPrompt[]"}},
 		{Class: "date", Records: 1},
@@ -113,6 +114,10 @@ func TestPrice_CountsSourceFieldsOnce(t *testing.T) {
 		// A hook that answers with the JSON control protocol is priced at 0:
 		// its hook_additional_context record carries the text instead.
 		{"hook_success", "SessionStart", `{"content":"","stdout":"{\"hookSpecificOutput\":{\"additionalContext\":\"abcdef\"}}"}`, 0, true},
+		// Only stdout carries the control object. A decoded
+		// hook_additional_context record whose own content is JSON-shaped is
+		// text the model sees, so it is priced.
+		{"hook_additional_context", "SessionStart", `{"content":"{\"a\":1}"}`, 7, true},
 		{"hook_success", "PreToolUse", `{"stderr":"abcdef"}`, 0, true},
 		{"instructions", "", `{"files":[{"path":"p","content":"abc"},{"content":"de"}]}`, 5, true},
 		{"instructions", "", `{"files":[{"content":"abc"},{"content":"abc"}]}`, 6, true},
@@ -434,7 +439,7 @@ func addedText(r *attachRecord, reqs []capturedRequest, fields map[string]struct
 	}
 	firstPath := map[string]string{} // text → the path that counted it; same rule as price
 	walkLeaves(v, "", func(path, text string) {
-		if len(text) < minLeafText || hookRouting(r.class, path) || hookControlJSON(r.class, text) {
+		if len(text) < minLeafText || hookRouting(r.class, path) || hookControlJSON(r.class, path, text) {
 			return
 		}
 		if at, dup := firstPath[text]; dup && at != path {

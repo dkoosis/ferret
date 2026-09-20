@@ -133,7 +133,7 @@ func (t visibilityTable) price(class, hookEvent string, payload []byte) (visible
 			continue
 		}
 		walkPath(v, strings.Split(f, "."), func(text string) {
-			if hookControlJSON(class, text) {
+			if hookControlJSON(class, f, text) {
 				return
 			}
 			if at, dup := firstField[text]; dup && at != f {
@@ -175,13 +175,17 @@ func hookRouting(class, path string) bool {
 // which this table prices on its own row. Counting the stdout as well would
 // price the same text twice, once escaped and once not.
 //
+// Only the stdout field carries that control object. A decoded
+// hook_additional_context record whose own content happens to be JSON-shaped is
+// text the model does see, so it is priced.
+//
 // Measured in 0qo-20260919. Of four SessionStart hooks, the one that printed
 // plain text had every byte of its stdout reach all four requests; of the three
 // whose stdout was a JSON object, two had no byte of it reach any request, and
 // the third matched only a 48-byte window that fell inside a run of prose its
 // own decoded hook_additional_context record carries verbatim.
-func hookControlJSON(class, text string) bool {
-	if !strings.HasPrefix(class, "hook_") {
+func hookControlJSON(class, path, text string) bool {
+	if !strings.HasPrefix(class, "hook_") || path != "stdout" {
 		return false
 	}
 	t := strings.TrimSpace(text)
