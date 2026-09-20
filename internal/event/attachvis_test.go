@@ -118,6 +118,9 @@ func TestPrice_CountsSourceFieldsOnce(t *testing.T) {
 		// hook_additional_context record whose own content is JSON-shaped is
 		// text the model sees, so it is priced.
 		{"hook_additional_context", "SessionStart", `{"content":"{\"a\":1}"}`, 7, true},
+		// stdout that is a JSON object carrying no control key was never
+		// consumed by the harness, so it is priced too.
+		{"hook_success", "SessionStart", `{"content":"","stdout":"{\"a\":1}"}`, 7, true},
 		{"hook_success", "PreToolUse", `{"stderr":"abcdef"}`, 0, true},
 		{"instructions", "", `{"files":[{"path":"p","content":"abc"},{"content":"de"}]}`, 5, true},
 		{"instructions", "", `{"files":[{"content":"abc"},{"content":"abc"}]}`, 6, true},

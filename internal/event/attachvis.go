@@ -175,9 +175,10 @@ func hookRouting(class, path string) bool {
 // which this table prices on its own row. Counting the stdout as well would
 // price the same text twice, once escaped and once not.
 //
-// Only the stdout field carries that control object. A decoded
-// hook_additional_context record whose own content happens to be JSON-shaped is
-// text the model does see, so it is priced.
+// Only the stdout field carries that control object, and only when it holds a
+// key the harness reads. A decoded hook_additional_context record whose own
+// content happens to be JSON-shaped, or a hook's stdout that is a JSON object
+// the harness does not consume, is text the model sees, so it is priced.
 //
 // Measured in 0qo-20260919. Of four SessionStart hooks, the one that printed
 // plain text had every byte of its stdout reach all four requests; of the three
@@ -193,7 +194,21 @@ func hookControlJSON(class, path, text string) bool {
 		return false
 	}
 	var obj map[string]any
-	return json.Unmarshal([]byte(t), &obj) == nil
+	if json.Unmarshal([]byte(t), &obj) != nil {
+		return false
+	}
+	for _, k := range hookControlKeys {
+		if _, ok := obj[k]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// hookControlKeys are the top-level keys the harness reads out of a hook's
+// stdout. An object carrying none of them was never consumed as control.
+var hookControlKeys = []string{
+	"hookSpecificOutput", "continue", "stopReason", "suppressOutput", "decision", "systemMessage",
 }
 
 // walkPath calls fn on every string at a source-field path. A segment's
