@@ -7,7 +7,7 @@ import (
 )
 
 // attachVisibilityJSON is the ferret-z35 calibration: for each attachment
-// class and hook event one captured Claude Code session produced, whether the
+// class and hook event a captured Claude Code session produced, whether the
 // record's text entered an API request, and from which record fields.
 //
 // Measured, not read off the record. A record's bytes and its own "content"
@@ -16,8 +16,9 @@ import (
 // hook's record of the same shape reached every one. The docs agree for exit-0
 // PreToolUse/PostToolUse hooks; the capture is what checks them.
 //
-// Regenerated from a capture by TestRegenAttachVisibility (attachvis_test.go).
-// A class the capture never produced is absent here and stays uncalibrated.
+// Regenerated from the captures by TestRegenAttachVisibility (attachvis_test.go);
+// cmd/capture-proxy makes one. A class no capture produced is absent here and
+// stays uncalibrated.
 //
 //go:embed attach-visibility.json
 var attachVisibilityJSON []byte
