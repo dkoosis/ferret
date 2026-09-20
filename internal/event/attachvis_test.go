@@ -6,18 +6,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/dkoosis/ferret/internal/transcript"
 )
 
-// ferret-z35. The capture (one Claude Code session through a logging proxy:
-// transcript.jsonl + requests/, never committed) lives under
-// ~/.ferret/calibration/. Regenerate the committed table from it:
+// ferret-z35, ferret-0qo. A capture (one Claude Code session through
+// cmd/capture-proxy: transcript.jsonl + requests/, never committed) lives under
+// ~/.ferret/calibration/. Regenerate the committed table from all of them, the
+// directories joined like $PATH:
 //
-//	FERRET_CALIB_DIR=~/.ferret/calibration/z35-20260913 go test ./internal/event -run TestRegenAttachVisibility
+//	FERRET_CALIB_DIR=~/.ferret/calibration/z35-20260913:~/.ferret/calibration/0qo-20260919 go test ./internal/event -run TestRegenAttachVisibility
 const attachVisibilityPath = "attach-visibility.json"
 
 // Within the ferret-z35 tolerances, per subkey of the capture: a visible one
@@ -153,12 +156,30 @@ func TestAttachmentEvent_CarriesHookEventAndPrice(t *testing.T) {
 	}
 }
 
-func TestRegenAttachVisibility(t *testing.T) {
-	dir := os.Getenv("FERRET_CALIB_DIR")
-	if dir == "" {
-		t.Skip("FERRET_CALIB_DIR unset: regenerating needs the capture, which is never committed")
+// A later capture adds the subkeys it alone saw; a subkey both saw keeps the
+// earlier capture's row, numbers and all.
+func TestMergeRows_LaterCaptureOnlyFillsGaps(t *testing.T) {
+	first := []AttachVisibilityRow{
+		{Class: "instructions", Records: 1, VisibleRecords: 1, Visible: true, SourceFields: []string{"files[].content"}, TextBytes: 10, RecordBytes: 40},
+		{Class: "hook_success", HookEvent: "SessionStart", Records: 1, VisibleRecords: 1, Visible: true, SourceFields: []string{"content"}, TextBytes: 5, RecordBytes: 20},
 	}
-	av, err := deriveVisibility(dir)
+	second := []AttachVisibilityRow{
+		{Class: "hook_success", HookEvent: "SessionStart", Records: 2, SourceFields: []string{"stdout"}, TextBytes: 7, RecordBytes: 30},
+		{Class: "nested_memory", Records: 1, VisibleRecords: 1, Visible: true, SourceFields: []string{"content.content"}, TextBytes: 9, RecordBytes: 50},
+	}
+	got := mergeRows(first, second)
+	want := []AttachVisibilityRow{first[1], first[0], second[1]}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("mergeRows =\n%+v\nwant\n%+v", got, want)
+	}
+}
+
+func TestRegenAttachVisibility(t *testing.T) {
+	dirs := filepath.SplitList(os.Getenv("FERRET_CALIB_DIR"))
+	if len(dirs) == 0 {
+		t.Skip("FERRET_CALIB_DIR unset: regenerating needs the captures, which are never committed")
+	}
+	av, err := deriveVisibility(dirs...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,16 +195,43 @@ func TestRegenAttachVisibility(t *testing.T) {
 	}
 }
 
-func deriveVisibility(dir string) (*AttachVisibility, error) {
+// deriveVisibility builds the table from one or more captures, in order. A
+// later capture adds the subkeys no earlier one measured and changes nothing
+// else (mergeRows).
+func deriveVisibility(dirs ...string) (*AttachVisibility, error) {
+	var (
+		rows    []AttachVisibilityRow
+		names   []string
+		version string
+	)
+	for _, dir := range dirs {
+		captured, v, err := deriveCapture(dir)
+		if err != nil {
+			return nil, err
+		}
+		rows = mergeRows(rows, captured)
+		names = append(names, filepath.Base(dir))
+		version = v // the last capture's: the newest harness the table has seen
+	}
+	return &AttachVisibility{
+		Note: "ferret-z35 attachment visibility, derived from proxy captures: class names, field paths and byte counts only. " +
+			"Regenerate with TestRegenAttachVisibility; the captures themselves are never committed.",
+		Capture: strings.Join(names, "+"), ClaudeCode: version, Subkeys: rows,
+	}, nil
+}
+
+// deriveCapture measures one capture's records against its own requests and
+// prices them off the rows that measurement gives.
+func deriveCapture(dir string) (rows []AttachVisibilityRow, version string, err error) {
 	reqs, err := loadRequests(filepath.Join(dir, "requests"))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	recs, version, err := loadAttachRecords(filepath.Join(dir, "transcript.jsonl"))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	rows := classifyRecords(recs, reqs)
+	rows = classifyRecords(recs, reqs)
 	table := tableOf(rows)
 	for i := range recs {
 		r := &recs[i]
@@ -196,11 +244,25 @@ func deriveVisibility(dir string) (*AttachVisibility, error) {
 		}
 		row.PricedBytes += v
 	}
-	return &AttachVisibility{
-		Note: "ferret-z35 attachment visibility, derived from a proxy capture: class names, field paths and byte counts only. " +
-			"Regenerate with TestRegenAttachVisibility; the capture itself is never committed.",
-		Capture: filepath.Base(dir), ClaudeCode: version, Subkeys: rows,
-	}, nil
+	return rows, version, nil
+}
+
+// mergeRows adds to earlier the subkeys only later measured. A subkey both
+// measured keeps earlier's row untouched: a second capture exists to fill
+// gaps, and where the two disagree the disagreement is a finding to look at
+// (ferret-0qo's trail), not a number to average into the pricing.
+func mergeRows(earlier, later []AttachVisibilityRow) []AttachVisibilityRow {
+	have := tableOf(earlier)
+	merged := append([]AttachVisibilityRow{}, earlier...)
+	for i := range later {
+		if _, ok := have[AttachSubkey(later[i].Class, later[i].HookEvent)]; !ok {
+			merged = append(merged, later[i])
+		}
+	}
+	sort.Slice(merged, func(i, j int) bool {
+		return AttachSubkey(merged[i].Class, merged[i].HookEvent) < AttachSubkey(merged[j].Class, merged[j].HookEvent)
+	})
+	return merged
 }
 
 // capturedRequest is one main-thread request body and its UTC time of day,

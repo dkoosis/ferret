@@ -1,7 +1,7 @@
 {
-  "note": "ferret-z35 attachment visibility, derived from a proxy capture: class names, field paths and byte counts only. Regenerate with TestRegenAttachVisibility; the capture itself is never committed.",
-  "capture": "z35-20260913",
-  "claudeCode": "2.1.270",
+  "note": "ferret-z35 attachment visibility, derived from proxy captures: class names, field paths and byte counts only. Regenerate with TestRegenAttachVisibility; the captures themselves are never committed.",
+  "capture": "z35-20260913+0qo-20260919",
+  "claudeCode": "2.1.278",
   "subkeys": [
     {
       "class": "agent_listing_delta",
@@ -25,6 +25,27 @@
       "recordBytes": 35
     },
     {
+      "class": "deferred_tools_delta",
+      "records": 2,
+      "visibleRecords": 2,
+      "visible": true,
+      "sourceFields": [
+        "addedNames[]"
+      ],
+      "textBytes": 3282,
+      "pricedBytes": 3612,
+      "recordBytes": 8380
+    },
+    {
+      "class": "deferred_tools_record",
+      "records": 1,
+      "visibleRecords": 0,
+      "visible": false,
+      "textBytes": 36,
+      "pricedBytes": 0,
+      "recordBytes": 110
+    },
+    {
       "class": "environment",
       "records": 1,
       "visibleRecords": 1,
@@ -35,6 +56,32 @@
       "textBytes": 110,
       "pricedBytes": 110,
       "recordBytes": 300
+    },
+    {
+      "class": "hook_additional_context",
+      "hookEvent": "SessionStart",
+      "records": 1,
+      "visibleRecords": 1,
+      "visible": true,
+      "sourceFields": [
+        "content[]"
+      ],
+      "textBytes": 8351,
+      "pricedBytes": 8351,
+      "recordBytes": 8637
+    },
+    {
+      "class": "hook_additional_context",
+      "hookEvent": "UserPromptSubmit",
+      "records": 2,
+      "visibleRecords": 2,
+      "visible": true,
+      "sourceFields": [
+        "content[]"
+      ],
+      "textBytes": 1158,
+      "pricedBytes": 1158,
+      "recordBytes": 1498
     },
     {
       "class": "hook_success",
@@ -86,6 +133,16 @@
       "recordBytes": 26335
     },
     {
+      "class": "hook_system_message",
+      "hookEvent": "SessionStart",
+      "records": 1,
+      "visibleRecords": 0,
+      "visible": false,
+      "textBytes": 575,
+      "pricedBytes": 0,
+      "recordBytes": 827
+    },
+    {
       "class": "instructions",
       "records": 1,
       "visibleRecords": 1,
@@ -99,6 +156,18 @@
       "recordBytes": 297
     },
     {
+      "class": "mcp_instructions_delta",
+      "records": 1,
+      "visibleRecords": 1,
+      "visible": true,
+      "sourceFields": [
+        "addedBlocks[]"
+      ],
+      "textBytes": 1926,
+      "pricedBytes": 1926,
+      "recordBytes": 2098
+    },
+    {
       "class": "model",
       "records": 1,
       "visibleRecords": 1,
@@ -109,6 +178,20 @@
       "textBytes": 127,
       "pricedBytes": 127,
       "recordBytes": 254
+    },
+    {
+      "class": "nested_memory",
+      "records": 1,
+      "visibleRecords": 1,
+      "visible": true,
+      "sourceFields": [
+        "content.content",
+        "content.rawContent",
+        "path"
+      ],
+      "textBytes": 5693,
+      "pricedBytes": 5693,
+      "recordBytes": 6138
     },
     {
       "class": "prompt_snapshot",
