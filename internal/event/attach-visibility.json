@@ -6,6 +6,7 @@
     {
       "class": "agent_listing_delta",
       "records": 1,
+      "measuredRecords": 1,
       "visibleRecords": 1,
       "visible": true,
       "sourceFields": [
@@ -18,6 +19,7 @@
     {
       "class": "date",
       "records": 1,
+      "measuredRecords": 0,
       "visibleRecords": 0,
       "visible": false,
       "textBytes": 0,
@@ -27,6 +29,7 @@
     {
       "class": "deferred_tools_delta",
       "records": 2,
+      "measuredRecords": 2,
       "visibleRecords": 2,
       "visible": true,
       "sourceFields": [
@@ -39,6 +42,7 @@
     {
       "class": "deferred_tools_record",
       "records": 1,
+      "measuredRecords": 1,
       "visibleRecords": 0,
       "visible": false,
       "textBytes": 36,
@@ -48,6 +52,7 @@
     {
       "class": "environment",
       "records": 1,
+      "measuredRecords": 1,
       "visibleRecords": 1,
       "visible": true,
       "sourceFields": [
@@ -61,6 +66,7 @@
       "class": "hook_additional_context",
       "hookEvent": "SessionStart",
       "records": 1,
+      "measuredRecords": 1,
       "visibleRecords": 1,
       "visible": true,
       "sourceFields": [
@@ -74,6 +80,7 @@
       "class": "hook_additional_context",
       "hookEvent": "UserPromptSubmit",
       "records": 2,
+      "measuredRecords": 2,
       "visibleRecords": 2,
       "visible": true,
       "sourceFields": [
@@ -87,9 +94,10 @@
       "class": "hook_success",
       "hookEvent": "PostToolUse",
       "records": 14,
+      "measuredRecords": 14,
       "visibleRecords": 0,
       "visible": false,
-      "textBytes": 119924,
+      "textBytes": 118188,
       "pricedBytes": 0,
       "recordBytes": 122773
     },
@@ -97,9 +105,10 @@
       "class": "hook_success",
       "hookEvent": "PreToolUse",
       "records": 14,
+      "measuredRecords": 14,
       "visibleRecords": 0,
       "visible": false,
-      "textBytes": 60816,
+      "textBytes": 59094,
       "pricedBytes": 0,
       "recordBytes": 63644
     },
@@ -107,21 +116,22 @@
       "class": "hook_success",
       "hookEvent": "SessionStart",
       "records": 1,
+      "measuredRecords": 1,
       "visibleRecords": 1,
       "visible": true,
       "sourceFields": [
-        "command",
         "content",
         "stdout"
       ],
-      "textBytes": 8569,
-      "pricedBytes": 8569,
+      "textBytes": 8444,
+      "pricedBytes": 8444,
       "recordBytes": 8785
     },
     {
       "class": "hook_success",
       "hookEvent": "UserPromptSubmit",
       "records": 3,
+      "measuredRecords": 3,
       "visibleRecords": 3,
       "visible": true,
       "sourceFields": [
@@ -136,15 +146,17 @@
       "class": "hook_system_message",
       "hookEvent": "SessionStart",
       "records": 1,
+      "measuredRecords": 1,
       "visibleRecords": 0,
       "visible": false,
-      "textBytes": 575,
+      "textBytes": 539,
       "pricedBytes": 0,
       "recordBytes": 827
     },
     {
       "class": "instructions",
       "records": 1,
+      "measuredRecords": 1,
       "visibleRecords": 1,
       "visible": true,
       "sourceFields": [
@@ -158,6 +170,7 @@
     {
       "class": "mcp_instructions_delta",
       "records": 1,
+      "measuredRecords": 1,
       "visibleRecords": 1,
       "visible": true,
       "sourceFields": [
@@ -170,6 +183,7 @@
     {
       "class": "model",
       "records": 1,
+      "measuredRecords": 1,
       "visibleRecords": 1,
       "visible": true,
       "sourceFields": [
@@ -182,6 +196,7 @@
     {
       "class": "nested_memory",
       "records": 1,
+      "measuredRecords": 1,
       "visibleRecords": 1,
       "visible": true,
       "sourceFields": [
@@ -196,6 +211,7 @@
     {
       "class": "prompt_snapshot",
       "records": 2,
+      "measuredRecords": 2,
       "visibleRecords": 1,
       "visible": false,
       "sourceFields": [
@@ -208,6 +224,7 @@
     {
       "class": "remote_session_change",
       "records": 1,
+      "measuredRecords": 1,
       "visibleRecords": 1,
       "visible": true,
       "sourceFields": [
@@ -221,6 +238,7 @@
     {
       "class": "session_context",
       "records": 1,
+      "measuredRecords": 1,
       "visibleRecords": 1,
       "visible": true,
       "sourceFields": [
@@ -233,6 +251,7 @@
     {
       "class": "skill_listing",
       "records": 1,
+      "measuredRecords": 1,
       "visibleRecords": 1,
       "visible": true,
       "sourceFields": [

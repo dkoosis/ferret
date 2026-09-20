@@ -32,7 +32,7 @@ func checkPricing(rows []AttachVisibilityRow, priced func(*AttachVisibilityRow) 
 	visible, invisible := 0, 0
 	for i := range rows {
 		r := &rows[i]
-		if r.mixed() {
+		if r.mixed() || r.unmeasured() {
 			continue // no single bound applies
 		}
 		got, text := float64(priced(r)), float64(r.TextBytes)
@@ -98,10 +98,11 @@ func TestAttachVisibility_CarriesNoAuth(t *testing.T) {
 
 func TestPrice_CountsSourceFieldsOnce(t *testing.T) {
 	table := tableOf([]AttachVisibilityRow{
-		{Class: "hook_success", HookEvent: "SessionStart", Visible: true, SourceFields: []string{"content", "stdout"}},
-		{Class: "hook_success", HookEvent: "PreToolUse"},
-		{Class: "instructions", Visible: true, SourceFields: []string{"files[].content"}},
-		{Class: "prompt_snapshot", Records: 2, VisibleRecords: 1, SourceFields: []string{"systemPrompt[]"}},
+		{Class: "hook_success", HookEvent: "SessionStart", Records: 1, MeasuredRecords: 1, VisibleRecords: 1, Visible: true, SourceFields: []string{"content", "stdout"}},
+		{Class: "hook_success", HookEvent: "PreToolUse", Records: 1, MeasuredRecords: 1},
+		{Class: "instructions", Records: 1, MeasuredRecords: 1, VisibleRecords: 1, Visible: true, SourceFields: []string{"files[].content"}},
+		{Class: "prompt_snapshot", Records: 2, MeasuredRecords: 2, VisibleRecords: 1, SourceFields: []string{"systemPrompt[]"}},
+		{Class: "date", Records: 1},
 	})
 	cases := []struct {
 		class, hook, payload string
@@ -109,10 +110,16 @@ func TestPrice_CountsSourceFieldsOnce(t *testing.T) {
 		calibrated           bool
 	}{
 		{"hook_success", "SessionStart", `{"content":"abcdef","stdout":"abcdef","command":"x"}`, 6, true},
+		// A hook that answers with the JSON control protocol is priced at 0:
+		// its hook_additional_context record carries the text instead.
+		{"hook_success", "SessionStart", `{"content":"","stdout":"{\"hookSpecificOutput\":{\"additionalContext\":\"abcdef\"}}"}`, 0, true},
 		{"hook_success", "PreToolUse", `{"stderr":"abcdef"}`, 0, true},
 		{"instructions", "", `{"files":[{"path":"p","content":"abc"},{"content":"de"}]}`, 5, true},
 		{"instructions", "", `{"files":[{"content":"abc"},{"content":"abc"}]}`, 6, true},
+		// A JSON-looking string outside a hook class is just text.
+		{"instructions", "", `{"files":[{"content":"{\"a\":1}"}]}`, 7, true},
 		{"prompt_snapshot", "", `{"systemPrompt":["abcdef"]}`, 0, false},
+		{"date", "", `{"date":"2026-09-19"}`, 0, false},
 		{"nested_memory", "", `{"content":"abc"}`, 0, false},
 	}
 	for _, c := range cases {
@@ -126,8 +133,8 @@ func TestPrice_CountsSourceFieldsOnce(t *testing.T) {
 func TestAttachmentEvent_CarriesHookEventAndPrice(t *testing.T) {
 	prev := attachVisibility
 	attachVisibility = tableOf([]AttachVisibilityRow{
-		{Class: "hook_success", HookEvent: "UserPromptSubmit", Visible: true, SourceFields: []string{"stdout"}},
-		{Class: "hook_success", HookEvent: "PreToolUse"},
+		{Class: "hook_success", HookEvent: "UserPromptSubmit", Records: 1, MeasuredRecords: 1, VisibleRecords: 1, Visible: true, SourceFields: []string{"stdout"}},
+		{Class: "hook_success", HookEvent: "PreToolUse", Records: 1, MeasuredRecords: 1},
 	})
 	t.Cleanup(func() { attachVisibility = prev })
 
@@ -156,19 +163,22 @@ func TestAttachmentEvent_CarriesHookEventAndPrice(t *testing.T) {
 	}
 }
 
-// A later capture adds the subkeys it alone saw; a subkey both saw keeps the
-// earlier capture's row, numbers and all.
+// A later capture adds the subkeys it alone saw; a subkey both measured keeps
+// the earlier capture's row, numbers and all. An earlier row that measured
+// nothing is a gap, so a later measured row takes its place.
 func TestMergeRows_LaterCaptureOnlyFillsGaps(t *testing.T) {
 	first := []AttachVisibilityRow{
-		{Class: "instructions", Records: 1, VisibleRecords: 1, Visible: true, SourceFields: []string{"files[].content"}, TextBytes: 10, RecordBytes: 40},
-		{Class: "hook_success", HookEvent: "SessionStart", Records: 1, VisibleRecords: 1, Visible: true, SourceFields: []string{"content"}, TextBytes: 5, RecordBytes: 20},
+		{Class: "instructions", Records: 1, MeasuredRecords: 1, VisibleRecords: 1, Visible: true, SourceFields: []string{"files[].content"}, TextBytes: 10, RecordBytes: 40},
+		{Class: "hook_success", HookEvent: "SessionStart", Records: 1, MeasuredRecords: 1, VisibleRecords: 1, Visible: true, SourceFields: []string{"content"}, TextBytes: 5, RecordBytes: 20},
+		{Class: "environment", Records: 1, RecordBytes: 25},
 	}
 	second := []AttachVisibilityRow{
-		{Class: "hook_success", HookEvent: "SessionStart", Records: 2, SourceFields: []string{"stdout"}, TextBytes: 7, RecordBytes: 30},
-		{Class: "nested_memory", Records: 1, VisibleRecords: 1, Visible: true, SourceFields: []string{"content.content"}, TextBytes: 9, RecordBytes: 50},
+		{Class: "hook_success", HookEvent: "SessionStart", Records: 2, MeasuredRecords: 2, SourceFields: []string{"stdout"}, TextBytes: 7, RecordBytes: 30},
+		{Class: "environment", Records: 1, MeasuredRecords: 1, VisibleRecords: 1, Visible: true, SourceFields: []string{"snapshot.workingDirectory"}, TextBytes: 110, RecordBytes: 300},
+		{Class: "nested_memory", Records: 1, MeasuredRecords: 1, VisibleRecords: 1, Visible: true, SourceFields: []string{"content.content"}, TextBytes: 9, RecordBytes: 50},
 	}
 	got := mergeRows(first, second)
-	want := []AttachVisibilityRow{first[1], first[0], second[1]}
+	want := []AttachVisibilityRow{second[1], first[1], first[0], second[2]}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("mergeRows =\n%+v\nwant\n%+v", got, want)
 	}
@@ -250,13 +260,19 @@ func deriveCapture(dir string) (rows []AttachVisibilityRow, version string, err 
 // mergeRows adds to earlier the subkeys only later measured. A subkey both
 // measured keeps earlier's row untouched: a second capture exists to fill
 // gaps, and where the two disagree the disagreement is a finding to look at
-// (ferret-0qo's trail), not a number to average into the pricing.
+// (ferret-0qo's trail), not a number to average into the pricing. An earlier
+// row that measured nothing is a gap too, so a later row that did measure
+// something replaces it.
 func mergeRows(earlier, later []AttachVisibilityRow) []AttachVisibilityRow {
-	have := tableOf(earlier)
-	merged := append([]AttachVisibilityRow{}, earlier...)
+	merged := make([]AttachVisibilityRow, len(earlier), len(earlier)+len(later))
+	copy(merged, earlier)
+	have := tableOf(merged) // points into merged, which the cap above keeps put
 	for i := range later {
-		if _, ok := have[AttachSubkey(later[i].Class, later[i].HookEvent)]; !ok {
+		switch prev, ok := have[AttachSubkey(later[i].Class, later[i].HookEvent)]; {
+		case !ok:
 			merged = append(merged, later[i])
+		case prev.unmeasured() && !later[i].unmeasured():
+			*prev = later[i]
 		}
 	}
 	sort.Slice(merged, func(i, j int) bool {
@@ -371,6 +387,10 @@ func classifyRecords(recs []attachRecord, reqs []capturedRequest) []AttachVisibi
 		row.Records++
 		row.RecordBytes += len(r.payload)
 		added, all := addedText(r, reqs, fields[k])
+		if all == 0 {
+			continue // carried nothing long enough to look for: no evidence
+		}
+		row.MeasuredRecords++
 		if added > 0 {
 			row.VisibleRecords++
 			row.TextBytes += added
@@ -380,7 +400,7 @@ func classifyRecords(recs []attachRecord, reqs []capturedRequest) []AttachVisibi
 	}
 	rows := make([]AttachVisibilityRow, 0, len(bySubkey))
 	for k, row := range bySubkey {
-		row.Visible = row.VisibleRecords*2 > row.Records
+		row.Visible = row.VisibleRecords*2 > row.MeasuredRecords
 		for f := range fields[k] {
 			row.SourceFields = append(row.SourceFields, f)
 		}
@@ -414,7 +434,7 @@ func addedText(r *attachRecord, reqs []capturedRequest, fields map[string]struct
 	}
 	firstPath := map[string]string{} // text → the path that counted it; same rule as price
 	walkLeaves(v, "", func(path, text string) {
-		if len(text) < minLeafText {
+		if len(text) < minLeafText || hookRouting(r.class, path) || hookControlJSON(r.class, text) {
 			return
 		}
 		if at, dup := firstPath[text]; dup && at != path {
