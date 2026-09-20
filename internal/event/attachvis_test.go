@@ -203,11 +203,15 @@ func TestFormatCaptureRows_ShowsEachCaptureBySubkey(t *testing.T) {
 	names := []string{"cap-a", "cap-b"}
 	captures := [][]AttachVisibilityRow{
 		{
-			{Class: "hook_success", HookEvent: "SessionStart", Records: 1, MeasuredRecords: 1, VisibleRecords: 1, Visible: true, SourceFields: []string{"content", "stdout"}},
+			{Class: "hook_success", HookEvent: "SessionStart", Records: 1, MeasuredRecords: 1, VisibleRecords: 1, Visible: true, TextBytes: 90, PricedBytes: 80, RecordBytes: 300, SourceFields: []string{"content", "stdout"}},
 			{Class: "environment", Records: 1},
+			{Class: "skill_listing", Records: 2, MeasuredRecords: 2, VisibleRecords: 2, Visible: true, TextBytes: 500, PricedBytes: 500, RecordBytes: 900, SourceFields: []string{"content"}},
 		},
 		{
-			{Class: "hook_success", HookEvent: "SessionStart", Records: 4, MeasuredRecords: 4, VisibleRecords: 2, SourceFields: []string{"stdout"}},
+			{Class: "hook_success", HookEvent: "SessionStart", Records: 4, MeasuredRecords: 4, VisibleRecords: 2, TextBytes: 12, PricedBytes: 10, RecordBytes: 200, SourceFields: []string{"stdout"}},
+			// Same counts and source fields as cap-a, different bytes: the case
+			// mergeRows hides by keeping the first capture's row.
+			{Class: "skill_listing", Records: 2, MeasuredRecords: 2, VisibleRecords: 2, Visible: true, TextBytes: 640, PricedBytes: 610, RecordBytes: 1100, SourceFields: []string{"content"}},
 		},
 	}
 	got := formatCaptureRows(names, captures)
@@ -221,10 +225,12 @@ func TestFormatCaptureRows_ShowsEachCaptureBySubkey(t *testing.T) {
 		rows[subkey+" "+f[0]] = strings.Join(f[1:], " ")
 	}
 	want := map[string]string{
-		"environment cap-a":               "1 0 0 false -",
+		"environment cap-a":               "1 0 0 false 0 0 0 -",
 		"environment cap-b":               "not seen",
-		"hook_success/SessionStart cap-a": "1 1 1 true content,stdout",
-		"hook_success/SessionStart cap-b": "4 4 2 false stdout",
+		"hook_success/SessionStart cap-a": "1 1 1 true 90 80 300 content,stdout",
+		"hook_success/SessionStart cap-b": "4 4 2 false 12 10 200 stdout",
+		"skill_listing cap-a":             "2 2 2 true 500 500 900 content",
+		"skill_listing cap-b":             "2 2 2 true 640 610 1100 content",
 	}
 	if !reflect.DeepEqual(rows, want) {
 		t.Errorf("rows = %q\nwant %q\nfull output:\n%s", rows, want, got)
@@ -346,7 +352,7 @@ func formatCaptureRows(names []string, captures [][]AttachVisibilityRow) string 
 
 	var buf bytes.Buffer
 	w := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "subkey\tcapture\trecords\tmeasured\tvisible\tvisible?\tsource fields")
+	fmt.Fprintln(w, "subkey\tcapture\trecords\tmeasured\tvisible\tvisible?\ttext\tpriced\trecord\tsource fields")
 	for _, k := range subkeys {
 		label := k
 		for i, name := range names {
@@ -355,11 +361,13 @@ func formatCaptureRows(names []string, captures [][]AttachVisibilityRow) string 
 				if len(r.SourceFields) > 0 {
 					src = strings.Join(r.SourceFields, ",")
 				}
-				fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%d\t%t\t%s\n", label, name, r.Records, r.MeasuredRecords, r.VisibleRecords, r.Visible, src)
+				fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%d\t%t\t%d\t%d\t%d\t%s\n", label, name,
+					r.Records, r.MeasuredRecords, r.VisibleRecords, r.Visible,
+					r.TextBytes, r.PricedBytes, r.RecordBytes, src)
 			} else {
 				// Empty cells keep the row as wide as the others, or tabwriter
 				// ends the column block here and the table loses its alignment.
-				fmt.Fprintf(w, "%s\t%s\tnot seen\t\t\t\t\n", label, name)
+				fmt.Fprintf(w, "%s\t%s\tnot seen\t\t\t\t\t\t\t\n", label, name)
 			}
 			label = ""
 		}
