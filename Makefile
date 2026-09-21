@@ -58,7 +58,7 @@ race: ## Run tests with race detector (fresh run)
 # Fleet gate (sd-th5.22): conform pinned as a go.mod tool dependency
 # (go.sum-verified); bumping the pin is a deliberate PR.
 selfcheck: ## Run conform (fleet SDLC checker) against this repo
-	go tool conform
+	go tool conform-to-sdlc
 
 build: ## Compile everything
 	go build ./...
