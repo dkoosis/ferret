@@ -2,7 +2,6 @@ package analyst
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -31,7 +30,7 @@ func (maxTokensDoer) Do(req *http.Request) (*http.Response, error) {
 // real token usage (not Usage{}), so analyst.Hop1's burn accounting stays honest.
 func TestRunCoveragePreservesUsageOnTruncation(t *testing.T) {
 	cfg := Config{APIKey: "sk-test", HTTPClient: maxTokensDoer{}}
-	_, usage, err := RunCoverage(context.Background(), cfg, "ep-1", "prompt text", "query text")
+	_, usage, err := RunCoverage(t.Context(), cfg, "ep-1", "prompt text", "query text")
 	if !errors.Is(err, ErrTruncatedResponse) {
 		t.Fatalf("err = %v; want ErrTruncatedResponse", err)
 	}

@@ -165,7 +165,7 @@ func TestHop1LoopContinuesPastPerEpisodeError(t *testing.T) {
 		return analyst.Hop1Result{Episode: id, Grade: analyst.Hop1High, LLMCalled: true}, nil
 	}
 
-	rows, anyErr := runHop1Episodes(context.Background(), analyst.Config{}, eps, judge)
+	rows, anyErr := runHop1Episodes(t.Context(), analyst.Config{}, eps, judge)
 	if len(rows) != 3 {
 		t.Fatalf("want all 3 episodes reported, got %d", len(rows))
 	}
@@ -216,7 +216,7 @@ func TestHop1FanOutPreservesOrderAndBoundsConcurrency(t *testing.T) {
 		return analyst.Hop1Result{Episode: id, Grade: analyst.Hop1High, LLMCalled: true}, nil
 	}
 
-	rows, anyErr := runHop1Episodes(context.Background(), analyst.Config{}, eps, judge)
+	rows, anyErr := runHop1Episodes(t.Context(), analyst.Config{}, eps, judge)
 	if anyErr {
 		t.Fatal("anyErr = true, want false")
 	}
