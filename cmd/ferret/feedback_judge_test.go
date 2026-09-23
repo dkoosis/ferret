@@ -72,7 +72,7 @@ func TestRunFeedbackJudge_DisagreementFires(t *testing.T) {
 			{NugID: "n2", Grade: analyst.GradeIrrelevant},
 		}}, nil
 	}
-	got, err := runFeedbackJudge(context.Background(), analyst.Config{}, fake, fixedRNG(),
+	got, err := runFeedbackJudge(t.Context(), analyst.Config{}, fake, fixedRNG(),
 		"evt-1", res, events, nil, []analyst.NugCandidate{{ID: "n1", Text: "t1"}, {ID: "n2", Text: "t2"}})
 	if err != nil {
 		t.Fatalf("runFeedbackJudge: %v", err)
@@ -99,7 +99,7 @@ func TestRunFeedbackJudge_AgreementSilent(t *testing.T) {
 			{NugID: "n2", Grade: analyst.GradeIrrelevant},
 		}}, nil
 	}
-	got, err := runFeedbackJudge(context.Background(), analyst.Config{}, fake, fixedRNG(),
+	got, err := runFeedbackJudge(t.Context(), analyst.Config{}, fake, fixedRNG(),
 		"evt-1", res, events, nil, []analyst.NugCandidate{{ID: "n1", Text: "t1"}, {ID: "n2", Text: "t2"}})
 	if err != nil {
 		t.Fatalf("runFeedbackJudge: %v", err)
@@ -119,7 +119,7 @@ func TestRunFeedbackJudge_UnclassifiableNoOp(t *testing.T) {
 			{NugID: "some-unreturned-id", Grade: analyst.GradeExact},
 		}}, nil
 	}
-	got, err := runFeedbackJudge(context.Background(), analyst.Config{}, fake, fixedRNG(),
+	got, err := runFeedbackJudge(t.Context(), analyst.Config{}, fake, fixedRNG(),
 		"evt-1", res, events, nil, []analyst.NugCandidate{{ID: "n1", Text: "t1"}})
 	if err != nil {
 		t.Fatalf("runFeedbackJudge: %v", err)
@@ -136,7 +136,7 @@ func TestRunFeedbackJudge_JudgeErrorSurfaces(t *testing.T) {
 	fake := func(ctx context.Context, cfg analyst.Config, episode, prompt, query string, candidates []analyst.NugCandidate) (analyst.RelevanceResult, error) {
 		return analyst.RelevanceResult{}, errJudgeBoom
 	}
-	got, err := runFeedbackJudge(context.Background(), analyst.Config{}, fake, fixedRNG(),
+	got, err := runFeedbackJudge(t.Context(), analyst.Config{}, fake, fixedRNG(),
 		"evt-1", res, events, nil, []analyst.NugCandidate{{ID: "n1", Text: "t1"}})
 	if err == nil {
 		t.Fatal("a judge error must surface, not be swallowed")
@@ -157,7 +157,7 @@ func TestRunFeedbackJudge_NoMatchingRecordNoOp(t *testing.T) {
 		called = true
 		return analyst.RelevanceResult{}, nil
 	}
-	got, err := runFeedbackJudge(context.Background(), analyst.Config{}, fake, fixedRNG(),
+	got, err := runFeedbackJudge(t.Context(), analyst.Config{}, fake, fixedRNG(),
 		"evt-does-not-exist", res, events, nil, nil)
 	if err != nil {
 		t.Fatalf("runFeedbackJudge: %v", err)
@@ -186,7 +186,7 @@ func TestRunFeedbackJudge_ShuffleIsDeterministicPerSeed(t *testing.T) {
 			}
 			return analyst.RelevanceResult{}, nil
 		}
-		_, err := runFeedbackJudge(context.Background(), analyst.Config{}, fake,
+		_, err := runFeedbackJudge(t.Context(), analyst.Config{}, fake,
 			rand.New(rand.NewSource(seed)), "evt-1", res, events, nil, cands)
 		if err != nil {
 			t.Fatalf("runFeedbackJudge: %v", err)

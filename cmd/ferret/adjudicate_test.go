@@ -197,7 +197,7 @@ func TestJudgeRecallRuns_PreservesOrder(t *testing.T) {
 		return []analyst.Finding{{Task: r.RunID}}, "test-model", nil
 	}
 
-	res, err := judgeRecallRuns(context.Background(), runs, judge)
+	res, err := judgeRecallRuns(t.Context(), runs, judge)
 	if err != nil {
 		t.Fatalf("judgeRecallRuns: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestJudgeRecallRuns_FailFastErrorSurfaces(t *testing.T) {
 		return []analyst.Finding{{Task: r.RunID}}, "test-model", nil
 	}
 
-	_, err := judgeRecallRuns(context.Background(), runs, judge)
+	_, err := judgeRecallRuns(t.Context(), runs, judge)
 	if err == nil {
 		t.Fatal("expected error to surface, got nil")
 	}
@@ -254,7 +254,7 @@ func TestJudgeRecallRuns_BoundsConcurrency(t *testing.T) {
 		return []analyst.Finding{{Task: r.RunID}}, "test-model", nil
 	}
 
-	if _, err := judgeRecallRuns(context.Background(), runs, judge); err != nil {
+	if _, err := judgeRecallRuns(t.Context(), runs, judge); err != nil {
 		t.Fatalf("judgeRecallRuns: %v", err)
 	}
 	if got := atomic.LoadInt64(&maxInFlight); got > 8 {
@@ -274,7 +274,7 @@ func TestJudgeRecallRuns_StopsLaunchingAfterCancel(t *testing.T) {
 	const maxConcurrency = 8 // mirrors judgeRecallRuns' internal semaphore size
 	runs := recallRunsWithFragments(n)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	release := make(chan struct{})

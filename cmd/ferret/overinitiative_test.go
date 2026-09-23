@@ -31,7 +31,7 @@ func TestJudgeOverInitiativeFanOutPreservesOrder(t *testing.T) {
 		return analyst.OverInitiativeVerdict{OverInitiative: true, Why: prompt}, "test-model", nil
 	}
 
-	res, err := judgeOverInitiative(context.Background(), analyst.Config{}, "s", cands, 0)
+	res, err := judgeOverInitiative(t.Context(), analyst.Config{}, "s", cands, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestJudgeOverInitiativeFailFast(t *testing.T) {
 		return analyst.OverInitiativeVerdict{}, "m", nil
 	}
 
-	_, err := judgeOverInitiative(context.Background(), analyst.Config{}, "s", cands, 0)
+	_, err := judgeOverInitiative(t.Context(), analyst.Config{}, "s", cands, 0)
 	if !errors.Is(err, errOverInitTestJudge) {
 		t.Fatalf("err = %v, want wrapped errOverInitTestJudge", err)
 	}

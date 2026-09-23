@@ -1,7 +1,6 @@
 package analyst
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -16,7 +15,7 @@ import (
 // return ErrNoAPIKey and the assertion would fail.
 func TestHop1FloorsOnSelfRequery(t *testing.T) {
 	t.Setenv("FERRET_ANTHROPIC_API_KEY", "")
-	got, err := Hop1(context.Background(), Config{}, "ep1", score.Episode{SelfRequery: true, Prompt: "find x", Query: "x"})
+	got, err := Hop1(t.Context(), Config{}, "ep1", score.Episode{SelfRequery: true, Prompt: "find x", Query: "x"})
 	if err != nil {
 		t.Fatalf("Hop1: unexpected err %v", err)
 	}
@@ -27,7 +26,7 @@ func TestHop1FloorsOnSelfRequery(t *testing.T) {
 
 func TestHop1FloorsOnRetryMotif(t *testing.T) {
 	t.Setenv("FERRET_ANTHROPIC_API_KEY", "")
-	got, err := Hop1(context.Background(), Config{}, "ep1", score.Episode{RetryMotif: true, Prompt: "find x", Query: "x"})
+	got, err := Hop1(t.Context(), Config{}, "ep1", score.Episode{RetryMotif: true, Prompt: "find x", Query: "x"})
 	if err != nil {
 		t.Fatalf("Hop1: unexpected err %v", err)
 	}
@@ -40,7 +39,7 @@ func TestHop1FloorsOnRetryMotif(t *testing.T) {
 // prompt has nothing to judge — no grade, no call, no error.
 func TestHop1NoSignalWhenPromptEmpty(t *testing.T) {
 	t.Setenv("FERRET_ANTHROPIC_API_KEY", "")
-	got, err := Hop1(context.Background(), Config{}, "ep1", score.Episode{Prompt: "", Query: "x"})
+	got, err := Hop1(t.Context(), Config{}, "ep1", score.Episode{Prompt: "", Query: "x"})
 	if err != nil {
 		t.Fatalf("Hop1: unexpected err %v", err)
 	}
@@ -54,7 +53,7 @@ func TestHop1NoSignalWhenPromptEmpty(t *testing.T) {
 // surfaces ErrNoAPIKey unchanged (the --emit-prompt escape hatch is the CLI's).
 func TestHop1WithoutAPIKeyReturnsErrNoAPIKey(t *testing.T) {
 	t.Setenv("FERRET_ANTHROPIC_API_KEY", "")
-	_, err := Hop1(context.Background(), Config{}, "ep1", score.Episode{Prompt: "find the loto rules", Query: "loto"})
+	_, err := Hop1(t.Context(), Config{}, "ep1", score.Episode{Prompt: "find the loto rules", Query: "loto"})
 	if !errors.Is(err, ErrNoAPIKey) {
 		t.Errorf("err = %v, want ErrNoAPIKey", err)
 	}
@@ -98,7 +97,7 @@ func TestHop1RulesHashPinned(t *testing.T) {
 // with a nil LLM leg — deterministic verdict, versioned all the same.
 func TestHop1FloorFingerprint(t *testing.T) {
 	t.Setenv("FERRET_ANTHROPIC_API_KEY", "")
-	got, err := Hop1(context.Background(), Config{}, "ep1", score.Episode{SelfRequery: true, Prompt: "find x", Query: "x"})
+	got, err := Hop1(t.Context(), Config{}, "ep1", score.Episode{SelfRequery: true, Prompt: "find x", Query: "x"})
 	if err != nil {
 		t.Fatalf("Hop1: unexpected err %v", err)
 	}
@@ -116,7 +115,7 @@ func TestHop1FloorFingerprint(t *testing.T) {
 // which judge was CONSULTED, and the no-key error fires after that decision.
 func TestHop1EscalationFingerprintCarriesLLM(t *testing.T) {
 	t.Setenv("FERRET_ANTHROPIC_API_KEY", "")
-	got, err := Hop1(context.Background(), Config{}, "ep1", score.Episode{Prompt: "find the loto rules", Query: "loto"})
+	got, err := Hop1(t.Context(), Config{}, "ep1", score.Episode{Prompt: "find the loto rules", Query: "loto"})
 	if !errors.Is(err, ErrNoAPIKey) {
 		t.Fatalf("err = %v, want ErrNoAPIKey", err)
 	}
