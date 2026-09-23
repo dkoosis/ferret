@@ -37,7 +37,7 @@ func TestCompleteRespectsOperatorTimeout(t *testing.T) {
 	cfg := Config{APIKey: "sk-test", Timeout: 50 * time.Millisecond, HTTPClient: hangingDoer{}}
 
 	start := time.Now()
-	_, _, _, err := complete(context.Background(), cfg, "system", "user")
+	_, _, _, err := complete(t.Context(), cfg, "system", "user")
 	elapsed := time.Since(start)
 
 	if err == nil {
@@ -54,7 +54,7 @@ func TestCompleteRespectsOperatorTimeout(t *testing.T) {
 // wedged analyst run without a hard kill.
 func TestCompleteCancelsOnContextCancel(t *testing.T) {
 	cfg := Config{APIKey: "sk-test", HTTPClient: hangingDoer{}}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		cancel()

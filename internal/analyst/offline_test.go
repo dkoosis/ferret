@@ -2,7 +2,6 @@ package analyst
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"net/http"
 	"os"
@@ -82,7 +81,7 @@ func TestComplete_ReturnsErrOffline_WithoutTouchingKeychainOrNetwork(t *testing.
 	t.Run("via Config.Offline", func(t *testing.T) {
 		guardKeychain(t)
 		cfg := Config{Offline: true, HTTPClient: failDoer{t: t}}
-		_, _, _, err := complete(context.Background(), cfg, "system", "user")
+		_, _, _, err := complete(t.Context(), cfg, "system", "user")
 		if !errors.Is(err, ErrOffline) {
 			t.Fatalf("complete() err = %v, want ErrOffline", err)
 		}
@@ -92,7 +91,7 @@ func TestComplete_ReturnsErrOffline_WithoutTouchingKeychainOrNetwork(t *testing.
 		guardKeychain(t)
 		t.Setenv(EnvOffline, "1")
 		cfg := Config{HTTPClient: failDoer{t: t}}
-		_, _, _, err := complete(context.Background(), cfg, "system", "user")
+		_, _, _, err := complete(t.Context(), cfg, "system", "user")
 		if !errors.Is(err, ErrOffline) {
 			t.Fatalf("complete() err = %v, want ErrOffline", err)
 		}
