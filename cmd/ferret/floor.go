@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 
 	"github.com/dkoosis/ferret/internal/floor"
@@ -155,7 +156,7 @@ func writeFloorText(w io.Writer, rep floor.Report, limit, maxBytes int) error {
 		sink.Head("%d transcripts skipped (unreadable)", rep.DecodeErrs)
 	}
 
-	sessions := append([]floor.Session(nil), rep.Sessions...)
+	sessions := slices.Clone(rep.Sessions)
 	sort.SliceStable(sessions, func(i, j int) bool { return sessions[i].Share(ruleBytes) > sessions[j].Share(ruleBytes) })
 
 	sink.Head("sessions ranked by floor share (worst first):")

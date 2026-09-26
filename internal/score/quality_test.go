@@ -2,6 +2,7 @@ package score
 
 import (
 	"math"
+	"slices"
 	"testing"
 
 	"github.com/dkoosis/ferret/internal/conform"
@@ -135,9 +136,9 @@ func TestScoreAxesWithConformNilFallsBack(t *testing.T) {
 		{Index: 1, FirstCall: -1, LastCall: -1},                        // owns no calls
 		{Index: 2, FirstCall: 1, LastCall: 2, Shape: []string{"Read", "Edit"}},
 	}
-	free := Result{Segments: append([]Segment(nil), segs...)}
+	free := Result{Segments: slices.Clone(segs)}
 	ScoreAxes(&free)
-	enriched := Result{Segments: append([]Segment(nil), segs...)}
+	enriched := Result{Segments: slices.Clone(segs)}
 	ScoreAxesWithConform(&enriched, nil)
 	if mustMarshal(t, free) != mustMarshal(t, enriched) {
 		t.Errorf("nil-spec ScoreAxesWithConform diverged from ScoreAxes:\nfree     %s\nenriched %s",

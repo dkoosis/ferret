@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/dkoosis/ferret/internal/retrievalevent"
@@ -129,7 +130,7 @@ func TestScanNewLinesLeavesTornLineUnconsumed(t *testing.T) {
 		t.Fatal(err)
 	}
 	// One complete line, then a torn (no trailing \n) partial line.
-	content := append(append([]byte{}, b...), '\n')
+	content := slices.Concat(b, []byte{'\n'})
 	content = append(content, []byte(`{"schema_version":1,"kind":"search","event_id":"evt-b"`)...)
 	if err := os.WriteFile(path, content, 0o644); err != nil {
 		t.Fatal(err)

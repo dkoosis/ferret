@@ -2,6 +2,7 @@ package mine
 
 import (
 	"maps"
+	"slices"
 	"testing"
 )
 
@@ -379,8 +380,8 @@ func TestAttachOddsRatioSurfacesLowBurnHighSignalMotif(t *testing.T) {
 		padIdx[k] = StreamDialogue{Outcome: "success"}
 	}
 
-	allStreams := append(append(append([][]tb{}, badStreams...), priceyStreams...), padStreams...)
-	allKeys := append(append(append([]string{}, badKeys...), priceyKeys...), padKeys...)
+	allStreams := slices.Concat(badStreams, priceyStreams, padStreams)
+	allKeys := slices.Concat(badKeys, priceyKeys, padKeys)
 	c := bytesCorpusKeyed(allStreams, allKeys)
 
 	idx := map[string]StreamDialogue{}

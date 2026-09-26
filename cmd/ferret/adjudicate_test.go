@@ -240,24 +240,24 @@ func TestJudgeRecallRuns_FailFastErrorSurfaces(t *testing.T) {
 func TestJudgeRecallRuns_BoundsConcurrency(t *testing.T) {
 	const n = 24
 	runs := recallRunsWithFragments(n)
-	var inFlight, maxInFlight int64
+	var inFlight, maxInFlight atomic.Int64
 	judge := func(_ context.Context, r recallRun) ([]analyst.Finding, string, error) {
-		cur := atomic.AddInt64(&inFlight, 1)
+		cur := inFlight.Add(1)
 		for {
-			m := atomic.LoadInt64(&maxInFlight)
-			if cur <= m || atomic.CompareAndSwapInt64(&maxInFlight, m, cur) {
+			m := maxInFlight.Load()
+			if cur <= m || maxInFlight.CompareAndSwap(m, cur) {
 				break
 			}
 		}
 		time.Sleep(5 * time.Millisecond)
-		atomic.AddInt64(&inFlight, -1)
+		inFlight.Add(-1)
 		return []analyst.Finding{{Task: r.RunID}}, "test-model", nil
 	}
 
 	if _, err := judgeRecallRuns(context.Background(), runs, judge); err != nil {
 		t.Fatalf("judgeRecallRuns: %v", err)
 	}
-	if got := atomic.LoadInt64(&maxInFlight); got > 8 {
+	if got := maxInFlight.Load(); got > 8 {
 		t.Errorf("max concurrent judge calls = %d, want <= 8", got)
 	}
 }

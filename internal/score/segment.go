@@ -3,6 +3,7 @@ package score
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -385,7 +386,7 @@ func (s *segmenter) result(src transcript.Source) Result {
 		totalIn += s.segs[i].InBytes
 		totalOut += s.segs[i].OutBytes
 	}
-	segs := append([]Segment(nil), s.segs...)
+	segs := slices.Clone(s.segs)
 	return Result{
 		Session:    src.Session,
 		Project:    src.Project,

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -170,7 +171,7 @@ func TestBuildHomeScoreboard_WasteIsUnionOfMisfireAndPoll_When_LedgerIsEmpty(t *
 	}
 	pollRep = filterWasteReport(pollRep, mine.WasteRepeat)
 
-	union := append(append([]mine.WasteRow{}, misRep.Rows...), pollRep.Rows...)
+	union := slices.Concat(misRep.Rows, pollRep.Rows)
 	if len(union) == 0 {
 		t.Fatal("independent misfire ∪ poll replay is empty — fixture is broken")
 	}
