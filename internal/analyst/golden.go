@@ -30,6 +30,7 @@ package analyst
 import (
 	"math"
 	"math/rand"
+	"slices"
 )
 
 // relevantGrade is the cut for the binary set metrics (R4, R5): grade >= 2
@@ -160,7 +161,7 @@ func NDCGAtK(returned []string, grades map[string]RelGrade, k int) float64 {
 	}
 	dcg := discountedSum(gains)
 
-	ideal := append([]float64(nil), gains...)
+	ideal := slices.Clone(gains)
 	// Sort descending (insertion sort — n is tiny, k results).
 	for i := 1; i < len(ideal); i++ {
 		for j := i; j > 0 && ideal[j] > ideal[j-1]; j-- {
