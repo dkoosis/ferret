@@ -479,6 +479,15 @@ var CLI struct {
 		Signatures string `help:"Known-signatures JSONL file (default: <data>/friction_signatures.jsonl; absent = learn signatures from the corpus)." name:"signatures"`
 	} `cmd:"" help:"Friction-recurrence detector: flag the 2nd+ occurrence of a known friction signature (normalized command/error fingerprint). Emits match records for the /wrap trap-graduation prompt."`
 
+	Signatures struct {
+		Seed struct {
+			Data       string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
+			Nugs       string `help:"mnemd nugbase root to read friction nugs from." env:"MNEMD_NUGBASE" required:"" name:"nugs"`
+			Signatures string `help:"Known-signatures JSONL to seed (default: <data>/friction_signatures.jsonl)." name:"signatures"`
+			Format     string `help:"Output format: text|json." default:"text" name:"format"`
+		} `cmd:"" help:"Seed the known-signatures file from friction nugs: one signature per nug, fingerprinted from its tool: clause, so 'ferret recurrence' flags a recorded trap's first fresh sighting as occurrence 2."`
+	} `cmd:"" help:"Known friction signatures: the set 'ferret recurrence' matches fresh failures against."`
+
 	Emit struct {
 		Data       string  `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
 		Root       string  `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
@@ -638,6 +647,8 @@ func main() {
 		err = cmdReach()
 	case "recurrence":
 		err = cmdRecurrence()
+	case "signatures seed":
+		err = cmdSignaturesSeed()
 	case "emit":
 		err = cmdEmit()
 	default:

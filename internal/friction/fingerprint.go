@@ -37,13 +37,16 @@ import (
 // Masking order is load-bearing — earlier masks consume characters later masks
 // would otherwise misread (a quoted literal may contain a path; a timestamp
 // contains numbers; a path segment may itself be a hex SHA). The fixed order is:
-// quoted literals, timestamps, UUIDs, paths, hex hashes, then bare numbers.
+// quoted literals, command substitutions, timestamps, UUIDs, paths, hex hashes,
+// then bare numbers. Substitutions run after quoted literals so a quote inside
+// $(...) is already <str> and cannot hide the closing paren.
 // Paths run before hashes so a path with a hex-looking segment masks whole to
 // <path> rather than fragmenting. Finally whitespace is collapsed and the result
 // lower-cased so casing and spacing never fork a signature.
 func Fingerprint(raw string) string {
 	s := raw
 	s = reQuoted.ReplaceAllString(s, "<str>")
+	s = reSubst.ReplaceAllString(s, "<sub>")
 	s = reTimestamp.ReplaceAllString(s, "<ts>")
 	s = reUUID.ReplaceAllString(s, "<uuid>")
 	s = rePath.ReplaceAllString(s, "${1}<path>")
@@ -125,6 +128,13 @@ var (
 	// reQuoted masks single- or double-quoted literals whole — their interior
 	// (filenames, messages, values) is the most volatile part of a command.
 	reQuoted = regexp.MustCompile(`"[^"]*"|'[^']*'`)
+
+	// reSubst masks a $(...) command substitution whole (one level of nested
+	// parens allowed): what it computes is as volatile as a quoted literal, and
+	// a friction nug's tool: clause names it by role (`$(pipeline)`), never by
+	// the exact pipeline, so the seeded and live fingerprints meet only if both
+	// collapse to <sub>.
+	reSubst = regexp.MustCompile(`\$\((?:[^()]|\([^()]*\))*\)`)
 
 	// reTimestamp masks ISO-8601-ish timestamps and bare clock times so a log
 	// line that differs only by when it was emitted fingerprints identically.

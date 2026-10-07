@@ -71,6 +71,7 @@ var commandSurfaces = map[string]cmdSurface{
 	"feedback answer": {kind: surfaceHook},
 	"emit":            {kind: surfaceHook},
 	"recurrence":      {kind: surfaceHook},
+	"signatures seed": {kind: surfaceLocal},
 
 	// Everything else reads local artifacts and transcripts.
 	"ingest":          {kind: surfaceLocal},

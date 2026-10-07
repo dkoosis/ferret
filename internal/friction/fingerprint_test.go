@@ -175,3 +175,18 @@ func TestFingerprintDistinguishesDifferentFriction(t *testing.T) {
 		t.Errorf("distinct friction collapsed to one fingerprint: %q", a)
 	}
 }
+
+// TestFingerprintMasksCommandSubstitution: a $(...) is masked whole, so a
+// friction nug naming the substitution by role ($(pipeline)) and the live
+// failure carrying the real pipeline fingerprint identically.
+func TestFingerprintMasksCommandSubstitution(t *testing.T) {
+	nug := Fingerprint(`bd_update bd update --description $(pipeline)`)
+	live := Fingerprint(`bd_update bd update --description $(awk -v body="$x" '{print}' f | sed -n '1,$p')`)
+	nested := Fingerprint(`bd_update bd update --description $(cat $(ls f))`)
+	if nug != live || nug != nested {
+		t.Errorf("substitutions did not collapse:\n nug    %q\n live   %q\n nested %q", nug, live, nested)
+	}
+	if want := "bd_update bd update --description <sub>"; nug != want {
+		t.Errorf("got %q, want %q", nug, want)
+	}
+}
