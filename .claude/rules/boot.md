@@ -1,5 +1,5 @@
 # Boot
-updated: 2026-09-07
+updated: 2026-10-07
 
 *Project working-memory. Maintained for future-me: current state + live frontier + traps that still bite. Resolved lanes pruned — history lives in beads/PRs.*
 
@@ -38,7 +38,8 @@ Phases 1–4 ALL CLOSED. ferret-097 (close the loop: rank burners/misfires, tune
 Dry fenced grants, zero corrections → trust-the-loop. Surface deviations, ✗ ask permission mid-build. On **open design** dk drives + wants the *why* before a model-changing/destructive call; hand him the approve/merge fork crisply (he ends on "next?"). When dk states a ground-truth fact, verify-then-proceed — ✗ re-litigate.
 
 ## Loose thread
-- read-before-edit/write hookify guard — RESOLVED 2026-09-07 (ferret-kk7). `read-before-edit@cc-plugins` is enabled in `~/.claude/settings.json`; verified live that an Edit on a file unread this session is refused and the same Edit after a Read passes. Still unlogged in the ferret fix ledger, so the ~670k burn has no measured delta yet: `ferret fixes add --motif 'Edit! ⇝ Read' --fix 'read-before-edit@cc-plugins hook'`.
+- **CI is red on an expired modules token, not on code** — PR #177 (ferret-7gu) fails `make vet` fetching private `dkoosis/keyring`; main last passed 2026-09-28, secret set 2026-09-05. dk rotates `DKOOSIS_MODULES_TOKEN`, then rerun. Bead filed; ✗ chase it as a code failure.
+- `ferret signatures seed --nugs $MNEMD_NUGBASE` is the populator PR 68 deferred; `~/.ferret/friction_signatures.jsonl` was seeded live 2026-10-07 (1 nug → 1 signature). The bead said "trixi kg read" — there is no such door; mnemd at `$MNEMD_NUGBASE` is the nug store. A nug's `tool:` clause must be the command as run (a `$(...)` masks to `<sub>`); prose never matches.
 
 ## Shipped ledger
 **bbp epic (closed):** agent-initiative scorer bbp.11 (#83/85/87) + no-pushback over-init bbp.18 (#86) · bbp.21 shipped-artifact tell (#91) · bbp.20 query-mode recall roots (#90) · bbp.19 transcript-paste parse (#93) · bbp.17 read-adjacency 5-verdict (#81) · bbp.16 ts→segment join + helped CLI (#79) · bbp.15 judge_fingerprint (#78) · bbp.14 helped adjudicator (#74) · bbp.13/.12/.10/.9 (#56/57/58/59) · bbp.7 v2 taxonomy (#54) · bbp.5 staged Hop1 judge (#53) · spine bbp.1/.2/.3/.4/.6 (#49–52).
