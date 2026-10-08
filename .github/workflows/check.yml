@@ -66,20 +66,21 @@ jobs:
           go-version-file: go.mod
           check-latest: false
 
-      # Private dkoosis modules bypass the public proxy and authenticate with a
-      # PAT. Add DKOOSIS_MODULES_TOKEN in repo Settings → Secrets before merge —
-      # this step fails loudly if it is missing (module fetch would fail anyway).
+      # PRIVATE_GO_MODULES_TOKEN lets CI download private dkoosis Go modules.
+      # Fine-grained PAT, Contents: Read-only on dkoosis/keyring (the only private
+      # module imported today) — add a repo to its list if another goes private.
+      # This step fails loudly if the secret is missing (module fetch would fail anyway).
       - name: configure access to private dkoosis modules
         if: needs.detect.outputs.run_check == 'true'
         env:
-          DKOOSIS_MODULES_TOKEN: ${{ secrets.DKOOSIS_MODULES_TOKEN }}
+          PRIVATE_GO_MODULES_TOKEN: ${{ secrets.PRIVATE_GO_MODULES_TOKEN }}
         run: |
-          if [ -z "$DKOOSIS_MODULES_TOKEN" ]; then
-            echo "::error::DKOOSIS_MODULES_TOKEN secret not set — add it in repo Settings → Secrets."
+          if [ -z "$PRIVATE_GO_MODULES_TOKEN" ]; then
+            echo "::error::PRIVATE_GO_MODULES_TOKEN secret not set — add it in repo Settings → Secrets."
             exit 1
           fi
           echo "GOPRIVATE=github.com/dkoosis/*" >> "$GITHUB_ENV"
-          git config --global url."https://x-access-token:${DKOOSIS_MODULES_TOKEN}@github.com/dkoosis/".insteadOf "https://github.com/dkoosis/"
+          git config --global url."https://x-access-token:${PRIVATE_GO_MODULES_TOKEN}@github.com/dkoosis/".insteadOf "https://github.com/dkoosis/"
 
       - name: install linter (version pinned in .sandbox/project.conf)
         if: needs.detect.outputs.run_check == 'true'
