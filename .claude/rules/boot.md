@@ -38,7 +38,6 @@ Phases 1–4 ALL CLOSED. ferret-097 (close the loop: rank burners/misfires, tune
 Dry fenced grants, zero corrections → trust-the-loop. Surface deviations, ✗ ask permission mid-build. On **open design** dk drives + wants the *why* before a model-changing/destructive call; hand him the approve/merge fork crisply (he ends on "next?"). When dk states a ground-truth fact, verify-then-proceed — ✗ re-litigate.
 
 ## Loose thread
-- **CI is red on an expired modules token, not on code** — PR #177 (ferret-7gu) fails `make vet` fetching private `dkoosis/keyring`; main last passed 2026-09-28, secret set 2026-09-05. dk rotates `DKOOSIS_MODULES_TOKEN`, then rerun. Bead filed; ✗ chase it as a code failure.
 - `ferret signatures seed --nugs $MNEMD_NUGBASE` is the populator PR 68 deferred; `~/.ferret/friction_signatures.jsonl` was seeded live 2026-10-07 (1 nug → 1 signature). The bead said "trixi kg read" — there is no such door; mnemd at `$MNEMD_NUGBASE` is the nug store. A nug's `tool:` clause must be the command as run (a `$(...)` masks to `<sub>`); prose never matches.
 
 ## Shipped ledger
