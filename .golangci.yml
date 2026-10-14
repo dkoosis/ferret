@@ -130,6 +130,9 @@ linters:
           # Fail the run on rule-compile errors — never silently skip them.
           failOn: dsl
       disabled-checks:
+        # %#q falls back to double quotes when the string holds a backtick,
+        # so the suggested fix changes output. Markdown wants the backtick.
+        - sprintfQuotedString
         - appendCombine
         - commentFormatting
         - deprecatedComment

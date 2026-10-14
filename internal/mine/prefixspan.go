@@ -132,7 +132,7 @@ func (m *seqMiner) grow(pat []uint32, proj *projection) {
 			if sup[id] > bestChild {
 				bestChild = sup[id]
 			}
-			m.grow(append(pat[:len(pat):len(pat)], id), m.project(proj, id))
+			m.grow(append(slices.Clip(pat), id), m.project(proj, id))
 		}
 	}
 	// Support is cross-call support: streams whose match spans ≥2 distinct
