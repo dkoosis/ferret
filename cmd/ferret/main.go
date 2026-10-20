@@ -254,6 +254,12 @@ var CLI struct {
 		Window int    `help:"Steps out from the token, 1..3." default:"1" name:"window"`
 	} `cmd:"" help:"Tokens before and after one token, with counts, plus the gapped routines through it."`
 
+	Vocab struct {
+		CommonFlags
+		LensFlags
+		Substring string `arg:"" optional:"" help:"Keep only tokens that contain this text (case-sensitive)." name:"substring"`
+	} `cmd:"" help:"Distinct tokens under the lens, with occurrence and session counts."`
+
 	Rank struct {
 		CommonFlags
 		LensFlags
@@ -583,6 +589,8 @@ func main() {
 		err = cmdSeqs()
 	case "around <token>":
 		err = cmdAround()
+	case "vocab", "vocab <substring>":
+		err = cmdVocab()
 	case "rank":
 		err = cmdRank()
 	case "report":
