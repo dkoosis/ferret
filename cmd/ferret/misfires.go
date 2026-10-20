@@ -6,7 +6,9 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/dkoosis/ferret/internal/event"
 	"github.com/dkoosis/ferret/internal/mine"
 	"github.com/dkoosis/ferret/internal/out"
 )
@@ -48,6 +50,12 @@ type MisfiresCmd struct {
 	// week-bucketed histogram is a breakdown OF the reason rows, not a
 	// standalone view.
 	By string `help:"Bucket --reasons by an ISO time axis (supported: week); requires --reasons." name:"by"`
+	// Since and Until (ferret-f3f) window the corpus before any mining, so a
+	// wrong flag whose last chain is older than --since drops out. Kept local
+	// to misfires: it embeds CommonFlags, not LensFlags. Both empty = the
+	// whole corpus, exactly as before the flags existed.
+	Since string `help:"Only events on or after this day (YYYY-MM-DD)." name:"since"`
+	Until string `help:"Only events on or before this day (YYYY-MM-DD), inclusive." name:"until"`
 }
 
 // cmdMisfires wires the kong flags to mine.MineMisfires over the canonical
@@ -72,6 +80,10 @@ func cmdMisfires(cmd MisfiresCmd) error {
 	if err != nil {
 		return err
 	}
+	events, err = windowMisfireEvents(events, cmd.Since, cmd.Until)
+	if err != nil {
+		return err
+	}
 	if cmd.By != "" {
 		rep := mine.MineReasonsByWeek(events, cmd.Key)
 		if c.format == fmtJSON {
@@ -87,10 +99,44 @@ func cmdMisfires(cmd MisfiresCmd) error {
 		return writeReasonsText(os.Stdout, rep, c.limit, c.maxBytes)
 	}
 	rep := mine.MineMisfires(events)
+	rep.Flags = mine.MineFlagMisfires(events)
 	if c.format == fmtJSON {
 		return writeMisfiresJSON(os.Stdout, rep, c.limit)
 	}
 	return writeMisfiresText(os.Stdout, rep, c.limit, c.maxBytes)
+}
+
+// windowMisfireEvents keeps the events inside [since, until] (local days,
+// both inclusive). With both empty it returns events untouched; with either
+// set, an event with no timestamp cannot be placed and is dropped.
+func windowMisfireEvents(events []event.Event, since, until string) ([]event.Event, error) {
+	if since == "" && until == "" {
+		return events, nil
+	}
+	lo, hi := time.Time{}, time.Time{}
+	if since != "" {
+		t, err := time.ParseInLocation(dateLayout, since, time.Local)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %q", errBadSince, since)
+		}
+		lo = startOfDay(t)
+	}
+	if until != "" {
+		t, err := time.ParseInLocation(dateLayout, until, time.Local)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %q", errBadUntil, until)
+		}
+		hi = endOfDay(t)
+	}
+	kept := make([]event.Event, 0, len(events))
+	for i := range events {
+		ts := events[i].Time
+		if ts.IsZero() || (!lo.IsZero() && ts.Before(lo)) || (!hi.IsZero() && ts.After(hi)) {
+			continue
+		}
+		kept = append(kept, events[i])
+	}
+	return kept, nil
 }
 
 // validateMisfiresBy enforces the bead's Rule up front, before touching the
@@ -125,7 +171,7 @@ func writeMisfiresJSON(w io.Writer, rep mine.MisfireReport, limit int) error {
 	if limit > 0 && len(swallowed) > limit {
 		swallowed = swallowed[:limit]
 	}
-	return out.JSON(w, map[string]any{
+	doc := map[string]any{
 		keyRows:          rows,
 		"repairs":        repairs,
 		"swallowed":      swallowed,
@@ -133,7 +179,15 @@ func writeMisfiresJSON(w io.Writer, rep mine.MisfireReport, limit int) error {
 		"repairsTotal":   repairsTotal,
 		"swallowedTotal": swallowedTotal,
 		"unmeasured":     rep.Unmeasured,
-	})
+	}
+	if len(rep.Flags) > 0 {
+		flags := rep.Flags
+		if limit > 0 && len(flags) > limit {
+			flags = flags[:limit]
+		}
+		doc["flags"], doc["flagsTotal"] = flags, len(rep.Flags)
+	}
+	return out.JSON(w, doc)
 }
 
 // writeMisfiresText emits the dense human/analyst rendering: the misfire
@@ -163,6 +217,7 @@ func writeMisfiresText(w io.Writer, rep mine.MisfireReport, limit, maxBytes int)
 
 	writeRepairSection(sink, rep.Repairs)
 	writeSwallowSection(sink, rep.Swallowed)
+	writeFlagSection(sink, rep.Flags)
 	writeUnmeasuredLine(sink, rep.Unmeasured)
 	// Legal moves, not a plan (DK-AXI rule 11): price these failures against
 	// the other detectors, or record a repair pair as a substitution.
@@ -194,6 +249,21 @@ func writeSwallowSection(sink *out.Sink, swallowed []mine.SwallowRow) {
 	sink.Head("swallowed errors (invisible to is_error — floor on hidden misfires):")
 	for _, row := range swallowed {
 		swallowRow(sink, row)
+	}
+}
+
+// writeFlagSection emits the ferret-f3f wrong-flag table, or nothing when no
+// chain was found — so a corpus without one renders byte-identically to
+// before the section existed.
+func writeFlagSection(sink *out.Sink, flags []mine.FlagRow) {
+	if len(flags) == 0 {
+		return
+	}
+	sink.Head("wrong flags (a call got a flag wrong, then a same-command call dropped it; score = chains × sessions):")
+	for i := range flags {
+		f := &flags[i]
+		sink.Row("%-16s %-16s chains=%-4d measured=%-4d inferred=%-4d sessions=%-4d calls=%d/%d  last=%s  score=%.0f",
+			f.Command, f.Flag, f.Chains, f.Measured, f.Inferred, f.Sessions, f.Calls, f.CallSessions, f.LastSeen, f.Score)
 	}
 }
 
