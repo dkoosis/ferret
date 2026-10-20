@@ -122,8 +122,9 @@ func BuildScoreboard(corpus *Corpus, findings []*Finding, waste WasteReport, led
 }
 
 // ScoreboardMaxGap is the gapped-match distance the Δ section re-counts a
-// non-finding motif at. It mirrors the report's default --max-gap (cmd/ferret
-// reportMaxGap, which is also what `fixes add` baselines with); keep them equal.
+// non-finding motif at. cmd/ferret's reportMaxGap (the report's default
+// --max-gap, which `fixes add` baselines with) is defined from it, so the two
+// cannot drift.
 const ScoreboardMaxGap = 3
 
 // buildDelta renders one row per ledger `fix` entry (wontfix/watch verdicts
