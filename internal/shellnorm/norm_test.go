@@ -44,7 +44,7 @@ func TestSplit(t *testing.T) {
 		{"gh pr -R owner/repo merge 12", []string{"gh_pr_merge"}},
 		{"gh pr --repo=owner/repo view 12", []string{"gh_pr_view"}},
 		{"gh pr 12", []string{"gh_pr"}},
-		{"bd dep ferret-x", []string{"bd_dep"}},
+		{"bd dep --json 12", []string{"bd_dep"}},
 		{"gh api x", []string{"gh_api"}},
 		{"trixi project create", []string{"trixi_project_create"}},
 		{"trixi ask q", []string{"trixi_ask"}},
