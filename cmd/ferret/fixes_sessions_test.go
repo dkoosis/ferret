@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -64,10 +65,15 @@ func runFixesAdd(t *testing.T, data, motif string) {
 
 func runReportSinceFixes(t *testing.T, data, format string) string {
 	t.Helper()
+	return runReportLimit(t, data, format, -1)
+}
+
+func runReportLimit(t *testing.T, data, format string, limit int) string {
+	t.Helper()
 	saved := CLI.Report
 	t.Cleanup(func() { CLI.Report = saved })
 	r := &CLI.Report
-	r.Data, r.Format, r.Limit, r.Lens = data, format, -1, "tool"
+	r.Data, r.Format, r.Limit, r.Lens = data, format, limit, "tool"
 	r.MinSupport, r.MaxGap, r.MaxLen, r.Order, r.Top = reportMinSupport, reportMaxGap, reportMaxLen, reportOrder, reportTop
 	r.SinceFixes = true
 	return captureStdout(t, cmdReport)
@@ -121,6 +127,38 @@ func TestReportSinceFixesShowsSessionDelta(t *testing.T) {
 	}
 	if !strings.Contains(row, "burn 1→") || !strings.Contains(row, "↑ sess") {
 		t.Errorf("burn must keep its own arrow (↑ here): %s", row)
+	}
+}
+
+// TestReportJSONCapsFixedGoneAtLimit: --format json --limit N cuts the
+// fixedGone rows to N, reports the full count, and marks the payload truncated;
+// an unlimited run keeps every row and stays untruncated.
+func TestReportJSONCapsFixedGoneAtLimit(t *testing.T) {
+	data := writeSessionFixture(t)
+	at := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	for _, m := range []string{"Grep,Write", "Glob,Bash", "Write,Read"} {
+		e := fixes.Entry{Motif: m, Fix: "f", AddedAt: at, BaselineBurn: 100, Lens: "tool", BaselineSessions: 9}
+		if err := fixes.Append(fixes.Path(data), e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	type payload struct {
+		Truncated      bool             `json:"truncated"`
+		FixedGone      []map[string]any `json:"fixedGone"`
+		FixedGoneTotal int              `json:"fixedGoneTotal"`
+	}
+	decode := func(limit int) payload {
+		var p payload
+		if err := json.Unmarshal([]byte(runReportLimit(t, data, fmtJSON, limit)), &p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	if p := decode(2); len(p.FixedGone) != 2 || p.FixedGoneTotal != 3 || !p.Truncated {
+		t.Errorf("limit 2: rows=%d total=%d truncated=%v, want 2/3/true", len(p.FixedGone), p.FixedGoneTotal, p.Truncated)
+	}
+	if p := decode(-1); len(p.FixedGone) != 3 || p.FixedGoneTotal != 3 || p.Truncated {
+		t.Errorf("unlimited: rows=%d total=%d truncated=%v, want 3/3/false", len(p.FixedGone), p.FixedGoneTotal, p.Truncated)
 	}
 }
 

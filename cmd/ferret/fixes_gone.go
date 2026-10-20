@@ -72,6 +72,23 @@ func writeGoneFixes(sink *out.Sink, gone []*goneFix, minSupport int) {
 	}
 }
 
+// addGoneFixes puts the gone rows into a report's JSON payload under the same
+// --limit the findings obey (limit > 0 caps; zero or negative is unlimited, as
+// applyDefaultLimit leaves it). When the cap cuts rows it records the full
+// count as fixedGoneTotal and marks the payload truncated.
+func addGoneFixes(payload map[string]any, gone []*goneFix, limit int) {
+	if len(gone) == 0 {
+		return
+	}
+	shown := gone
+	if limit > 0 && len(gone) > limit {
+		shown = gone[:limit]
+		payload[keyTruncated] = true
+	}
+	payload["fixedGone"] = goneFixRows(shown)
+	payload["fixedGoneTotal"] = len(gone)
+}
+
 // goneFixRows projects the same rows for --format json.
 func goneFixRows(gone []*goneFix) []map[string]any {
 	rows := make([]map[string]any, 0, len(gone))

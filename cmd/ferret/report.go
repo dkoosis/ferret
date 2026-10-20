@@ -191,9 +191,7 @@ func cmdReport() error {
 		if sup := suppressedRows(fixIdx, corpus, suppressed); len(sup) > 0 {
 			payload["suppressed"] = sup
 		}
-		if len(gone) > 0 {
-			payload["fixedGone"] = goneFixRows(gone)
-		}
+		addGoneFixes(payload, gone, c.limit)
 		return out.JSON(os.Stdout, payload)
 	}
 
