@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -234,19 +235,36 @@ func TestNgramsWindow_NoFlags_OutputIsByteIdenticalToToday(t *testing.T) {
 	}
 }
 
-func TestFrictionRefusesWindowFlags(t *testing.T) {
-	saved := CLI.Friction
-	t.Cleanup(func() { CLI.Friction = saved })
+// A fix's baseline burn is a whole-corpus number; --since-fixes over a window
+// would compare a windowed burn against it and show a false down-arrow.
+func TestReportSinceFixes_WithWindow_IsUsageError(t *testing.T) {
 	for _, set := range []func(){
-		func() { CLI.Friction.Since = "2026-10-19" },
-		func() { CLI.Friction.Until = "2026-10-19" },
+		func() { CLI.Report.Since = "2026-10-19" },
+		func() { CLI.Report.Until = "2026-10-19" },
 	} {
-		CLI.Friction = saved
+		saved := CLI.Report
+		CLI.Report.Data, CLI.Report.Format, CLI.Report.Lens = writeWindowCorpus(t), fmtText, "cmd"
+		CLI.Report.SinceFixes = true
 		set()
-		CLI.Friction.Data = t.TempDir()
-		err := cmdFriction(&CLI.Friction)
-		if err == nil || exitCodeFor(err) != exitUsage {
-			t.Errorf("cmdFriction with a window: err = %v, want a usage error", err)
+		err := cmdReport()
+		CLI.Report = saved
+		if !errors.Is(err, errSinceFixesWindow) || exitCodeFor(err) != exitUsage {
+			t.Errorf("report --since-fixes with a window: err = %v, want errSinceFixesWindow (usage)", err)
 		}
+	}
+}
+
+// --since-fixes alone, and a window alone, stay allowed.
+func TestReportWindow_WithoutSinceFixes_IsNotRefused(t *testing.T) {
+	saved := CLI.Report
+	t.Cleanup(func() { CLI.Report = saved })
+	CLI.Report.Data, CLI.Report.Format, CLI.Report.Lens = writeWindowCorpus(t), fmtText, "cmd"
+	CLI.Report.Since = "2026-10-19"
+	CLI.Report.MinSupport, CLI.Report.MaxGap, CLI.Report.MaxLen = 2, 3, 8
+	CLI.Report.Order, CLI.Report.Top = 3, 10
+	CLI.Report.Limit = -1
+	got := captureStdout(t, cmdReport)
+	if !strings.Contains(got, "window since=2026-10-19 kept=2 of 4 streams") {
+		t.Errorf("report header lacks the window line:\n%s", got)
 	}
 }

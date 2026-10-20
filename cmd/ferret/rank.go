@@ -17,7 +17,7 @@ func cmdRank() error {
 	if err != nil {
 		return err
 	}
-	lo := fromLensFlags(cmd.LensFlags)
+	lo := fromLensFlags(cmd.LensFlags).window(cmd.WindowFlags)
 	if err := c.validate("text", fmtJSON); err != nil {
 		return err
 	}

@@ -11,11 +11,6 @@ import (
 	"github.com/dkoosis/ferret/internal/out"
 )
 
-// errFrictionWindow refuses --since/--until on friction: only its motif leg
-// builds a windowed corpus, so the flags would silently narrow one detector of
-// the merged table and leave the others whole.
-var errFrictionWindow = usage("friction does not take --since/--until: its poll and misfire legs read every event")
-
 // FrictionCmd is the kong-ready flag struct for `ferret friction` (ferret-q6y)
 // — the combined friction op. Answering "which tool calls are worth fixing?"
 // used to take five commands (ingest → report --kind friction → burn →
@@ -45,9 +40,6 @@ func cmdFriction(cmd *FrictionCmd) error {
 	c, err := fromCommonFlags(cmd.CommonFlags)
 	if err != nil {
 		return err
-	}
-	if cmd.Since != "" || cmd.Until != "" {
-		return errFrictionWindow
 	}
 	applyDefaultLimit(c, 20)
 	if err := c.validate(fmtText, fmtJSON); err != nil {

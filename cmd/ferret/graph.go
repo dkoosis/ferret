@@ -18,7 +18,7 @@ func cmdGraph() error {
 		return err
 	}
 	applyDefaultLimit(c, 40)
-	lo := fromLensFlags(cmd.LensFlags)
+	lo := fromLensFlags(cmd.LensFlags).window(cmd.WindowFlags)
 	if err := c.validate("text", "json", "mermaid", "dot", "sankey"); err != nil {
 		return err
 	}

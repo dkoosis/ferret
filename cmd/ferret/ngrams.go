@@ -21,7 +21,7 @@ func cmdNgrams() error {
 		return err
 	}
 	applyDefaultLimit(c, 30)
-	lo := fromLensFlags(cmd.LensFlags)
+	lo := fromLensFlags(cmd.LensFlags).window(cmd.WindowFlags)
 	minN, maxN, err := parseRange(cmd.N)
 	if err != nil {
 		return err

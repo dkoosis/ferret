@@ -9,6 +9,21 @@ import (
 	"github.com/dkoosis/ferret/internal/out"
 )
 
+// WindowFlags narrow a corpus to the streams that started in a date window
+// (ferret-pr4). Only commands that build their whole result from one windowed
+// corpus embed it; friction and the rest do not, so they never offer a flag
+// they would ignore.
+type WindowFlags struct {
+	Since string `help:"Keep only streams that started on or after this date, YYYY-MM-DD (a stream with no timestamp is dropped)." name:"since"`
+	Until string `help:"Keep only streams that started on or before this date, YYYY-MM-DD, inclusive." name:"until"`
+}
+
+// window sets the corpus window on lo and returns it.
+func (lo *lensOpts) window(wf WindowFlags) *lensOpts {
+	lo.since, lo.until = wf.Since, wf.Until
+	return lo
+}
+
 // corpusWindow resolves the corpus commands' --since/--until (ferret-pr4) into
 // the instants mine.Options takes. Both are YYYY-MM-DD, the spelling reach
 // uses; --until is inclusive, so it becomes the end of that day. An empty flag

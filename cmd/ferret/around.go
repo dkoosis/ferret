@@ -26,6 +26,20 @@ type neighbour struct {
 	sessions int
 }
 
+// aroundNoMatch reports a token that no stream holds. It carries the window
+// too: a token seen only in streams the window dropped is "0 matches" here, and
+// without the window that would read as a token that never occurs.
+func aroundNoMatch(c *common, lensName string, corpus *mine.Corpus, token string) error {
+	if c.format == fmtJSON {
+		return out.JSON(os.Stdout, withWindow(map[string]any{keyLens: lensName, "token": token, "matches": 0}, corpus))
+	}
+	fmt.Printf("0 matches for %s\n", token)
+	if ln := windowLine(corpus); ln != "" {
+		fmt.Println(ln)
+	}
+	return nil
+}
+
 func cmdAround() error {
 	cmd := &CLI.Around
 	c, err := fromCommonFlags(cmd.CommonFlags)
@@ -33,7 +47,7 @@ func cmdAround() error {
 		return err
 	}
 	applyDefaultLimit(c, 15)
-	lo := fromLensFlags(cmd.LensFlags)
+	lo := fromLensFlags(cmd.LensFlags).window(cmd.WindowFlags)
 	if err := c.validate("text", fmtJSON); err != nil {
 		return err
 	}
@@ -52,11 +66,7 @@ func cmdAround() error {
 		return err
 	}
 	if !ok {
-		if c.format == fmtJSON {
-			return out.JSON(os.Stdout, map[string]any{keyLens: l.Name(), "token": cmd.Token, "matches": 0})
-		}
-		fmt.Printf("0 matches for %s\n", cmd.Token)
-		return nil
+		return aroundNoMatch(c, l.Name(), corpus, cmd.Token)
 	}
 
 	before, after := neighbours(mine.CountGrams(corpus, 2, cmd.Window+1), id)

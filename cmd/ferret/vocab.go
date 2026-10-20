@@ -28,7 +28,7 @@ func cmdVocab() error {
 	}
 	// The default is every token: the point is to see how a command tokenizes.
 	applyDefaultLimit(c, 0)
-	lo := fromLensFlags(cmd.LensFlags)
+	lo := fromLensFlags(cmd.LensFlags).window(cmd.WindowFlags)
 	if err := c.validate("text", fmtJSON); err != nil {
 		return err
 	}

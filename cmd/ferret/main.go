@@ -207,8 +207,6 @@ type LensFlags struct {
 	NoMarkFail  bool   `help:"Don't append ! to failed-action tokens." name:"no-mark-fail"`
 	NoCollapse  bool   `help:"Don't run-length collapse repeated tokens." name:"no-collapse"`
 	NoSidechain bool   `help:"Exclude sidechain events." name:"no-sidechain"`
-	Since       string `help:"Keep only streams that started on or after this date, YYYY-MM-DD (a stream with no timestamp is dropped)." name:"since"`
-	Until       string `help:"Keep only streams that started on or before this date, YYYY-MM-DD, inclusive." name:"until"`
 }
 
 // CLI is the root grammar parsed by kong.
@@ -234,6 +232,7 @@ var CLI struct {
 	Ngrams struct {
 		CommonFlags
 		LensFlags
+		WindowFlags
 		ContainsFlags
 		N           string `help:"Gram lengths ≥2, e.g. 3 or 2-5." default:"2-5" name:"n"`
 		MinCount    int    `help:"Min total occurrences." default:"5" name:"min-count"`
@@ -243,6 +242,7 @@ var CLI struct {
 	Seqs struct {
 		CommonFlags
 		LensFlags
+		WindowFlags
 		ContainsFlags
 		MinSupport int `help:"Min distinct streams containing the pattern." default:"20" name:"min-support"`
 		MaxGap     int `help:"Max positions between consecutive items (1 = adjacent)." default:"3" name:"max-gap"`
@@ -252,6 +252,7 @@ var CLI struct {
 	Around struct {
 		CommonFlags
 		LensFlags
+		WindowFlags
 		Token  string `arg:"" help:"Exact token, or a substring that matches only one token." name:"token"`
 		Window int    `help:"Steps out from the token, 1..3." default:"1" name:"window"`
 	} `cmd:"" help:"Tokens before and after one token, with counts, plus the gapped routines through it."`
@@ -259,12 +260,14 @@ var CLI struct {
 	Vocab struct {
 		CommonFlags
 		LensFlags
+		WindowFlags
 		Substring string `arg:"" optional:"" help:"Keep only tokens that contain this text (case-sensitive)." name:"substring"`
 	} `cmd:"" help:"Distinct tokens under the lens, with occurrence and session counts."`
 
 	Rank struct {
 		CommonFlags
 		LensFlags
+		WindowFlags
 		MinSupport int `help:"Min distinct streams containing the pattern." default:"20" name:"min-support"`
 		MaxGap     int `help:"Max positions between consecutive items (1 = adjacent)." default:"3" name:"max-gap"`
 		MaxLen     int `help:"Max pattern length." default:"5" name:"max-len"`
@@ -275,6 +278,7 @@ var CLI struct {
 	Report struct {
 		CommonFlags
 		LensFlags
+		WindowFlags
 		MinSupport int    `help:"Min distinct streams containing the pattern." default:"20" name:"min-support"`
 		MaxGap     int    `help:"Max positions between consecutive items (1 = adjacent)." default:"3" name:"max-gap"`
 		MaxLen     int    `help:"Max pattern length." default:"8" name:"max-len"`
@@ -287,6 +291,7 @@ var CLI struct {
 	Surprise struct {
 		CommonFlags
 		LensFlags
+		WindowFlags
 		Order   int `help:"Model order: predict each token from up to N prior tokens." default:"3" name:"order"`
 		MinToks int `help:"Skip streams shorter than this." default:"20" name:"min-toks"`
 	} `cmd:"" help:"Per-session predictability (low=scriptable, high=thrash)."`
@@ -294,6 +299,7 @@ var CLI struct {
 	Graph struct {
 		CommonFlags
 		LensFlags
+		WindowFlags
 		ContainsFlags
 		MinCount int  `help:"Min edge count." default:"20" name:"min-count"`
 		Loops    bool `help:"Show A→B→A bounce cycles (friction signatures)." name:"loops"`
@@ -302,6 +308,7 @@ var CLI struct {
 	Tokens struct {
 		CommonFlags
 		LensFlags
+		WindowFlags
 		Session string `help:"Session ID prefix (required)." required:"" name:"session"`
 	} `cmd:"" help:"One session's token stream (lens debugger)."`
 
@@ -899,8 +906,6 @@ func fromLensFlags(lf LensFlags) *lensOpts {
 		noMarkFail:  lf.NoMarkFail,
 		noCollapse:  lf.NoCollapse,
 		noSidechain: lf.NoSidechain,
-		since:       lf.Since,
-		until:       lf.Until,
 	}
 }
 

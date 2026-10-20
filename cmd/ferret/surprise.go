@@ -17,7 +17,7 @@ func cmdSurprise() error {
 		return err
 	}
 	applyDefaultLimit(c, 20)
-	lo := fromLensFlags(cmd.LensFlags)
+	lo := fromLensFlags(cmd.LensFlags).window(cmd.WindowFlags)
 	if err := c.validate("text", fmtJSON); err != nil {
 		return err
 	}

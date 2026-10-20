@@ -16,6 +16,10 @@ import (
 var (
 	errBadKind    = usage("bad --kind (want routine|friction|loop|noise)")
 	errMaxBytesMD = usage("--max-bytes is not supported with --format md (whole-document output; use --limit)")
+
+	// A fix's BaselineBurn is measured on the whole corpus; a windowed burn
+	// compared against it would read as a fix landing.
+	errSinceFixesWindow = usage("--since-fixes cannot combine with --since/--until: the fix ledger's baselines are whole-corpus burns")
 )
 
 func cmdReport() error {
@@ -25,12 +29,15 @@ func cmdReport() error {
 		return err
 	}
 	applyDefaultLimit(c, 30)
-	lo := fromLensFlags(cmd.LensFlags)
+	lo := fromLensFlags(cmd.LensFlags).window(cmd.WindowFlags)
 	if err := c.validate("text", fmtJSON, fmtMD); err != nil {
 		return err
 	}
 	if c.format == fmtMD && c.maxBytes > 0 {
 		return errMaxBytesMD
+	}
+	if cmd.SinceFixes && (cmd.Since != "" || cmd.Until != "") {
+		return errSinceFixesWindow
 	}
 	switch cmd.Kind {
 	case "", string(mine.KindRoutine), string(mine.KindFriction), string(mine.KindLoop), string(mine.KindNoise):
