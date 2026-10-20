@@ -30,7 +30,7 @@ const floorDefaultLimit = 10
 type FloorCmd struct {
 	Root     string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
 	Format   string `help:"Output format: text|json." default:"text" name:"format"`
-	Limit    int    `help:"Max session rows to print (0 = compact default; N = exactly N; negative = unlimited)." default:"0" name:"limit"`
+	Limit    int    `help:"Max session rows to print (0 = compact default; N = exactly N; negative = unlimited, written --limit=-1)." default:"0" name:"limit"`
 	MaxBytes int    `help:"Max output bytes, text only (0 = unlimited)." default:"0" name:"max-bytes"`
 	// RulesGlobal/RulesProject default to the SAME two tiers the bead's
 	// Givens name (~/.claude/rules/**, .claude/rules/**) — read straight off
