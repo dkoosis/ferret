@@ -30,13 +30,15 @@ func cmdGraph() error {
 		return err
 	}
 	f := mine.BuildFollows(corpus)
+	match := newTokenMatch(corpus, cmd.Contains)
 
 	edges := f.Edges[:0:0]
 	for _, e := range f.Edges {
-		if e.Count >= cmd.MinCount {
+		if e.Count >= cmd.MinCount && match.any(e.From, e.To) {
 			edges = append(edges, e)
 		}
 	}
+	f.Cycles = keepMatching(match, f.Cycles, func(cy mine.Cycle) []uint32 { return []uint32{cy.A, cy.B} })
 	totalEdges := len(edges)
 	if c.limit > 0 && len(edges) > c.limit {
 		edges = edges[:c.limit]
@@ -77,7 +79,7 @@ func cmdGraph() error {
 	about(sink,
 		"≡ graph: action→action transition counts (what typically follows what).",
 		"≡ --loops adds A⇄B bounce cycles — back-and-forth churn, often friction.")
-	sink.Head("graph lens=%s edges=%d (min-count=%d)", l.Name(), len(edges), cmd.MinCount)
+	sink.Head("graph lens=%s%s edges=%d (min-count=%d)", l.Name(), containsTag(cmd.Contains), len(edges), cmd.MinCount)
 	emptyNote(sink, len(edges), "edges")
 	for _, e := range edges {
 		sink.Row("%6dx  %s → %s", e.Count, corpus.Vocab[e.From], corpus.Vocab[e.To])

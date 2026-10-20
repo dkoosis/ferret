@@ -232,6 +232,7 @@ var CLI struct {
 	Ngrams struct {
 		CommonFlags
 		LensFlags
+		ContainsFlags
 		N           string `help:"Gram lengths ≥2, e.g. 3 or 2-5." default:"2-5" name:"n"`
 		MinCount    int    `help:"Min total occurrences." default:"5" name:"min-count"`
 		MinSessions int    `help:"Min distinct streams." default:"3" name:"min-sessions"`
@@ -240,6 +241,7 @@ var CLI struct {
 	Seqs struct {
 		CommonFlags
 		LensFlags
+		ContainsFlags
 		MinSupport int `help:"Min distinct streams containing the pattern." default:"20" name:"min-support"`
 		MaxGap     int `help:"Max positions between consecutive items (1 = adjacent)." default:"3" name:"max-gap"`
 		MaxLen     int `help:"Max pattern length." default:"5" name:"max-len"`
@@ -277,6 +279,7 @@ var CLI struct {
 	Graph struct {
 		CommonFlags
 		LensFlags
+		ContainsFlags
 		MinCount int  `help:"Min edge count." default:"20" name:"min-count"`
 		Loops    bool `help:"Show A→B→A bounce cycles (friction signatures)." name:"loops"`
 	} `cmd:"" help:"Token transition graph."`

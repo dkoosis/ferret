@@ -37,6 +37,7 @@ func cmdNgrams() error {
 		return err
 	}
 	grams := mine.Filter(mine.CountGrams(corpus, minN, maxN), cmd.MinCount, cmd.MinSessions)
+	grams = keepMatching(newTokenMatch(corpus, cmd.Contains), grams, func(g *mine.Gram) []uint32 { return g.IDs })
 
 	if c.format == fmtJSON {
 		type jg struct {
@@ -63,8 +64,8 @@ func cmdNgrams() error {
 		"≡ ngrams: exact action sequences repeated verbatim (no gaps). High count across many",
 		"≡ sessions = a habitual routine — script/skill candidate. Nx/Ms = N occurrences in M sessions.",
 		legendMarks)
-	sink.Head("ngrams lens=%s n=%s streams=%d grams=%d (min-count=%d min-sessions=%d)",
-		l.Name(), cmd.N, len(corpus.Streams), len(grams), cmd.MinCount, cmd.MinSessions)
+	sink.Head("ngrams lens=%s n=%s%s streams=%d grams=%d (min-count=%d min-sessions=%d)",
+		l.Name(), cmd.N, containsTag(cmd.Contains), len(corpus.Streams), len(grams), cmd.MinCount, cmd.MinSessions)
 	emptyNote(sink, len(grams), "grams")
 	for _, g := range grams {
 		sink.Row("%5dx/%-4ds %s  ex: %s",

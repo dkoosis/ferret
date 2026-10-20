@@ -31,9 +31,14 @@ func cmdSeqs() error {
 	if err != nil {
 		return err
 	}
-	pats, capped := mine.MineSeqs(corpus, mine.SeqOpts{
+	opts := mine.SeqOpts{
 		MinSupport: cmd.MinSupport, MaxGap: cmd.MaxGap, MaxLen: cmd.MaxLen, MaxPatterns: 10000,
-	})
+	}
+	// --contains filters inside the miner, so the pattern cap counts only matching rows.
+	if m := newTokenMatch(corpus, cmd.Contains); m != nil {
+		opts.Keep = func(ids []uint32) bool { return m.any(ids...) }
+	}
+	pats, capped := mine.MineSeqs(corpus, opts)
 
 	if c.format == fmtJSON {
 		type jp struct {
@@ -59,8 +64,8 @@ func cmdSeqs() error {
 		"≡ seqs: ordered subsequences that recur with up to max-gap other actions between steps",
 		"≡ (PrefixSpan) — habits that survive interruptions. Ns = pattern appears in N sessions. ⇝ = gap allowed.",
 		legendMarks)
-	sink.Head("seqs lens=%s streams=%d patterns=%d (min-support=%d max-gap=%d max-len=%d)",
-		l.Name(), len(corpus.Streams), len(pats), cmd.MinSupport, cmd.MaxGap, cmd.MaxLen)
+	sink.Head("seqs lens=%s%s streams=%d patterns=%d (min-support=%d max-gap=%d max-len=%d)",
+		l.Name(), containsTag(cmd.Contains), len(corpus.Streams), len(pats), cmd.MinSupport, cmd.MaxGap, cmd.MaxLen)
 	if capped {
 		sink.Head("‡ search hit the 10000-pattern cap — raise --min-support")
 	}

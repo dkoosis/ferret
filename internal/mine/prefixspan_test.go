@@ -1,6 +1,7 @@
 package mine
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -125,5 +126,27 @@ func TestSeqsPatternCap(t *testing.T) {
 	}
 	if len(got) != 1 {
 		t.Errorf("patterns = %d, want exactly 1 (cap)", len(got))
+	}
+}
+
+func TestSeqsKeepAppliesBeforeCap(t *testing.T) {
+	// With a cap of 1, an after-the-fact filter sees only the first pattern
+	// emitted; Keep must filter first so a later matching pattern survives.
+	c := corpusFrom([][]string{
+		{"a", "b", "c", "d"},
+		{"a", "b", "c", "d"},
+	})
+	var d uint32
+	for id, tok := range c.Vocab {
+		if tok == "d" {
+			d = uint32(id)
+		}
+	}
+	pats, _ := MineSeqs(c, SeqOpts{
+		MinSupport: 2, MaxGap: 3, MaxLen: 2, MaxPatterns: 1,
+		Keep: func(ids []uint32) bool { return slices.Contains(ids, d) },
+	})
+	if len(pats) != 1 || !slices.Contains(pats[0].IDs, d) {
+		t.Fatalf("patterns = %v, want one pattern holding d", pats)
 	}
 }
