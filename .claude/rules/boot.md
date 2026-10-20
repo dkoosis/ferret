@@ -1,12 +1,12 @@
 # Boot
-updated: 2026-10-07
+updated: 2026-10-20
 
 *Project working-memory. Maintained for future-me: current state + live frontier + traps that still bite. Resolved lanes pruned — history lives in beads/PRs.*
 
 ## lane: none — phase 4 closed, the queue is loose beads
 Phases 1–4 ALL CLOSED. ferret-097 (close the loop: rank burners/misfires, tune, verify the delta) closed 2026-07-28 with nrr/ct1/kt5 all merged; ✗ read it as live work.
 → There is no open epic. Confirm before planning against this line: `bd list --status open --type epic` (empty = still true) · `bd ready` for what is actually next.
-→ Still undecided: RTK adoption (rtk-ai/rtk — Rust output-filter proxy). nrr's burn ranking has landed, so the "revisit after nrr says what actually burns" trigger is now MET and nobody has revisited it.
+→ RTK (rtk-ai/rtk) is SKIPPED, decided 2026-10-20 after nrr's ranking: decision nug 5d4f08673823 (evidence cd9f5df89e65). ✗ reopen it without the hand replay that nug names.
 ~ dk drives forks himself — hand them crisply, ✗ pre-decide ratified semantics.
 
 ## State
@@ -24,7 +24,7 @@ Phases 1–4 ALL CLOSED. ferret-097 (close the loop: rank burners/misfires, tune
 
 **ferret-wf9 — CLOSED (phase 3).** In-session feedback tap shipped end-to-end (#96–99): ask-side selector + label ledger + live join orchestration + answer-side recognition/valence/probe-exclusion. Gold labels now accumulate in-band.
 
-**ferret-097 — CLOSED (phase 4).** Close the loop: burn ranking (nrr) + misfire ranking (ct1) + burn-delta verify (kt5), all three merged 2026-07-28. Ferret now measures its own fixes end to end; the RTK fork it was gating is still open (top block).
+**ferret-097 — CLOSED (phase 4).** Close the loop: burn ranking (nrr) + misfire ranking (ct1) + burn-delta verify (kt5), all three merged 2026-07-28. Ferret now measures its own fixes end to end; the RTK fork it was gating is settled: skip (top block).
 
 **Retrieval-outcome contract (trixi⇄ferret)** — ferret's consumer side = the bbp epic, now SHIPPED. Spec: `~/Projects/dk/Project/trixi/specs/retrieval-outcome-contract-design.md`. Seam: `trixi/observe.2.1` emits retrieval-event JSONL (producer) → `ferret/bbp` joins to segments + adjudicates (consumer, done) → `search-loop.4` reads back via interrupted-time-series (reader, upstream). Golden fixture is the contract test (ferret vendors it). Producer conformance = `tx-dii8m`.
 
