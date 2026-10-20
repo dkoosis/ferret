@@ -1238,8 +1238,8 @@ func TestPipeNonLastStageOKIsUnmeasured(t *testing.T) {
 	if len(evs) != 1 {
 		t.Fatalf("events = %d, want 1 (pipe collapses to the kept stage)", len(evs))
 	}
-	if evs[0].Action != "mnemd" {
-		t.Fatalf("Action = %q, want %q", evs[0].Action, "mnemd")
+	if evs[0].Action != "mnemd_amend" {
+		t.Fatalf("Action = %q, want %q", evs[0].Action, "mnemd_amend")
 	}
 	if evs[0].Status != StatusUnmeasured {
 		t.Errorf("status = %q, want %q — head's exit, not mnemd's, is what is_error describes", evs[0].Status, StatusUnmeasured)

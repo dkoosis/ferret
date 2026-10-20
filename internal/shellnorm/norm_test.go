@@ -1,6 +1,8 @@
 package shellnorm
 
 import (
+	"os/exec"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -28,6 +30,21 @@ func TestSplit(t *testing.T) {
 		{"FOO=bar make lint", []string{"make_lint"}},
 		{"rg -n 'pattern' src/", []string{"rg"}},
 		{"git -C /repo status", []string{"git"}}, // flag, not subcommand
+		// ferret-ilp: in-house tools keep their subcommand.
+		{"sdlc ship --closes x", []string{"sdlc_ship"}},
+		{"bin/sdlc sweep", []string{"sdlc_sweep"}},
+		{"sdlc", []string{"sdlc"}},
+		{"mnemd recall x", []string{"mnemd_recall"}},
+		{"ferret misfires", []string{"ferret_misfires"}},
+		{"glance next", []string{"glance_next"}},
+		// ferret-ilp: subcmdGroups keep a second word.
+		{"gh pr checks 12 --watch", []string{"gh_pr_checks"}},
+		{"gh pr --help", []string{"gh_pr"}},
+		{"gh api x", []string{"gh_api"}},
+		{"trixi project create", []string{"trixi_project_create"}},
+		{"trixi ask q", []string{"trixi_ask"}},
+		{"bd dep add a b", []string{"bd_dep_add"}},
+		{"snipe diagram arch", []string{"snipe_diagram"}},
 	}
 	for _, c := range cases {
 		segs, _ := Split(c.in)
@@ -454,5 +471,38 @@ func TestSplitFlagsSurviveDetailTruncation(t *testing.T) {
 	if got := Flags(truncated); len(got) != 0 {
 		t.Fatalf("re-parsing the truncated Detail recovered %v — the premise of storing "+
 			"Segment.Flags is that it cannot; adjust the test, not the field", got)
+	}
+}
+
+// helpCommand matches a two-word command line in a kong-style --help listing
+// ("  project create [flags]", "  diagram arch   Top packages…").
+var helpCommand = regexp.MustCompile(`(?m)^  ([a-z][a-z-]*) ([a-z][a-z-]*)(?:\s|$)`)
+
+// helpUnsplit names groups a tool's --help lists that stay one word on
+// purpose (see subcmdGroups).
+var helpUnsplit = map[string]map[string]bool{"snipe": {"diagram": true}}
+
+// TestSubcmdGroupsMatchHelp reads each installed kong-style in-house tool's
+// --help and fails when it lists a two-word command whose group subcmdGroups
+// does not split (ferret-ilp). A tool not on PATH is skipped, so CI passes
+// without them.
+func TestSubcmdGroupsMatchHelp(t *testing.T) {
+	for _, tool := range []string{"sdlc", "ferret", "snipe", "trixi"} {
+		t.Run(tool, func(t *testing.T) {
+			path, err := exec.LookPath(tool)
+			if err != nil {
+				t.Skipf("%s not on PATH", tool)
+			}
+			help, _ := exec.CommandContext(t.Context(), path, "--help").CombinedOutput()
+			if !subcmdTools[tool] {
+				t.Errorf("%s is not in subcmdTools", tool)
+			}
+			for _, m := range helpCommand.FindAllStringSubmatch(string(help), -1) {
+				group := m[1]
+				if !subcmdGroups[tool][group] && !helpUnsplit[tool][group] {
+					t.Errorf("%s --help lists %q %q, but subcmdGroups[%q] lacks %q", tool, group, m[2], tool, group)
+				}
+			}
+		})
 	}
 }

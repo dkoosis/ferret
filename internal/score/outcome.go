@@ -31,16 +31,16 @@ import (
 
 // terminalVCS is the mutating/terminal subset of the VCS family that reads as a
 // "shipped" signal — the normalized shellnorm forms (base_subcommand). git_push
-// and gh_pr (create/merge) are the strongest; git_commit and git_merge ship work
-// locally. Read-only VCS (git_status, git_diff, git_log, gh_pr_view→gh_pr is kept
-// broad here intentionally — gh's subcommand depth stops at "pr") is excluded by
-// not appearing here. Keep this tight: every entry must be an action that PRODUCES
+// and gh_pr_create/gh_pr_merge are the strongest; git_commit and git_merge ship
+// work locally. Read-only VCS (git_status, git_diff, git_log, gh_pr_view,
+// gh_pr_checks) is excluded by not appearing here. Keep this tight: every entry must be an action that PRODUCES
 // a durable artifact, never one that only inspects.
 var terminalVCS = map[string]bool{
-	"git_commit": true, // local checkpoint of work
-	"git_push":   true, // published to the remote
-	"git_merge":  true, // integrated a branch
-	"gh_pr":      true, // gh pr create / gh pr merge — opened or landed a PR
+	"git_commit":   true, // local checkpoint of work
+	"git_push":     true, // published to the remote
+	"git_merge":    true, // integrated a branch
+	"gh_pr_create": true, // opened a PR
+	"gh_pr_merge":  true, // landed a PR
 }
 
 // terminalTracker is the durable-artifact subset of bd (beads) actions —
