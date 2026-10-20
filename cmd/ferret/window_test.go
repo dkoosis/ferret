@@ -149,7 +149,7 @@ func TestNgramsWindow_JSON_CarriesWindowOnlyWhenSet(t *testing.T) {
 	if err := json.Unmarshal([]byte(plain), &m); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := m["window"]; ok {
+	if _, ok := m["streamWindow"]; ok {
 		t.Errorf("unwindowed JSON carries a window key: %s", plain)
 	}
 
@@ -163,7 +163,7 @@ func TestNgramsWindow_JSON_CarriesWindowOnlyWhenSet(t *testing.T) {
 			Kept    int    `json:"kept"`
 			Total   int    `json:"total"`
 			Dropped int    `json:"dropped_no_timestamp"`
-		} `json:"window"`
+		} `json:"streamWindow"`
 	}
 	if err := json.Unmarshal([]byte(win), &wm); err != nil {
 		t.Fatal(err)

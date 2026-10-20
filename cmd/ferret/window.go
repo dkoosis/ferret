@@ -64,6 +64,10 @@ func windowHead(sink *out.Sink, c *mine.Corpus) {
 	}
 }
 
+// keyStreamWindow is the JSON key for the window's counts. It is not "window":
+// around already uses that key for its --window step count.
+const keyStreamWindow = "streamWindow"
+
 // withWindow adds the window's counts to a JSON payload, and only then: an
 // unwindowed payload keeps today's exact keys.
 func withWindow(m map[string]any, c *mine.Corpus) map[string]any {
@@ -75,7 +79,7 @@ func withWindow(m map[string]any, c *mine.Corpus) map[string]any {
 		if !w.Until.IsZero() {
 			win["until"] = w.Until.Format(dateLayout)
 		}
-		m["window"] = win
+		m[keyStreamWindow] = win
 	}
 	return m
 }
