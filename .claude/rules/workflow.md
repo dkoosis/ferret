@@ -13,4 +13,4 @@
 
 ## PR ↔ beads
 
-‡ Every PR body carries a `Closes:` trailer naming the beads it lands: `Closes: ferret-abc, ferret-def` (no bead → `Closes: none`). Squash-merge keeps the trailer in main's commit. **On merge, close them with the ref:** `bd close <ids> --reason "merged #<PR> (<sha>)"`. ✗ merge-then-forget — a landed-but-open bead is a leak.
+‡ Every PR body carries a `Closes:` trailer naming the beads it lands, one `Closes: <id>` line each (no bead → `Closes: none`); `sdlc ship --closes=<ids>` writes them. ✗ `Closes: ferret-abc, ferret-def` on one line — `sdlc merge` cannot read it. Squash-merge keeps the trailer in main's commit. `sdlc merge` closes the beads the trailer names, so ✗ `bd close` after a merge.
