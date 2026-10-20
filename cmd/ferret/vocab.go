@@ -85,7 +85,7 @@ func vocabRows(c *mine.Corpus, sub string) []vocabRow {
 			}
 		}
 	}
-	var rows []vocabRow
+	rows := []vocabRow{} // non-nil: JSON emits "tokens": [] on no match
 	for id, tok := range c.Vocab {
 		if count[id] == 0 || !strings.Contains(tok, sub) {
 			continue

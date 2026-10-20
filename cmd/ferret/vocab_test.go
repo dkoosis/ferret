@@ -112,3 +112,10 @@ func TestVocab_NoMatch_PrintsZeroTokens(t *testing.T) {
 		t.Errorf("want an explicit 0 tokens:\n%s", got)
 	}
 }
+
+func TestVocab_NoMatch_JSONTokensIsEmptyArray(t *testing.T) {
+	got := runVocab(t, writeVocabCorpus(t), fmtJSON, "nope")
+	if !strings.Contains(got, `"tokens": []`) {
+		t.Errorf("want \"tokens\": [] on no match:\n%s", got)
+	}
+}
