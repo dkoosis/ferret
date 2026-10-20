@@ -7,6 +7,10 @@ type MotifCount struct {
 	Count    int // total non-overlapping occurrences
 	Sessions int // distinct streams containing the motif
 	Burn     int // member-call cost in tokens, as Finding.Burn
+	// Known is true when every token of the motif is in the corpus vocabulary.
+	// A zero count with Known false means the motif's tokens do not exist under
+	// this lens at all (often a different lens), not that the motif went away.
+	Known bool
 }
 
 // CountMotif measures a motif given as token strings, straight from the corpus
@@ -31,5 +35,5 @@ func CountMotif(c *Corpus, tokens []string, maxGap int) MotifCount {
 		ids[i] = id
 	}
 	count, sessions, burnBytes, _ := measure(c, ids, maxGap)
-	return MotifCount{Count: count, Sessions: sessions, Burn: burnBytes / BytesPerToken}
+	return MotifCount{Count: count, Sessions: sessions, Burn: burnBytes / BytesPerToken, Known: true}
 }

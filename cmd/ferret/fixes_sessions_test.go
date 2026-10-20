@@ -124,6 +124,30 @@ func TestReportSinceFixesShowsSessionDelta(t *testing.T) {
 	}
 }
 
+// TestLegacyLenslessRowWithForeignTokensIsNotListedAsFixed: a row with no lens
+// whose tokens do not exist in this corpus (likely another lens) must not read
+// as a fix that took the motif to zero. One whose tokens exist but no longer
+// co-occur is a real outcome and is listed.
+func TestLegacyLenslessRowWithForeignTokensIsNotListedAsFixed(t *testing.T) {
+	data := writeSessionFixture(t)
+	at := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	for _, e := range []fixes.Entry{
+		{Motif: "sh:git_add,sh:git_commit -q -F", Fix: "foreign", AddedAt: at, BaselineBurn: 100},
+		{Motif: "Write,Read", Fix: "gone", AddedAt: at, BaselineBurn: 100},
+	} {
+		if err := fixes.Append(fixes.Path(data), e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := runReportSinceFixes(t, data, "text")
+	if strings.Contains(out, "git_add") {
+		t.Errorf("foreign-lens legacy row listed as fixed:\n%s", out)
+	}
+	if row := lineWith(t, out, "Write ⇝ Read"); !strings.Contains(row, "n=0") {
+		t.Errorf("co-occurrence gone but tokens known must list at n=0: %s", row)
+	}
+}
+
 // TestReportListsFixedMotifsNoLongerFindings: a ledgered motif below min-support
 // is not a finding, yet it is printed under its own heading with baseline→now
 // sessions counted from the corpus. A row written before baselineSessions

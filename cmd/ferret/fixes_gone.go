@@ -35,7 +35,9 @@ func minedKeys(corpus *mine.Corpus, findings []*mine.Finding) map[string]bool {
 // mined findings, each re-counted from the corpus at maxGap. Suppressed
 // (wontfix/watch) rows are skipped — they have their own section — and so are
 // rows recorded under a different lens, whose tokens mean something else here
-// (warnLensDivergence already flags those). Newest fix first, then by key.
+// (warnLensDivergence already flags those). A legacy row with no lens is
+// skipped when its tokens are absent from this corpus: that may be another lens,
+// not a motif that went away. Newest fix first, then by key.
 func fixedNotFindings(idx map[string]fixes.Entry, mined map[string]bool, corpus *mine.Corpus, lensName string, maxGap int) []*goneFix {
 	var gone []*goneFix
 	for key := range idx {
@@ -44,7 +46,11 @@ func fixedNotFindings(idx map[string]fixes.Entry, mined map[string]bool, corpus 
 			continue
 		}
 		toks := fixes.SplitMotifKey(key)
-		gone = append(gone, &goneFix{Entry: e, Motif: toks, Now: mine.CountMotif(corpus, toks, maxGap)})
+		now := mine.CountMotif(corpus, toks, maxGap)
+		if e.Lens == "" && !now.Known {
+			continue // legacy row, lens unknown: tokens absent here may just be another lens
+		}
+		gone = append(gone, &goneFix{Entry: e, Motif: toks, Now: now})
 	}
 	slices.SortFunc(gone, func(a, b *goneFix) int {
 		return cmp.Or(b.Entry.AddedAt.Compare(a.Entry.AddedAt), strings.Compare(a.Entry.Motif, b.Entry.Motif))

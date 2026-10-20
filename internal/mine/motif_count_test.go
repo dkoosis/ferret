@@ -12,7 +12,7 @@ func TestCountMotifBelowAnyFloor(t *testing.T) {
 		{{"B", 400}, {"A", 400}},
 	})
 	got := CountMotif(c, []string{"A", "B"}, 3)
-	want := MotifCount{Count: 3, Sessions: 2, Burn: 6 * 400 / BytesPerToken}
+	want := MotifCount{Count: 3, Sessions: 2, Burn: 6 * 400 / BytesPerToken, Known: true}
 	if got != want {
 		t.Errorf("CountMotif = %+v, want %+v", got, want)
 	}
