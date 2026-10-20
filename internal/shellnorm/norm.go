@@ -15,12 +15,19 @@ import (
 // changed split, a different collapse. Two corpora built with different
 // Versions have differently-keyed shell rows, so a per-key delta across them
 // measures the rule change, not the behavior change (ferret-4wc).
+// Seeded friction signatures (internal/friction, ~/.ferret/friction_signatures.jsonl)
+// embed the token too: after a bump, re-run `ferret signatures seed`.
+//
+// v3 (ferret-ilp, 2026-10-20): sdlc, mnemd, ferret and glance keep their
+// subcommand (sdlc ship → sdlc_ship, was sdlc), and the command groups in
+// subcmdGroups keep a second word (gh pr checks → gh_pr_checks, was gh_pr;
+// trixi project create → trixi_project_create; bd dep add → bd_dep_add).
 //
 // v2 (ferret-dep, 2026-08-30): Segment.Flags is computed at ingest from the
 // untruncated statement. Segment.Cmd is untouched, so the tool lens is
 // unchanged — but the cmd lens keys 13,747 shell events differently than a v1
 // corpus does, which is exactly the drift this constant exists to declare.
-const Version = "2"
+const Version = "3"
 
 // Segment is one normalized command from a (possibly compound) bash string.
 type Segment struct {
@@ -77,6 +84,29 @@ var subcmdTools = map[string]bool{
 	"cargo": true, "docker": true, "gh": true, "kubectl": true,
 	"make": true, "bd": true, "snipe": true, "trixi": true, "mage": true,
 	"brew": true, "pip": true, "uv": true, "bun": true, "loto": true,
+	"sdlc": true, "mnemd": true, "ferret": true, "glance": true,
+}
+
+// subcmdGroups are the subcommands whose own next word is a command too
+// (gh pr checks, trixi project create), so the token keeps both words. The
+// lists come from each tool's --help; TestSubcmdGroupsMatchHelp fails when a
+// kong-style tool lists a group missing here. snipe diagram stays one word:
+// internal/snipeusage keys its join on "snipe_"+cmd.
+var subcmdGroups = map[string]map[string]bool{
+	"gh":     {"pr": true, "run": true, "issue": true},
+	"ferret": {"feedback": true, "fixes": true},
+	"trixi": {
+		"context-read": true, "dashboard": true, "doctor": true, "eval": true,
+		"incidents": true, "ingest": true, "kg": true, "loops": true,
+		"metrics": true, "pack": true, "permissions": true, "project": true,
+		"proposals": true, "recipe": true, "retrieval": true, "self": true,
+		"session": true, "skills": true, "triage": true, "workflow": true,
+	},
+	"bd": {
+		"dep": true, "epic": true, "config": true, "vc": true, "swarm": true,
+		"label": true,
+	},
+	"loto": {"hook": true, "gate": true},
 }
 
 // trivial commands carry no behavioral signal on their own.
@@ -258,13 +288,72 @@ func fromCall(c *syntax.CallExpr, st *syntax.Stmt, pr *syntax.Printer) (Segment,
 	if trivial[base] {
 		return Segment{}, false
 	}
-	cmd := base
-	if subcmdTools[base] && len(c.Args) > 1 {
-		if sub := wordLit(c.Args[1]); sub != "" && !strings.HasPrefix(sub, "-") {
-			cmd = base + "_" + sub
+	return Segment{Cmd: token(base, c.Args), Raw: printStmt(st, pr), Flags: flagsFromCall(c)}, true
+}
+
+// token is base, plus its subcommand for a subcmdTools tool, plus the next
+// word for a subcmdGroups group (gh pr checks → gh_pr_checks).
+func token(base string, args []*syntax.Word) string {
+	if !subcmdTools[base] || len(args) < 2 {
+		return base
+	}
+	sub := subWord(args[1])
+	if sub == "" {
+		return base
+	}
+	if subcmdGroups[base][sub] {
+		if leaf := groupLeaf(args[2:]); leaf != "" {
+			return base + "_" + sub + "_" + leaf
 		}
 	}
-	return Segment{Cmd: cmd, Raw: printStmt(st, pr), Flags: flagsFromCall(c)}, true
+	return base + "_" + sub
+}
+
+// groupValueFlags are group-level flags that take a separate value, which
+// groupLeaf skips along with the flag (gh pr --repo o/r create).
+var groupValueFlags = map[string]bool{"-R": true, "--repo": true}
+
+// groupLeaf is the first word of args that names a command, past any flags a
+// group inherits (gh pr --repo o/r create → create). A word that is not a bare
+// lowercase command name (a path, an id, a value of an unknown flag) ends the
+// search, so the token stays at the group.
+func groupLeaf(args []*syntax.Word) string {
+	for i := 0; i < len(args); i++ {
+		w := wordLit(args[i])
+		if strings.HasPrefix(w, "-") {
+			if groupValueFlags[w] {
+				i++
+			}
+			continue
+		}
+		if !isCommandWord(w) {
+			return ""
+		}
+		return w
+	}
+	return ""
+}
+
+// isCommandWord reports whether w reads as a subcommand name: lowercase
+// letters and hyphens, starting with a letter.
+func isCommandWord(w string) bool {
+	if w == "" || w[0] < 'a' || w[0] > 'z' {
+		return false
+	}
+	for _, r := range w {
+		if (r < 'a' || r > 'z') && r != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+// subWord is w's literal when it can name a subcommand: not a flag, not empty.
+func subWord(w *syntax.Word) string {
+	if sub := wordLit(w); !strings.HasPrefix(sub, "-") {
+		return sub
+	}
+	return ""
 }
 
 func wordLit(w *syntax.Word) string {

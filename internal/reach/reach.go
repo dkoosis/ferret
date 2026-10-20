@@ -146,7 +146,9 @@ func Classify(prompt string) (cue string, class Class, ok bool) {
 // --- reach classification ---------------------------------------------------
 
 // bd read subcommands — the ones that consult prior state. Writes (update/close/
-// create/delete/reopen) are not a reach and fall through to skip.
+// create/delete/reopen) are not a reach and fall through to skip. bd_dep and
+// bd_epic are groups (shellnorm's subcmdGroups: bd dep add → bd_dep_add), so a
+// lookup goes through bdSub.
 var bdReadSub = map[string]bool{
 	"bd_show": true, "bd_query": true, "bd_list": true, "bd_ready": true,
 	"bd_search": true, "bd_blocked": true, "bd_stats": true, "bd_prime": true,
@@ -160,6 +162,15 @@ var bdReadSub = map[string]bool{
 // drift. Keep this to genuine gaps in lens, not a parallel copy of its taxonomy.
 var reachLocalGrep = map[string]bool{
 	"ferret": true,
+}
+
+// bdSub trims a bd group token to its group (bd_dep_add → bd_dep), so
+// bdReadSub keys on the subcommand alone.
+func bdSub(cmd string) string {
+	if parts := strings.SplitN(cmd, "_", 3); len(parts) == 3 && parts[0] == "bd" {
+		return parts[0] + "_" + parts[1]
+	}
+	return cmd
 }
 
 // reachExcludeShell narrows lens's coarse read/search class where reach-rate
@@ -236,9 +247,9 @@ func classifyShellCmd(cmd string) (Reach, string) {
 		// was misclassified. event/build.go already treats ask as retrieval;
 		// reach must agree or the two ferret lenses report different worlds.
 		return ReachStore, cmd
-	case bdReadSub[cmd]:
+	case bdReadSub[bdSub(cmd)]:
 		return ReachBeads, cmd
-	case cmd == "snipe" || strings.HasPrefix(cmd, "snipe_") || reachLocalGrep[cmd]:
+	case cmd == "snipe" || strings.HasPrefix(cmd, "snipe_") || reachLocalGrep[strings.SplitN(cmd, "_", 2)[0]]:
 		return ReachGrep, cmd
 	}
 	// Project reach's channels onto lens's single-source coarse class.

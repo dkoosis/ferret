@@ -18,7 +18,9 @@ func TestTerminalAction(t *testing.T) {
 	}{
 		{"commit fires", []string{"Edit", "sh:git_commit"}, "sh:git_commit", true},
 		{"push fires", []string{"sh:git_push"}, "sh:git_push", true},
-		{"gh pr fires", []string{"sh:gh_pr"}, "sh:gh_pr", true},
+		{"gh pr create fires", []string{"sh:gh_pr_create"}, "sh:gh_pr_create", true},
+		{"gh pr merge fires", []string{"sh:gh_pr_merge"}, "sh:gh_pr_merge", true},
+		{"gh pr view does not fire", []string{"sh:gh_pr_view", "sh:gh_pr_checks"}, "", false},
 		{"merge fires", []string{"sh:git_merge"}, "sh:git_merge", true},
 		{"read-only vcs does not fire", []string{"sh:git_status", "sh:git_diff"}, "", false},
 		{"non-vcs shell does not fire", []string{"sh:go_test", "sh:rg"}, "", false},
