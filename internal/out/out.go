@@ -44,6 +44,21 @@ func (s *Sink) Row(format string, args ...any) bool {
 	return true
 }
 
+// RowBytes writes one line against the byte budget only, not the row limit. A
+// section whose rows must not compete with the main rows for --limit keeps its
+// own row count and writes through RowBytes, so --max-bytes still caps the whole
+// output. Returns false (and counts the line as truncated) once the budget is spent.
+func (s *Sink) RowBytes(format string, args ...any) bool {
+	line := fmt.Sprintf(format, args...)
+	if s.maxBytes > 0 && s.bytes+len(line)+1 > s.maxBytes {
+		s.truncated++
+		return false
+	}
+	s.bytes += len(line) + 1
+	fmt.Fprintln(s.w, line)
+	return true
+}
+
 func (s *Sink) Close() error {
 	if s.truncated > 0 {
 		fmt.Fprintf(s.w, "… +%d more (raise -limit / -max-bytes)\n", s.truncated)

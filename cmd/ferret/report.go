@@ -60,6 +60,7 @@ func cmdReport() error {
 	surpriseIdx := mine.SurpriseIndex(sscores)
 	surpriseCut := mine.FrictionCut(sscores)
 	findings, capped := mineFindings(corpus, cmd.MinSupport, cmd.MaxGap, cmd.MaxLen, cmd.Order, cmd.Top, surpriseIdx, surpriseCut)
+	mined := minedKeys(corpus, findings) // before the kind/noise filters below
 	if cmd.Kind != "" {
 		filtered := findings[:0:0]
 		for _, f := range findings {
@@ -98,7 +99,9 @@ func cmdReport() error {
 	// out here (and shown separately with their reason) so the loop's memory
 	// holds across scans. Only meaningful under --since-fixes (nil index = off).
 	var suppressed []*mine.Finding
+	var gone []*goneFix //ledgered fixes whose motif left the findings
 	if fixIdx != nil {
+		gone = fixedNotFindings(fixIdx, mined, corpus, l.Name(), cmd.MaxGap)
 		keep := findings[:0:0]
 		for _, f := range findings {
 			if e, ok := fixIdx[fixes.MotifKey(corpus.Tokens(f.IDs))]; ok && e.Suppressed() {
@@ -156,6 +159,10 @@ func cmdReport() error {
 			Fix          string   `json:"fix,omitempty"`
 			FixedAt      string   `json:"fixedAt,omitempty"`
 			BaselineBurn int      `json:"baselineBurn,omitempty"`
+			// BaselineSessions/BaselineCount: the ledger's session and occurrence
+			// baselines; absent on a row written before they were recorded.
+			BaselineSessions int `json:"baselineSessions,omitempty"`
+			BaselineCount    int `json:"baselineCount,omitempty"`
 		}
 		rows := make([]jf, 0, len(findings))
 		for i, f := range findings {
@@ -173,6 +180,7 @@ func cmdReport() error {
 			if e, ok := fixIdx[fixes.MotifKey(corpus.Tokens(f.IDs))]; ok {
 				row.Fixed, row.Fix = true, e.Fix
 				row.FixedAt, row.BaselineBurn = e.AddedAt.Format("2006-01-02"), e.BaselineBurn
+				row.BaselineSessions, row.BaselineCount = e.BaselineSessions, e.BaselineCount
 			}
 			rows = append(rows, row)
 		}
@@ -183,6 +191,7 @@ func cmdReport() error {
 		if sup := suppressedRows(fixIdx, corpus, suppressed); len(sup) > 0 {
 			payload["suppressed"] = sup
 		}
+		addGoneFixes(payload, gone, c.limit)
 		return out.JSON(os.Stdout, payload)
 	}
 
@@ -216,7 +225,7 @@ func cmdReport() error {
 		"≡ surp = mean bits/tok of the sessions a motif recurs in: a high-surp routine is friction (fix it), low-surp is routine (script it).",
 		legendMarks)
 	if fixIdx != nil {
-		sink.Head("≡ since-fixes: [fixed DATE burn BASE→NOW ↓/↑/=] annotates motifs in the ledger (↓ = fix landed).")
+		sink.Head("≡ since-fixes: [fixed DATE burn BASE→NOW ↓/↑/= sess BASEs→NOWs ↓/↑/=] annotates motifs in the ledger (↓ = fix landed; sessions have their own arrow).")
 	}
 	sink.Head("report lens=%s findings=%d (min-support=%d order=%d)",
 		l.Name(), len(findings), cmd.MinSupport, cmd.Order)
@@ -228,7 +237,7 @@ func cmdReport() error {
 		row := fmt.Sprintf("%-8s %-8s burn=%-8d side=%3.0f%% n=%-5d sess=%-4d fail=%2.0f%% surp=%4.1f  %s  ex: %s",
 			f.Kind, f.Action, f.Burn, sideShare(f)*100, f.Count, f.Sessions, f.FailRate*100, f.Surprise,
 			strings.Join(corpus.Tokens(f.IDs), " ⇝ "), exemplar(corpus, f.ExStream, f.ExSeq))
-		if ann, ok := sinceFixAnnotation(fixIdx, corpus.Tokens(f.IDs), f.Burn); ok {
+		if ann, ok := sinceFixAnnotation(fixIdx, corpus.Tokens(f.IDs), f.Burn, f.Sessions); ok {
 			row += ann
 		}
 		row += reportDialogueNote(f)
@@ -242,6 +251,7 @@ func cmdReport() error {
 				strings.Join(corpus.Tokens(f.IDs), " ⇝ "), suppressReason(e))
 		}
 	}
+	writeGoneFixes(sink, gone, cmd.MinSupport, c.limit)
 	// Legal moves, not a plan (DK-AXI rule 11): a motif's burn is gross cost —
 	// the merged view prices how much of it bought nothing, and the ledger is
 	// where a decided fix goes.
@@ -299,8 +309,8 @@ func warnLensDivergence(idx map[string]fixes.Entry, corpus *mine.Corpus, kept, s
 		matched[fixes.MotifKey(corpus.Tokens(f.IDs))] = true
 	}
 	n := 0
-	for key, e := range idx {
-		if !matched[key] && e.Lens != "" && e.Lens != lensName {
+	for key := range idx {
+		if lens := idx[key].Lens; !matched[key] && lens != "" && lens != lensName {
 			n++
 		}
 	}
@@ -324,14 +334,26 @@ func plural(n int, one, many string) string {
 // returning the human-readable annotation suffix and whether a fix matched.
 // Pure (no corpus/disk) so the motif-keyed join + burn-delta formatting is
 // unit-testable. A nil index (flag off) yields no match.
-func sinceFixAnnotation(idx map[string]fixes.Entry, motif []string, currentBurn int) (string, bool) {
+func sinceFixAnnotation(idx map[string]fixes.Entry, motif []string, currentBurn, currentSessions int) (string, bool) {
 	e, ok := idx[fixes.MotifKey(motif)]
 	if !ok {
 		return "", false
 	}
-	a := fixes.Annotation{Entry: e, Current: currentBurn}
-	return fmt.Sprintf("  [fixed %s burn %s→%s %s]",
-		e.AddedAt.Format("2006-01-02"), compactBurn(e.BaselineBurn), compactBurn(currentBurn), a.Arrow()), true
+	return fixAnnotation(e, currentBurn, currentSessions), true
+}
+
+// fixAnnotation renders one ledger entry against the motif's current burn and
+// session count: "  [fixed DATE burn A→B ↓ sess 64s→Ns ↓]". Burn and sessions
+// each carry their own arrow. A row with no session baseline (written before
+// the field existed) prints the burn delta alone.
+func fixAnnotation(e fixes.Entry, currentBurn, currentSessions int) string {
+	a := fixes.Annotation{Entry: e, Current: currentBurn, CurrentSessions: currentSessions}
+	sess := ""
+	if arrow := a.SessionsArrow(); arrow != "" {
+		sess = fmt.Sprintf(" sess %ds→%ds %s", e.BaselineSessions, currentSessions, arrow)
+	}
+	return fmt.Sprintf("  [fixed %s burn %s→%s %s%s]",
+		e.AddedAt.Format("2006-01-02"), compactBurn(e.BaselineBurn), compactBurn(currentBurn), a.Arrow(), sess)
 }
 
 // sideShare is the fraction of a finding's burn drawn from subagent sidechain

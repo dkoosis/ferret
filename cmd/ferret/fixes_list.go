@@ -30,7 +30,8 @@ func cmdFixesList() error {
 	sink := out.NewSink(os.Stdout, 0, 0)
 	defer sink.Close()
 	sink.Head("fixes recorded=%d (ledger %s)", len(entries), fixes.Path(data))
-	for _, e := range entries {
+	for i := range entries {
+		e := &entries[i]
 		note := ""
 		if e.Note != "" {
 			note = "  — " + e.Note
