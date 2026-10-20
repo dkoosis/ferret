@@ -70,10 +70,15 @@ func runReportSinceFixes(t *testing.T, data, format string) string {
 
 func runReportLimit(t *testing.T, data, format string, limit int) string {
 	t.Helper()
+	return runReportOpts(t, data, format, limit, 0)
+}
+
+func runReportOpts(t *testing.T, data, format string, limit, maxBytes int) string {
+	t.Helper()
 	saved := CLI.Report
 	t.Cleanup(func() { CLI.Report = saved })
 	r := &CLI.Report
-	r.Data, r.Format, r.Limit, r.Lens = data, format, limit, "tool"
+	r.Data, r.Format, r.Limit, r.MaxBytes, r.Lens = data, format, limit, maxBytes, "tool"
 	r.MinSupport, r.MaxGap, r.MaxLen, r.Order, r.Top = reportMinSupport, reportMaxGap, reportMaxLen, reportOrder, reportTop
 	r.SinceFixes = true
 	return captureStdout(t, cmdReport)
@@ -188,6 +193,30 @@ func TestGoneRowWithUnknownTokensClaimsNoDelta(t *testing.T) {
 	}
 	if row := lineWith(t, out, "Write ⇝ Read"); !strings.Contains(row, "n=0") || !strings.Contains(row, "sess 9s→0s ↓") {
 		t.Errorf("co-occurrence gone but tokens known must list at n=0 with its delta: %s", row)
+	}
+}
+
+// TestReportTextGoneRowsHonourMaxBytes: the gone rows sit outside the row limit
+// but not outside --max-bytes; a budget that fits the report minus its last row
+// drops that row and says so in the truncation footer.
+func TestReportTextGoneRowsHonourMaxBytes(t *testing.T) {
+	data := writeSessionFixture(t)
+	at := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	for _, m := range []string{"Glob,Bash", "Grep,Write", "Write,Read"} { // key order: the last prints last
+		e := fixes.Entry{Motif: m, Fix: "f", AddedAt: at, BaselineBurn: 100, Lens: "tool", BaselineSessions: 9}
+		if err := fixes.Append(fixes.Path(data), e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	full := runReportLimit(t, data, "text", -1)
+	if !strings.Contains(full, "Write ⇝ Read") {
+		t.Fatalf("setup: last gone row missing:\n%s", full)
+	}
+	// A budget that ends just inside the last row's line: the two rows before it fit.
+	before, _, _ := strings.Cut(full, "✓ n=0")
+	capped := runReportOpts(t, data, "text", -1, len(before)+10)
+	if strings.Contains(capped, "Write ⇝ Read") || !strings.Contains(capped, "more (raise") {
+		t.Errorf("--max-bytes must drop the last gone row and say so:\n%s", capped)
 	}
 }
 

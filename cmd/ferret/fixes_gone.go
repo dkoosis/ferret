@@ -75,6 +75,7 @@ func goneFixLine(g *goneFix) string {
 // own --limit budget (limit > 0 caps; zero or negative is unlimited) rather than
 // the sink's, which the findings above have already spent: sharing it would leave
 // a heading with no rows under it on any corpus with a full page of findings.
+// --max-bytes still caps them, through the sink's byte budget.
 func writeGoneFixes(sink *out.Sink, gone []*goneFix, minSupport, limit int) {
 	if len(gone) == 0 {
 		return
@@ -86,7 +87,7 @@ func writeGoneFixes(sink *out.Sink, gone []*goneFix, minSupport, limit int) {
 		shown = gone[:limit]
 	}
 	for _, g := range shown {
-		sink.Head("%s", goneFixLine(g))
+		sink.RowBytes("%s", goneFixLine(g)) // --max-bytes still caps these; --limit is counted above
 	}
 	if len(shown) < len(gone) {
 		sink.Head("… +%d more fixed motifs (raise -limit)", len(gone)-len(shown))
