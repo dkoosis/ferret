@@ -45,6 +45,11 @@ func cmdTokens() error {
 		}
 	}
 	if len(matches) == 0 {
+		if ln := windowLine(corpus); ln != "" {
+			// The window may have dropped the session; say so, or this reads as
+			// a session that does not exist.
+			return fmt.Errorf("%w: %q (%s)", errNoStreamMatch, cmd.Session, ln)
+		}
 		return fmt.Errorf("%w: %q", errNoStreamMatch, cmd.Session)
 	}
 	if c.format == fmtJSON {

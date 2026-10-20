@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -25,6 +26,26 @@ func TestReportMD_Window_NamesTheWindow(t *testing.T) {
 	CLI.Report.Since = ""
 	if plain := captureStdout(t, cmdReport); strings.Contains(plain, "window") {
 		t.Errorf("unwindowed markdown report mentions a window:\n%s", plain)
+	}
+}
+
+// A session the window dropped must not read as a session that does not exist.
+func TestTokensWindow_DroppedSession_ErrorNamesTheWindow(t *testing.T) {
+	data := writeWindowCorpus(t)
+	saved := CLI.Tokens
+	t.Cleanup(func() { CLI.Tokens = saved })
+	CLI.Tokens.Data, CLI.Tokens.Format, CLI.Tokens.Limit = data, fmtText, -1
+	CLI.Tokens.Lens, CLI.Tokens.Session = "cmd", "s1"
+
+	CLI.Tokens.Since = "2026-10-19"
+	err := cmdTokens()
+	if !errors.Is(err, errNoStreamMatch) || !strings.Contains(err.Error(), wantWindowLine) {
+		t.Errorf("windowed tokens error = %v, want errNoStreamMatch naming %q", err, wantWindowLine)
+	}
+
+	CLI.Tokens.Since = ""
+	if err := cmdTokens(); err != nil {
+		t.Errorf("unwindowed tokens for s1: %v", err)
 	}
 }
 
