@@ -197,7 +197,7 @@ func warnAmbiguousSession(session string, distinct int, chosen, verb string) {
 type CommonFlags struct {
 	Data     string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
 	Format   string `help:"Output format: text|json (graph: +mermaid|dot|sankey)." default:"text" name:"format"`
-	Limit    int    `help:"Max rows (unset = the command's compact default; N = exactly N; negative = unlimited, written --limit=-1)." default:"0" name:"limit"`
+	Limit    Limit  `help:"Max rows (unset = the command's compact default; N = exactly N; no cap = --limit all, or --limit=-1)." default:"0" name:"limit"`
 	MaxBytes int    `help:"Max output bytes, text only (0 = unlimited)." default:"0" name:"max-bytes"`
 }
 
@@ -725,7 +725,7 @@ func fromCommonFlags(cf CommonFlags) (*common, error) {
 		}
 		data = d
 	}
-	return &common{data: data, format: cf.Format, limit: cf.Limit, maxBytes: cf.MaxBytes}, nil
+	return &common{data: data, format: cf.Format, limit: int(cf.Limit), maxBytes: cf.MaxBytes}, nil
 }
 
 func (c *common) eventsPath() string { return filepath.Join(c.data, "events.jsonl") }
