@@ -91,7 +91,20 @@ type Entry struct {
 	// divergence instead of failing quietly. omitempty + a tolerant reader keep
 	// rows written before the field existed working.
 	Lens string `json:"lens,omitempty"`
+	// BaselineSessions and BaselineCount are the motif's distinct-session and
+	// occurrence counts under Lens at record time — the "before" of a fix judged
+	// by "fewer sessions run this routine". Counted straight from the corpus, so a
+	// motif below the report's min-support still gets a true baseline. omitzero: a
+	// row written before these fields existed reads 0, and HasSessionBaseline
+	// then says there is no session delta to print.
+	BaselineSessions int `json:"baselineSessions,omitzero"`
+	BaselineCount    int `json:"baselineCount,omitzero"`
 }
+
+// HasSessionBaseline reports whether the entry recorded a session count. A row
+// from before the field existed (or a motif the corpus never showed) has none,
+// so report prints no session delta for it rather than a bogus "0s→Ns".
+func (e Entry) HasSessionBaseline() bool { return e.BaselineSessions > 0 }
 
 // Disp returns the entry's verdict, defaulting a missing/empty Disposition to
 // DispositionFix. This is the single back-compat point: every reader asks Disp,
@@ -134,6 +147,30 @@ func MotifKey(tokens []string) string {
 		esc[i] = strings.ReplaceAll(strings.ReplaceAll(t, `\`, `\\`), ",", `\,`)
 	}
 	return strings.Join(esc, ",")
+}
+
+// SplitMotifKey is the inverse of MotifKey: it recovers a motif's token sequence
+// from the ledger's join key, undoing the '\' and ',' escaping. report uses it
+// to re-measure a ledgered motif that is no longer a finding.
+func SplitMotifKey(key string) []string {
+	var toks []string
+	var cur strings.Builder
+	escaped := false
+	for _, r := range key {
+		switch {
+		case escaped:
+			cur.WriteRune(r)
+			escaped = false
+		case r == '\\':
+			escaped = true
+		case r == ',':
+			toks = append(toks, cur.String())
+			cur.Reset()
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	return append(toks, cur.String())
 }
 
 // ParseMotif splits a user-supplied --motif string ("Edit!, Read") into its
@@ -233,8 +270,8 @@ func Append(path string, e Entry) error {
 // regression supersedes the original. This is the join table report consumes.
 func Index(entries []Entry) map[string]Entry {
 	idx := make(map[string]Entry, len(entries))
-	for _, e := range entries {
-		idx[e.Motif] = e // later (more recent) entries overwrite earlier ones
+	for i := range entries {
+		idx[entries[i].Motif] = entries[i] // later (more recent) entries overwrite earlier ones
 	}
 	return idx
 }
@@ -242,17 +279,35 @@ func Index(entries []Entry) map[string]Entry {
 // Annotation pairs a motif's recorded fix with its current burn this ingest —
 // the joined view report renders as "fixed <date>, burn <baseline>→<current>".
 type Annotation struct {
-	Entry   Entry
-	Current int // current burn (tokens) for the motif this ingest
+	Entry           Entry
+	Current         int // current burn (tokens) for the motif this ingest
+	CurrentSessions int // distinct sessions the motif runs in this ingest
 }
 
-// Arrow reports the delta direction: ↓ when burn fell (the fix landed), ↑ when
-// it rose (regression), = when unchanged.
+// Arrow reports the BURN delta direction: ↓ when burn fell (the fix landed), ↑
+// when it rose (regression), = when unchanged. It judges burn only; sessions
+// have their own arrow (SessionsArrow) because the two can move apart — a fix
+// can cut the cost of each run without changing how many sessions run it.
 func (a Annotation) Arrow() string {
+	return arrow(a.Current, a.Entry.BaselineBurn)
+}
+
+// SessionsArrow reports the session-count delta direction on the same terms as
+// Arrow. It returns "" when the entry has no session baseline (HasSessionBaseline),
+// so the caller prints no session delta for a pre-change ledger row.
+func (a Annotation) SessionsArrow() string {
+	if !a.Entry.HasSessionBaseline() {
+		return ""
+	}
+	return arrow(a.CurrentSessions, a.Entry.BaselineSessions)
+}
+
+// arrow compares now to the baseline: ↓ fell, ↑ rose, = unchanged.
+func arrow(now, base int) string {
 	switch {
-	case a.Current < a.Entry.BaselineBurn:
+	case now < base:
 		return "↓"
-	case a.Current > a.Entry.BaselineBurn:
+	case now > base:
 		return "↑"
 	default:
 		return "="

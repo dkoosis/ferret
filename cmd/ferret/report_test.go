@@ -20,7 +20,7 @@ func TestSinceFixAnnotation(t *testing.T) {
 	})
 
 	// Matched motif, burn fell → ↓ with compacted before→after figures.
-	got, ok := sinceFixAnnotation(idx, []string{"Edit!", "Read"}, 11000)
+	got, ok := sinceFixAnnotation(idx, []string{"Edit!", "Read"}, 11000, 7)
 	if !ok {
 		t.Fatal("expected a match for a ledgered motif")
 	}
@@ -29,19 +29,23 @@ func TestSinceFixAnnotation(t *testing.T) {
 			t.Errorf("annotation %q missing %q", got, want)
 		}
 	}
+	// This row predates the session baseline: no session delta, not a bogus "0s→7s".
+	if strings.Contains(got, "sess") {
+		t.Errorf("pre-change row must print no session delta, got %q", got)
+	}
 
 	// Matched motif, burn rose → ↑ (regression).
-	if up, _ := sinceFixAnnotation(idx, []string{"Edit!", "Read"}, 300000); !strings.Contains(up, "↑") {
+	if up, _ := sinceFixAnnotation(idx, []string{"Edit!", "Read"}, 300000, 7); !strings.Contains(up, "↑") {
 		t.Errorf("rising burn must read ↑, got %q", up)
 	}
 
 	// Unmatched motif → no annotation.
-	if _, ok := sinceFixAnnotation(idx, []string{"Grep", "Read"}, 9000); ok {
+	if _, ok := sinceFixAnnotation(idx, []string{"Grep", "Read"}, 9000, 7); ok {
 		t.Error("unledgered motif must not annotate")
 	}
 
 	// Nil index (flag off) → safe no-op.
-	if _, ok := sinceFixAnnotation(nil, []string{"Edit!", "Read"}, 11000); ok {
+	if _, ok := sinceFixAnnotation(nil, []string{"Edit!", "Read"}, 11000, 7); ok {
 		t.Error("nil index must not annotate")
 	}
 }

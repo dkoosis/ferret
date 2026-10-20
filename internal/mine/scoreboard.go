@@ -138,8 +138,8 @@ func BuildScoreboard(corpus *Corpus, findings []*Finding, waste WasteReport, led
 // order is not).
 func buildDelta(corpus *Corpus, findings []*Finding, idx map[string]fixes.Entry) []ScoreboardDelta {
 	keys := make([]string, 0, len(idx))
-	for key, e := range idx {
-		if e.Disp() == fixes.DispositionFix {
+	for key := range idx {
+		if e := idx[key]; e.Disp() == fixes.DispositionFix {
 			keys = append(keys, key)
 		}
 	}
