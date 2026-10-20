@@ -78,6 +78,7 @@ var commandSurfaces = map[string]cmdSurface{
 	"summary":         {kind: surfaceLocal},
 	"ngrams":          {kind: surfaceLocal},
 	"seqs":            {kind: surfaceLocal},
+	"around":          {kind: surfaceLocal},
 	"rank":            {kind: surfaceLocal},
 	"report":          {kind: surfaceLocal},
 	"surprise":        {kind: surfaceLocal},

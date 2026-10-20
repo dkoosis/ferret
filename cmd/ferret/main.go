@@ -247,6 +247,13 @@ var CLI struct {
 		MaxLen     int `help:"Max pattern length." default:"5" name:"max-len"`
 	} `cmd:"" help:"Gapped subsequences (PrefixSpan)."`
 
+	Around struct {
+		CommonFlags
+		LensFlags
+		Token  string `arg:"" help:"Exact token, or a substring that matches only one token." name:"token"`
+		Window int    `help:"Steps out from the token, 1..3." default:"1" name:"window"`
+	} `cmd:"" help:"Tokens before and after one token, with counts, plus the gapped routines through it."`
+
 	Rank struct {
 		CommonFlags
 		LensFlags
@@ -574,6 +581,8 @@ func main() {
 		err = cmdNgrams()
 	case "seqs":
 		err = cmdSeqs()
+	case "around <token>":
+		err = cmdAround()
 	case "rank":
 		err = cmdRank()
 	case "report":
