@@ -43,11 +43,11 @@ func cmdSurprise() error {
 	routine, thrash := splitSurprise(scores, c.limit)
 
 	if c.format == fmtJSON {
-		return out.JSON(os.Stdout, map[string]any{
+		return out.JSON(os.Stdout, withWindow(map[string]any{
 			keyLens: l.Name(), "order": cmd.Order, "meanBits": mean,
 			"routine": routine, "thrash": thrash,
 			keyTotal: len(scores), keyTruncated: len(routine)+len(thrash) < len(scores),
-		})
+		}, corpus))
 	}
 	sink := out.NewSink(os.Stdout, c.limit+2, c.maxBytes)
 	defer sink.Close()
@@ -56,6 +56,7 @@ func cmdSurprise() error {
 		"≡ (order-N context model). Low bits/tok = rote routine worth scripting; high = novel work or thrash.")
 	sink.Head("surprise lens=%s order=%d streams=%d mean=%.2f bits/tok (low=routine/scriptable, high=thrash)",
 		l.Name(), cmd.Order, len(scores), mean)
+	windowHead(sink, corpus)
 	sink.Head("most routine:")
 	for _, s := range routine {
 		sink.Row("%6.2f bits %5d toks  %s", s.Bits, s.Toks, s.Stream)

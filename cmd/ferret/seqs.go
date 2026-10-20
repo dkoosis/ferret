@@ -53,10 +53,10 @@ func cmdSeqs() error {
 			}
 			rows = append(rows, jp{corpus.Tokens(p.IDs), p.Support, exemplar(corpus, p.ExStream, p.ExSeq)})
 		}
-		return out.JSON(os.Stdout, map[string]any{
+		return out.JSON(os.Stdout, withWindow(map[string]any{
 			keyLens: l.Name(), "maxGap": cmd.MaxGap, "patterns": rows,
 			keyTotal: len(pats), keyTruncated: len(rows) < len(pats) || capped,
-		})
+		}, corpus))
 	}
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
 	defer sink.Close()
@@ -66,6 +66,7 @@ func cmdSeqs() error {
 		legendMarks)
 	sink.Head("seqs lens=%s%s streams=%d patterns=%d (min-support=%d max-gap=%d max-len=%d)",
 		l.Name(), containsTag(cmd.Contains), len(corpus.Streams), len(pats), cmd.MinSupport, cmd.MaxGap, cmd.MaxLen)
+	windowHead(sink, corpus)
 	if capped {
 		sink.Head("‡ search hit the 10000-pattern cap — raise --min-support")
 	}

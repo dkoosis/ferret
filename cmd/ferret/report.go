@@ -183,7 +183,7 @@ func cmdReport() error {
 		if sup := suppressedRows(fixIdx, corpus, suppressed); len(sup) > 0 {
 			payload["suppressed"] = sup
 		}
-		return out.JSON(os.Stdout, payload)
+		return out.JSON(os.Stdout, withWindow(payload, corpus))
 	}
 
 	// --format md renders the human cost report: the same findings projected into
@@ -220,6 +220,7 @@ func cmdReport() error {
 	}
 	sink.Head("report lens=%s findings=%d (min-support=%d order=%d)",
 		l.Name(), len(findings), cmd.MinSupport, cmd.Order)
+	windowHead(sink, corpus)
 	emptyNote(sink, len(findings), "findings")
 	if capped {
 		sink.Head("‡ seqs hit the 10000-pattern cap — raise --min-support")

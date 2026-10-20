@@ -71,10 +71,11 @@ func cmdTokens() error {
 			}
 			streams = append(streams, s)
 		}
-		return out.JSON(os.Stdout, map[string]any{keyLens: l.Name(), "streams": streams})
+		return out.JSON(os.Stdout, withWindow(map[string]any{keyLens: l.Name(), "streams": streams}, corpus))
 	}
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
 	defer sink.Close()
+	windowHead(sink, corpus)
 	for _, si := range matches {
 		sink.Head("stream %s lens=%s toks=%d", corpus.StreamKeys[si], l.Name(), len(corpus.Streams[si]))
 		for _, t := range corpus.Streams[si] {

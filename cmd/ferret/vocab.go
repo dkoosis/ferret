@@ -46,9 +46,9 @@ func cmdVocab() error {
 		if c.limit > 0 && len(shown) > c.limit {
 			shown = shown[:c.limit]
 		}
-		return out.JSON(os.Stdout, map[string]any{
+		return out.JSON(os.Stdout, withWindow(map[string]any{
 			keyLens: l.Name(), "tokens": shown, keyTotal: len(rows), keyTruncated: len(shown) < len(rows),
-		})
+		}, corpus))
 	}
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
 	defer sink.Close()
@@ -61,6 +61,7 @@ func cmdVocab() error {
 		head += fmt.Sprintf(" contains=%q", cmd.Substring)
 	}
 	sink.Head("%s streams=%d tokens=%d", head, len(corpus.Streams), len(rows))
+	windowHead(sink, corpus)
 	emptyNote(sink, len(rows), "tokens")
 	for _, r := range rows {
 		sink.Row("  %s  %d occ / %d sessions", r.Token, r.Count, r.Sessions)

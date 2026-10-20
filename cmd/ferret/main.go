@@ -207,6 +207,8 @@ type LensFlags struct {
 	NoMarkFail  bool   `help:"Don't append ! to failed-action tokens." name:"no-mark-fail"`
 	NoCollapse  bool   `help:"Don't run-length collapse repeated tokens." name:"no-collapse"`
 	NoSidechain bool   `help:"Exclude sidechain events." name:"no-sidechain"`
+	Since       string `help:"Keep only streams that started on or after this date, YYYY-MM-DD (a stream with no timestamp is dropped)." name:"since"`
+	Until       string `help:"Keep only streams that started on or before this date, YYYY-MM-DD, inclusive." name:"until"`
 }
 
 // CLI is the root grammar parsed by kong.
@@ -887,6 +889,8 @@ type lensOpts struct {
 	noMarkFail  bool
 	noCollapse  bool
 	noSidechain bool
+	since       string // YYYY-MM-DD, "" = unbounded
+	until       string // YYYY-MM-DD inclusive, "" = unbounded
 }
 
 func fromLensFlags(lf LensFlags) *lensOpts {
@@ -895,6 +899,8 @@ func fromLensFlags(lf LensFlags) *lensOpts {
 		noMarkFail:  lf.NoMarkFail,
 		noCollapse:  lf.NoCollapse,
 		noSidechain: lf.NoSidechain,
+		since:       lf.Since,
+		until:       lf.Until,
 	}
 }
 
@@ -903,10 +909,16 @@ func (lo *lensOpts) corpus(eventsPath string) (*mine.Corpus, lens.Lens, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	since, until, err := corpusWindow(lo.since, lo.until)
+	if err != nil {
+		return nil, nil, err
+	}
 	c, err := mine.Build(eventsPath, l, mine.Options{
 		MarkFail:    !lo.noMarkFail,
 		Collapse:    !lo.noCollapse,
 		NoSidechain: lo.noSidechain,
+		Since:       since,
+		Until:       until,
 	})
 	return c, l, err
 }

@@ -72,11 +72,11 @@ func cmdRank() error {
 			}
 			buckets[b] = rows
 		}
-		return out.JSON(os.Stdout, map[string]any{
+		return out.JSON(os.Stdout, withWindow(map[string]any{
 			keyLens: l.Name(), "order": cmd.Order, "buckets": buckets,
 			"noise": noise, keyTotal: len(cards),
 			keyTruncated: overflow > 0 || capped,
-		})
+		}, corpus))
 	}
 	sink := out.NewSink(os.Stdout, 0, c.maxBytes)
 	defer sink.Close()
@@ -86,6 +86,7 @@ func cmdRank() error {
 		legendMarks)
 	sink.Head("rank lens=%s patterns=%d → cards=%d noise=%d (min-support=%d order=%d top=%d)",
 		l.Name(), len(pats), len(cards), noise, cmd.MinSupport, cmd.Order, cmd.Top)
+	windowHead(sink, corpus)
 	if capped {
 		sink.Head("‡ seqs hit the 10000-pattern cap — raise --min-support")
 	}

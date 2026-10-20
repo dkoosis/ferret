@@ -30,7 +30,7 @@ func TestExitCodeFor_SeparatesUsageFromFailure_When_ErrorIsValidation(t *testing
 		errBadFormat, errBadKind, errBadSource, errMaxBytesJSON, errMaxBytesMD,
 		errMinSupport, errMaxGap, errMaxLen, errOrder,
 		errBadBy, errBadRange, errEmitWindow,
-		errBadSince, errBadUntil, errReachWindow,
+		errBadSince, errBadUntil, errReachWindow, errFrictionWindow,
 		errAdjSessionRequired, errSpineSessionRequired, errFeedbackSessionRequired,
 		errFeedbackSearchEventRequired, errFixMotifRequired, errOverInitSessionRequired,
 	}

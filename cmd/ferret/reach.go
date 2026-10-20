@@ -55,18 +55,18 @@ func resolveWindow(since, until string) (reach.Window, error) {
 	if until == "" {
 		w.Until = endOfDay(now)
 	} else {
-		t, err := time.ParseInLocation(dateLayout, until, time.Local)
+		t, err := parseDateFlag(until, errBadUntil)
 		if err != nil {
-			return w, fmt.Errorf("%w: %q", errBadUntil, until)
+			return w, err
 		}
 		w.Until = endOfDay(t)
 	}
 	if since == "" {
 		w.Since = startOfDay(now.AddDate(0, 0, -7))
 	} else {
-		t, err := time.ParseInLocation(dateLayout, since, time.Local)
+		t, err := parseDateFlag(since, errBadSince)
 		if err != nil {
-			return w, fmt.Errorf("%w: %q", errBadSince, since)
+			return w, err
 		}
 		w.Since = startOfDay(t)
 	}
@@ -74,6 +74,17 @@ func resolveWindow(since, until string) (reach.Window, error) {
 		return w, errReachWindow
 	}
 	return w, nil
+}
+
+// parseDateFlag parses one YYYY-MM-DD flag value in local time, wrapping bad
+// (errBadSince or errBadUntil) when it does not parse. reach and the corpus
+// commands' --since/--until share it, so the two spell dates the same way.
+func parseDateFlag(s string, bad error) (time.Time, error) {
+	t, err := time.ParseInLocation(dateLayout, s, time.Local)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%w: %q", bad, s)
+	}
+	return t, nil
 }
 
 func startOfDay(t time.Time) time.Time {

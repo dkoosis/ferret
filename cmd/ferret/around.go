@@ -71,12 +71,12 @@ func cmdAround() error {
 
 	if c.format == fmtJSON {
 		b, a := aroundJSON(corpus, before, c.limit), aroundJSON(corpus, after, c.limit)
-		return out.JSON(os.Stdout, map[string]any{
+		return out.JSON(os.Stdout, withWindow(map[string]any{
 			keyLens: l.Name(), "token": corpus.Vocab[id], "window": cmd.Window, "streams": len(corpus.Streams),
 			"before": b, "after": a, "seqs": seqsJSON(corpus, pats),
 			"beforeTotal": len(before), "afterTotal": len(after), "seqsTotal": seqTotal, "seqsCapped": capped,
 			keyTruncated: len(b) < len(before) || len(a) < len(after) || len(pats) < seqTotal || capped,
-		})
+		}, corpus))
 	}
 	aroundText(corpus, l.Name(), id, cmd.Window, before, after, pats, capped, c)
 	return nil
@@ -93,6 +93,7 @@ func aroundText(corpus *mine.Corpus, lensName string, id uint32, window int,
 		"≡ Nx/Ms = N occurrences in M sessions; a session is a stream (project/session@agent). dN = N steps away.",
 		legendMarks)
 	sink.Head("around %s lens=%s window=%d streams=%d", corpus.Vocab[id], lensName, window, len(corpus.Streams))
+	windowHead(sink, corpus)
 	aroundTable(sink, corpus, "before", before, c.limit)
 	aroundTable(sink, corpus, "after", after, c.limit)
 	sink.Head("seqs through it (min-support=%d max-gap=%d, top %d)", reportMinSupport, reportMaxGap, aroundSeqTop)

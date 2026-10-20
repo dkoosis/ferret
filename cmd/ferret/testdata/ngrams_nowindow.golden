@@ -1,0 +1,5 @@
+≡ ngrams: exact action sequences repeated verbatim (no gaps). High count across many
+≡ sessions = a habitual routine — script/skill candidate. Nx/Ms = N occurrences in M sessions.
+≡ tok! failed · tok? in failed chain · tok+ collapsed repeat run · ex: session@pos
+ngrams lens=cmd n=2-5 contains=bd_close streams=4 grams=1 (min-count=1 min-sessions=2)
+    4x/4   s sh:git_status → sh:bd_show → sh:bd_close → sh:git_commit → sh:git_push  ex: s1@@1

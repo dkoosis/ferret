@@ -53,10 +53,10 @@ func cmdNgrams() error {
 			}
 			rows = append(rows, jg{corpus.Tokens(g.IDs), g.Count, g.Sessions, exemplar(corpus, g.ExStream, g.ExSeq)})
 		}
-		return out.JSON(os.Stdout, map[string]any{
+		return out.JSON(os.Stdout, withWindow(map[string]any{
 			keyLens: l.Name(), "n": cmd.N, "grams": rows,
 			keyTotal: len(grams), keyTruncated: len(rows) < len(grams),
-		})
+		}, corpus))
 	}
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
 	defer sink.Close()
@@ -66,6 +66,7 @@ func cmdNgrams() error {
 		legendMarks)
 	sink.Head("ngrams lens=%s n=%s%s streams=%d grams=%d (min-count=%d min-sessions=%d)",
 		l.Name(), cmd.N, containsTag(cmd.Contains), len(corpus.Streams), len(grams), cmd.MinCount, cmd.MinSessions)
+	windowHead(sink, corpus)
 	emptyNote(sink, len(grams), "grams")
 	for _, g := range grams {
 		sink.Row("%5dx/%-4ds %s  ex: %s",
