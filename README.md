@@ -203,7 +203,7 @@ assembles the prompt without calling anything.
 | Command | Surface | Common flags | Other flags | What it does |
 |---|---|---|---|---|
 | `ferret ingest` | local | — | `--data` `--root` `--project` `--dry-run` `--snipe-usage` | Build ~/.ferret/events.jsonl from transcripts. |
-| `ferret summary` | local | ✓ | `--by` | Corpus health + tool mix. |
+| `ferret summary` | local | ✓ | `--since` `--until` `--by` | Corpus health + tool mix, and Bash calls against native file-tool calls. |
 | `ferret ngrams` | local | ✓ | `--lens` `--no-mark-fail` `--no-collapse` `--no-sidechain` `--since` `--until` `--contains` `--n` `--min-count` `--min-sessions` | Repeated n-grams across streams. |
 | `ferret seqs` | local | ✓ | `--lens` `--no-mark-fail` `--no-collapse` `--no-sidechain` `--since` `--until` `--contains` `--min-support` `--max-gap` `--max-len` | Gapped subsequences (PrefixSpan). |
 | `ferret around` | local | ✓ | `--lens` `--no-mark-fail` `--no-collapse` `--no-sidechain` `--since` `--until` `--window` | Tokens before and after one token, with counts, plus the gapped routines through it. |

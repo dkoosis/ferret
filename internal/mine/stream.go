@@ -95,7 +95,7 @@ func Build(eventsPath string, l lens.Lens, opts Options) (*Corpus, error) {
 		if opts.NoSidechain && ev.Sidechain {
 			return nil
 		}
-		key := ev.Project + "/" + ev.Session + "@" + ev.Agent
+		key := streamName(ev)
 		if windowed {
 			noteStart(start, key, ev.Time)
 		}
@@ -129,6 +129,9 @@ func Build(eventsPath string, l lens.Lens, opts Options) (*Corpus, error) {
 	}
 	return c, nil
 }
+
+// streamName is an event's stream key, "project/session@agent".
+func streamName(ev *event.Event) string { return ev.Project + "/" + ev.Session + "@" + ev.Agent }
 
 // failMark is the suffix --mark-fail appends for a failed status.
 func failMark(st string) string {
