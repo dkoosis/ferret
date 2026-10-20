@@ -113,6 +113,7 @@ func writeGraph(w *os.File, format string, c *mine.Corpus, edges []mine.Edge) er
 	switch format {
 	case "mermaid":
 		fmt.Fprintln(w, "flowchart LR")
+		diagramNote(w, "%% ", c)
 		for _, e := range edges {
 			fmt.Fprintf(w, "  %s[\"%s\"] -->|%d| %s[\"%s\"]\n",
 				id(e.From), mermaidLabel(c.Vocab[e.From]), e.Count, id(e.To), mermaidLabel(c.Vocab[e.To]))
@@ -122,6 +123,7 @@ func writeGraph(w *os.File, format string, c *mine.Corpus, edges []mine.Edge) er
 		// mermaid sankey-beta: a header line, a blank line, then CSV rows
 		// "source,target,value" — weights are the raw transition counts.
 		fmt.Fprintln(w, "sankey-beta")
+		diagramNote(w, "%% ", c)
 		fmt.Fprintln(w)
 		for _, e := range edges {
 			fmt.Fprintf(w, "%s,%s,%d\n", sankeyField(c.Vocab[e.From]), sankeyField(c.Vocab[e.To]), e.Count)
@@ -130,11 +132,21 @@ func writeGraph(w *os.File, format string, c *mine.Corpus, edges []mine.Edge) er
 	}
 	fmt.Fprintln(w, "digraph ferret {")
 	fmt.Fprintln(w, "  rankdir=LR;")
+	diagramNote(w, "  // ", c)
 	for _, e := range edges {
 		fmt.Fprintf(w, "  %q -> %q [label=%d];\n", c.Vocab[e.From], c.Vocab[e.To], e.Count)
 	}
 	fmt.Fprintln(w, "}")
 	return nil
+}
+
+// diagramNote writes the window line as a comment in a diagram format, whose
+// consumers would otherwise take a windowed graph for the whole corpus's. A
+// corpus with no window writes nothing.
+func diagramNote(w *os.File, prefix string, c *mine.Corpus) {
+	if ln := windowLine(c); ln != "" {
+		fmt.Fprintln(w, prefix+ln)
+	}
 }
 
 // mermaidLabel escapes characters that break a quoted mermaid node label.

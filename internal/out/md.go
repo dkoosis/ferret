@@ -73,11 +73,21 @@ var mdSections = []mdSection{
 // finding count, so a capped findings slice surfaces what it dropped rather than
 // truncating silently.
 func Markdown(w io.Writer, lens string, total int, findings []MDFinding) error {
+	return MarkdownNoted(w, lens, "", total, findings)
+}
+
+// MarkdownNoted is Markdown with one extra italic line under the scan line,
+// for a report cut from part of the corpus (a --since/--until window) so its
+// burn and cost do not read as the whole corpus's. An empty note adds nothing.
+func MarkdownNoted(w io.Writer, lens, note string, total int, findings []MDFinding) error {
 	bw := bufio.NewWriter(w)
 
 	fmt.Fprintln(bw, "# ferret cost report")
 	fmt.Fprintln(bw)
 	fmt.Fprintf(bw, "_lens %s · %d findings · cost ≈ burn × Sonnet input price ($3/1M tok)_\n", lens, total)
+	if note != "" {
+		fmt.Fprintf(bw, "\n_%s_\n", note)
+	}
 
 	byKind := map[string][]MDFinding{}
 	for i := range findings {
