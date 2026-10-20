@@ -2,7 +2,7 @@
 
 ★ measures Claude Code sessions in bytes — the multi-step sequences worth one deterministic helper, the calls that bought nothing, who burned it — and proves each fix by the delta.
 
-*The ★ line is mirrored from `~/Projects/kg/Project/ferret/NORTH_STAR.md`, which owns it. This file owns route order only — edited when the route changes, never as status. Progress derives live from `bd epic status`.*
+*The ★ line is mirrored from the vault nug `projects/dk/ferret/NORTH_STAR.md`, which owns it. This file owns route order only — edited when the route changes, never as status. Progress derives live from `bd epic status`.*
 
 ## Epics
 
@@ -14,5 +14,5 @@
 
 Frozen 2026-08-30 (decision `feb7162e18b9`): epics 1–3 shipped what they shipped;
 their intent/outcome-judging lanes are ceded to Claude Code's built-in usage
-report and take no new work. Route from here is measurement only — the four
-surfaces named in `NORTH_STAR.md`.
+report and take no new work. Route from here is measurement only — the measures
+named in `NORTH_STAR.md`.
