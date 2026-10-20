@@ -113,30 +113,39 @@ func windowMisfireEvents(events []event.Event, since, until string) ([]event.Eve
 	if since == "" && until == "" {
 		return events, nil
 	}
-	lo, hi := time.Time{}, time.Time{}
-	if since != "" {
-		t, err := time.ParseInLocation(dateLayout, since, time.Local)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %q", errBadSince, since)
-		}
-		lo = startOfDay(t)
+	lo, err := misfireDay(since, errBadSince, startOfDay, time.Time{})
+	if err != nil {
+		return nil, err
 	}
-	if until != "" {
-		t, err := time.ParseInLocation(dateLayout, until, time.Local)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %q", errBadUntil, until)
-		}
-		hi = endOfDay(t)
+	hi, err := misfireDay(until, errBadUntil, endOfDay, time.Unix(1<<62, 0))
+	if err != nil {
+		return nil, err
+	}
+	if lo.After(hi) {
+		return nil, errReachWindow // an inverted window would print an empty report as if clean
 	}
 	kept := make([]event.Event, 0, len(events))
 	for i := range events {
 		ts := events[i].Time
-		if ts.IsZero() || (!lo.IsZero() && ts.Before(lo)) || (!hi.IsZero() && ts.After(hi)) {
+		if ts.IsZero() || ts.Before(lo) || ts.After(hi) {
 			continue
 		}
 		kept = append(kept, events[i])
 	}
 	return kept, nil
+}
+
+// misfireDay parses one window edge (YYYY-MM-DD, local), snapped by edge to
+// the start or end of its day; an empty flag yields open, the unbounded side.
+func misfireDay(s string, bad error, edge func(time.Time) time.Time, open time.Time) (time.Time, error) {
+	if s == "" {
+		return open, nil
+	}
+	t, err := time.ParseInLocation(dateLayout, s, time.Local)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%w: %q", bad, s)
+	}
+	return edge(t), nil
 }
 
 // validateMisfiresBy enforces the bead's Rule up front, before touching the

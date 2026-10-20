@@ -56,6 +56,9 @@ func TestWindowMisfireEvents_RefusesBadDate(t *testing.T) {
 	if _, err := windowMisfireEvents(nil, "", "yesterday"); !errors.Is(err, errBadUntil) {
 		t.Errorf("err = %v; want errBadUntil", err)
 	}
+	if _, err := windowMisfireEvents(nil, "2026-10-19", "2026-10-01"); !errors.Is(err, errReachWindow) {
+		t.Errorf("err = %v; want errReachWindow for --since after --until", err)
+	}
 }
 
 // The wrong-flag section renders command, flag, chains (measured and
