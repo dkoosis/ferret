@@ -19,6 +19,9 @@ type SeqOpts struct {
 	MaxGap      int // max positions between consecutive items (1 = adjacent)
 	MaxLen      int // max pattern length
 	MaxPatterns int // emission cap; overflow is reported, never silent
+	// Keep, when set, drops a pattern before it counts against MaxPatterns, so
+	// the cap bounds the kept rows rather than a prefix of all of them.
+	Keep func(ids []uint32) bool
 }
 
 // span is one match of the pattern in a stream: positions of the first and
@@ -214,6 +217,9 @@ func (m *seqMiner) project(proj *projection, id uint32) *projection {
 func (m *seqMiner) emit(pat []uint32, proj *projection, support int) {
 	if uniform(pat) {
 		return // gapped Read…Read trivia — run-collapse only catches adjacent
+	}
+	if m.opts.Keep != nil && !m.opts.Keep(pat) {
+		return
 	}
 	if m.opts.MaxPatterns > 0 && len(m.out) >= m.opts.MaxPatterns {
 		m.truncated = true

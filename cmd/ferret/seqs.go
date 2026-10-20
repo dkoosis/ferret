@@ -31,10 +31,14 @@ func cmdSeqs() error {
 	if err != nil {
 		return err
 	}
-	pats, capped := mine.MineSeqs(corpus, mine.SeqOpts{
+	opts := mine.SeqOpts{
 		MinSupport: cmd.MinSupport, MaxGap: cmd.MaxGap, MaxLen: cmd.MaxLen, MaxPatterns: 10000,
-	})
-	pats = keepMatching(newTokenMatch(corpus, cmd.Contains), pats, func(p *mine.SeqPattern) []uint32 { return p.IDs })
+	}
+	// --contains filters inside the miner, so the pattern cap counts only matching rows.
+	if m := newTokenMatch(corpus, cmd.Contains); m != nil {
+		opts.Keep = func(ids []uint32) bool { return m.any(ids...) }
+	}
+	pats, capped := mine.MineSeqs(corpus, opts)
 
 	if c.format == fmtJSON {
 		type jp struct {
