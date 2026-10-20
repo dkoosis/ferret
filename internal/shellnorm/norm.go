@@ -15,6 +15,8 @@ import (
 // changed split, a different collapse. Two corpora built with different
 // Versions have differently-keyed shell rows, so a per-key delta across them
 // measures the rule change, not the behavior change (ferret-4wc).
+// Seeded friction signatures (internal/friction, ~/.ferret/friction_signatures.jsonl)
+// embed the token too: after a bump, re-run `ferret signatures seed`.
 //
 // v3 (ferret-ilp, 2026-10-20): sdlc, mnemd, ferret and glance keep their
 // subcommand (sdlc ship → sdlc_ship, was sdlc), and the command groups in
