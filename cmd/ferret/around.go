@@ -64,15 +64,18 @@ func cmdAround() error {
 		MinSupport: reportMinSupport, MaxGap: reportMaxGap, MaxLen: 5, MaxPatterns: 10000,
 		Keep: func(ids []uint32) bool { return slices.Contains(ids, id) },
 	})
+	seqTotal := len(pats)
 	if len(pats) > aroundSeqTop {
 		pats = pats[:aroundSeqTop]
 	}
 
 	if c.format == fmtJSON {
+		b, a := aroundJSON(corpus, before, c.limit), aroundJSON(corpus, after, c.limit)
 		return out.JSON(os.Stdout, map[string]any{
 			keyLens: l.Name(), "token": corpus.Vocab[id], "window": cmd.Window, "streams": len(corpus.Streams),
-			"before": aroundJSON(corpus, before, c.limit), "after": aroundJSON(corpus, after, c.limit),
-			"seqs": seqsJSON(corpus, pats), "seqsCapped": capped,
+			"before": b, "after": a, "seqs": seqsJSON(corpus, pats),
+			"beforeTotal": len(before), "afterTotal": len(after), "seqsTotal": seqTotal, "seqsCapped": capped,
+			keyTruncated: len(b) < len(before) || len(a) < len(after) || len(pats) < seqTotal || capped,
 		})
 	}
 	aroundText(corpus, l.Name(), id, cmd.Window, before, after, pats, capped, c)

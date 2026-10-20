@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -219,5 +220,26 @@ func TestAround_UniqueSubstring_Resolves(t *testing.T) {
 	}
 	if !strings.Contains(got, "around sh:bd_close ") {
 		t.Errorf("header does not name the resolved token:\n%s", got)
+	}
+}
+
+// TestAround_JSON_ReportsTruncation pins the AX contract: a capped section
+// says so, with its total.
+func TestAround_JSON_ReportsTruncation(t *testing.T) {
+	data := writeAroundCorpus(t)
+	saved := CLI.Around
+	t.Cleanup(func() { CLI.Around = saved })
+	CLI.Around.Data, CLI.Around.Format, CLI.Around.Limit = data, fmtJSON, 1
+	CLI.Around.Lens, CLI.Around.Token, CLI.Around.Window = "cmd", "sh:bd_close", 1
+	var got struct {
+		Before      []aroundRow `json:"before"`
+		BeforeTotal int         `json:"beforeTotal"`
+		Truncated   bool        `json:"truncated"`
+	}
+	if err := json.Unmarshal([]byte(captureStdout(t, cmdAround)), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Before) != 1 || got.BeforeTotal != 2 || !got.Truncated {
+		t.Errorf("--limit 1: before %d of %d, truncated=%v; want 1 of 2, true", len(got.Before), got.BeforeTotal, got.Truncated)
 	}
 }
