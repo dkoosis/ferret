@@ -40,6 +40,11 @@ func TestSplit(t *testing.T) {
 		// ferret-ilp: subcmdGroups keep a second word.
 		{"gh pr checks 12 --watch", []string{"gh_pr_checks"}},
 		{"gh pr --help", []string{"gh_pr"}},
+		{"gh pr --repo owner/repo create", []string{"gh_pr_create"}},
+		{"gh pr -R owner/repo merge 12", []string{"gh_pr_merge"}},
+		{"gh pr --repo=owner/repo view 12", []string{"gh_pr_view"}},
+		{"gh pr 12", []string{"gh_pr"}},
+		{"bd dep ferret-x", []string{"bd_dep"}},
 		{"gh api x", []string{"gh_api"}},
 		{"trixi project create", []string{"trixi_project_create"}},
 		{"trixi ask q", []string{"trixi_ask"}},

@@ -301,12 +301,51 @@ func token(base string, args []*syntax.Word) string {
 	if sub == "" {
 		return base
 	}
-	if subcmdGroups[base][sub] && len(args) > 2 {
-		if sub2 := subWord(args[2]); sub2 != "" {
-			return base + "_" + sub + "_" + sub2
+	if subcmdGroups[base][sub] {
+		if leaf := groupLeaf(args[2:]); leaf != "" {
+			return base + "_" + sub + "_" + leaf
 		}
 	}
 	return base + "_" + sub
+}
+
+// groupValueFlags are group-level flags that take a separate value, which
+// groupLeaf skips along with the flag (gh pr --repo o/r create).
+var groupValueFlags = map[string]bool{"-R": true, "--repo": true}
+
+// groupLeaf is the first word of args that names a command, past any flags a
+// group inherits (gh pr --repo o/r create → create). A word that is not a bare
+// lowercase command name (a path, an id, a value of an unknown flag) ends the
+// search, so the token stays at the group.
+func groupLeaf(args []*syntax.Word) string {
+	for i := 0; i < len(args); i++ {
+		w := wordLit(args[i])
+		if strings.HasPrefix(w, "-") {
+			if groupValueFlags[w] {
+				i++
+			}
+			continue
+		}
+		if !isCommandWord(w) {
+			return ""
+		}
+		return w
+	}
+	return ""
+}
+
+// isCommandWord reports whether w reads as a subcommand name: lowercase
+// letters and hyphens, starting with a letter.
+func isCommandWord(w string) bool {
+	if w == "" || w[0] < 'a' || w[0] > 'z' {
+		return false
+	}
+	for _, r := range w {
+		if (r < 'a' || r > 'z') && r != '-' {
+			return false
+		}
+	}
+	return true
 }
 
 // subWord is w's literal when it can name a subcommand: not a flag, not empty.
