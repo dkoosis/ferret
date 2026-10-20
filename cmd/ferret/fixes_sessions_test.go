@@ -162,27 +162,51 @@ func TestReportJSONCapsFixedGoneAtLimit(t *testing.T) {
 	}
 }
 
-// TestLegacyLenslessRowWithForeignTokensIsNotListedAsFixed: a row with no lens
-// whose tokens do not exist in this corpus (likely another lens) must not read
-// as a fix that took the motif to zero. One whose tokens exist but no longer
-// co-occur is a real outcome and is listed.
-func TestLegacyLenslessRowWithForeignTokensIsNotListedAsFixed(t *testing.T) {
+// TestGoneRowWithUnknownTokensClaimsNoDelta: a row (lens-less, or lens-tagged
+// like "Edit!,Read" checked with --no-mark-fail) whose tokens do not exist in
+// this corpus must not read as a fix that took the motif to zero: it is listed
+// with a note and no burn or session delta. One whose tokens exist but no longer
+// co-occur is a real outcome and shows its delta.
+func TestGoneRowWithUnknownTokensClaimsNoDelta(t *testing.T) {
 	data := writeSessionFixture(t)
 	at := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	for _, e := range []fixes.Entry{
 		{Motif: "sh:git_add,sh:git_commit -q -F", Fix: "foreign", AddedAt: at, BaselineBurn: 100},
-		{Motif: "Write,Read", Fix: "gone", AddedAt: at, BaselineBurn: 100},
+		{Motif: "Edit!,Read", Fix: "markfail", AddedAt: at, BaselineBurn: 100, Lens: "tool", BaselineSessions: 64},
+		{Motif: "Write,Read", Fix: "gone", AddedAt: at, BaselineBurn: 100, Lens: "tool", BaselineSessions: 9},
 	} {
 		if err := fixes.Append(fixes.Path(data), e); err != nil {
 			t.Fatal(err)
 		}
 	}
 	out := runReportSinceFixes(t, data, "text")
-	if strings.Contains(out, "git_add") {
-		t.Errorf("foreign-lens legacy row listed as fixed:\n%s", out)
+	for _, motif := range []string{"git_add", "Edit! ⇝ Read"} {
+		row := lineWith(t, out, motif)
+		if !strings.Contains(row, "tokens not in this corpus") || strings.Contains(row, "↓") || strings.Contains(row, "s→") {
+			t.Errorf("unknown-token row must carry the note and no delta: %s", row)
+		}
 	}
-	if row := lineWith(t, out, "Write ⇝ Read"); !strings.Contains(row, "n=0") {
-		t.Errorf("co-occurrence gone but tokens known must list at n=0: %s", row)
+	if row := lineWith(t, out, "Write ⇝ Read"); !strings.Contains(row, "n=0") || !strings.Contains(row, "sess 9s→0s ↓") {
+		t.Errorf("co-occurrence gone but tokens known must list at n=0 with its delta: %s", row)
+	}
+}
+
+// TestReportTextGoneRowsKeepTheirOwnLimit: the findings spend the sink's whole
+// --limit budget, yet the gone rows still print under their heading, capped at
+// the limit with an explicit "+K more" line.
+func TestReportTextGoneRowsKeepTheirOwnLimit(t *testing.T) {
+	data := writeSessionFixture(t)
+	at := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	for _, m := range []string{"Grep,Write", "Glob,Bash", "Write,Read"} {
+		e := fixes.Entry{Motif: m, Fix: "f", AddedAt: at, BaselineBurn: 100, Lens: "tool", BaselineSessions: 9}
+		if err := fixes.Append(fixes.Path(data), e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := runReportLimit(t, data, "text", 1) // one finding row spends the whole sink budget
+	_, under, found := strings.Cut(out, "no longer in findings=3")
+	if !found || strings.Count(under, "✓ n=") != 1 || !strings.Contains(under, "+2 more fixed motifs") {
+		t.Errorf("want 1 gone row and '+2 more' under the heading:\n%s", out)
 	}
 }
 

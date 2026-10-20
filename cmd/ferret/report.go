@@ -251,7 +251,7 @@ func cmdReport() error {
 				strings.Join(corpus.Tokens(f.IDs), " ⇝ "), suppressReason(e))
 		}
 	}
-	writeGoneFixes(sink, gone, cmd.MinSupport)
+	writeGoneFixes(sink, gone, cmd.MinSupport, c.limit)
 	// Legal moves, not a plan (DK-AXI rule 11): a motif's burn is gross cost —
 	// the merged view prices how much of it bought nothing, and the ledger is
 	// where a decided fix goes.
