@@ -78,7 +78,7 @@ func runReportOpts(t *testing.T, data, format string, limit, maxBytes int) strin
 	saved := CLI.Report
 	t.Cleanup(func() { CLI.Report = saved })
 	r := &CLI.Report
-	r.Data, r.Format, r.Limit, r.MaxBytes, r.Lens = data, format, limit, maxBytes, "tool"
+	r.Data, r.Format, r.Limit, r.MaxBytes, r.Lens = data, format, Limit(limit), maxBytes, "tool"
 	r.MinSupport, r.MaxGap, r.MaxLen, r.Order, r.Top = reportMinSupport, reportMaxGap, reportMaxLen, reportOrder, reportTop
 	r.SinceFixes = true
 	return captureStdout(t, cmdReport)
