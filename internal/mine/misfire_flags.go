@@ -211,7 +211,9 @@ func (sc *flagScan) chainForms(i int, forms []string, later []int) ([]string, ch
 
 // measuredForms is chainForms for a failed call: the flag its error text
 // rejects by name, else — when the text complains about the invocation —
-// the forms a same-command retry that did not fail dropped.
+// the forms a same-command retry that did not fail dropped. A compound
+// call's error text may be a peer segment's (cfail), so there only a dropped
+// flag the text names is blamed.
 func (sc *flagScan) measuredForms(i int, forms []string, later []int) []string {
 	errText := sc.events[i].Err
 	if named := namedFlag(errText, forms); named != "" {
@@ -220,13 +222,16 @@ func (sc *flagScan) measuredForms(i int, forms []string, later []int) []string {
 	if !invocationComplaint.MatchString(errText) {
 		return nil // exit 1 with no complaint (grep's no-match) is not a misfire
 	}
-	next := sc.retry(i, later)
-	if next < 0 || sc.stillMisinvoked(next) {
+	next := sc.fixedRetry(i, later)
+	if next < 0 {
 		return nil
 	}
 	dropped := sc.dropped(forms, next)
 	if m := mentioned(errText, dropped); len(m) > 0 {
 		return m // `--slurp is not supported with --jq`: the retry dropped both, the text blames one
+	}
+	if sc.events[i].Status == event.StatusCFail {
+		return nil
 	}
 	return dropped
 }
@@ -265,13 +270,29 @@ func hiddenExit(ev *event.Event) bool {
 // flag-form set, or -1. A same-form repeat is not the retry — two parallel
 // `bd list --status X --short` calls are both fixed by the one after them.
 func (sc *flagScan) retry(i int, later []int) int {
-	act, forms := sc.events[i].Action, sc.formsOf(i)
 	for _, j := range later {
-		if sc.events[j].Action == act && !sameForms(forms, sc.formsOf(j)) {
+		if sc.isRetry(i, j) {
 			return j
 		}
 	}
 	return -1
+}
+
+// fixedRetry is retry for a failed call, past attempts that still fail on
+// their invocation: a usage error, a changed attempt that still misfires,
+// then the call that works is one chain, closed by the call that works.
+func (sc *flagScan) fixedRetry(i int, later []int) int {
+	for _, j := range later {
+		if sc.isRetry(i, j) && !sc.stillMisinvoked(j) {
+			return j
+		}
+	}
+	return -1
+}
+
+// isRetry reports whether event j runs i's command with other flag forms.
+func (sc *flagScan) isRetry(i, j int) bool {
+	return sc.events[j].Action == sc.events[i].Action && !sameForms(sc.formsOf(i), sc.formsOf(j))
 }
 
 // sameForms reports whether two form lists hold the same set.
@@ -322,12 +343,35 @@ func (sc *flagScan) dropped(forms []string, j int) []string {
 	have := sc.formsOf(j)
 	var out []string
 	for _, f := range forms {
-		if !slices.Contains(have, f) && !helpFlag(f) {
+		if !slices.Contains(have, f) && !helpFlag(f) && !sc.pathOnlyDropped(f, j) {
 			out = append(out, f)
 		}
 	}
 	return out
 }
+
+// pathOnlyDropped reports whether j kept the flag of i's `name <path>` form
+// bare: `tool --verbose a.yaml` → `tool --verbose`. The flag may be boolean
+// and the path positional, so neither is blamed. When j gives the flag a
+// value (`loto lock -t a.go` → `loto lock a.go -t "why"`), the binding is
+// what changed and the form is blamed, as it is when the flag fell past a
+// truncated Detail and its value cannot be read.
+func (sc *flagScan) pathOnlyDropped(form string, j int) bool {
+	name, ok := strings.CutSuffix(form, " <path>")
+	if !ok || !slices.Contains(sc.formsOf(j), name) {
+		return false
+	}
+	words := shellWords(sc.events[j].Detail)
+	at := slices.Index(words, name)
+	if at < 0 {
+		return false
+	}
+	return at+1 == len(words) || bareFollower.MatchString(words[at+1])
+}
+
+// bareFollower is a word that ends a flag's value slot: another flag, a
+// redirect, or a shell operator.
+var bareFollower = regexp.MustCompile(`^(-|\d*>|[|&;])`)
 
 // helpFlag reports whether a form asks for help rather than doing work.
 func helpFlag(form string) bool {

@@ -267,3 +267,52 @@ func TestMineFlagMisfires_SkipsAmbiguousGuess_When_FallbackDropsSeveralFlags(t *
 		t.Errorf("rows = %+v; want none", rows)
 	}
 }
+
+// A compound call's error text may be a peer segment's: generic usage text
+// with no flag named blames none of this segment's flags.
+func TestMineFlagMisfires_SkipsCompoundSegment_When_ErrorTextNamesNoFlag(t *testing.T) {
+	seg := flagEv("s1", 1, "2026-10-12", "jq", "jq -r .x f.json && other --bad", event.StatusCFail, "-r")
+	seg.Err = "Exit code 2\nusage: other [flags]"
+	seg.Compound = true
+	evs := []event.Event{seg, flagEv("s1", 2, "2026-10-12", "jq", "jq .x f.json", event.StatusOK)}
+	if rows := MineFlagMisfires(evs); len(rows) != 0 {
+		t.Errorf("rows = %+v; want none — the usage text may be the peer's", rows)
+	}
+}
+
+// A compound segment whose flag the error text names is still blamed.
+func TestMineFlagMisfires_BlamesCompoundSegment_When_ErrorTextNamesItsFlag(t *testing.T) {
+	seg := flagEv("s1", 1, "2026-10-12", "bd_list", "cd x && bd list --short", event.StatusCFail, "--short")
+	seg.Err = "Exit code 1\nError: unknown flag: --short"
+	seg.Compound = true
+	evs := []event.Event{seg, flagEv("s1", 2, "2026-10-12", "bd_list", "bd list", event.StatusOK)}
+	if r := findFlagRow(MineFlagMisfires(evs), "sh:bd_list", "--short"); r == nil || r.Measured != 1 {
+		t.Errorf("row = %+v; want one measured --short chain", r)
+	}
+}
+
+// Usage error, a changed attempt that still misfires, then the call that
+// works: one chain, closed by the call that works.
+func TestMineFlagMisfires_ScansPastStillMisinvokedRetry(t *testing.T) {
+	usage := "Exit code 2\nusage: loto lock <target> -t \"why\""
+	bad := flagEv("s1", 1, "2026-10-12", "loto_lock", "loto lock -t a.go --force", event.StatusFail, "-t", "--force")
+	bad.Err = usage
+	still := flagEv("s1", 2, "2026-10-12", "loto_lock", "loto lock -t a.go", event.StatusFail, "-t")
+	still.Err = usage
+	good := flagEv("s1", 3, "2026-10-12", "loto_lock", `loto lock a.go -t "x"`, event.StatusOK, "-t")
+	rows := MineFlagMisfires([]event.Event{bad, still, good})
+	if r := findFlagRow(rows, "sh:loto_lock", "-t <path>"); r == nil || r.Chains != 2 {
+		t.Errorf("rows = %+v; want '-t <path>' with 2 chains (first call and the still-wrong retry)", rows)
+	}
+}
+
+// `tool --verbose a.yaml` → `tool --verbose`: the flag stayed and the path
+// went, so --verbose may be boolean and the path positional. No blame.
+func TestMineFlagMisfires_SkipsPathForm_When_RetryKeepsFlagAndDropsPath(t *testing.T) {
+	bad := flagEv("s1", 1, "2026-10-12", "tool", "tool --verbose config.yaml", event.StatusFail, "--verbose")
+	bad.Err = "Exit code 2\nusage: tool [--verbose]"
+	evs := []event.Event{bad, flagEv("s1", 2, "2026-10-12", "tool", "tool --verbose", event.StatusOK, "--verbose")}
+	if rows := MineFlagMisfires(evs); len(rows) != 0 {
+		t.Errorf("rows = %+v; want none — the retained flag is not the misfire", rows)
+	}
+}
