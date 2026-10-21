@@ -36,7 +36,7 @@ func TestSummarize_CountsCwdResetsPerBucket(t *testing.T) {
 		{Project: "p1", Session: "s2", Kind: event.KindShell, Action: "ls", CwdReset: true},
 	}
 	path := writeEventsFile(t, evs)
-	s, err := Summarize(path, "corpus")
+	s, err := Summarize(path, "corpus", Window{})
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestSummarize_LegacyCorpusNoCwdResetsField(t *testing.T) {
 	if err := os.WriteFile(path, []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s, err := Summarize(path, "corpus")
+	s, err := Summarize(path, "corpus", Window{})
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}

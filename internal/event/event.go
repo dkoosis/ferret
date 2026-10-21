@@ -13,11 +13,18 @@ type Event struct {
 	Session   string    `json:"s"`
 	Agent     string    `json:"a,omitempty"` // subagent id; "" = main thread
 	Sidechain bool      `json:"sc,omitempty"`
-	Kind      string    `json:"k"`   // tool | shell | prompt
-	Action    string    `json:"act"` // tool name; for shell: normalized command
-	Target    string    `json:"tgt,omitempty"`
-	Detail    string    `json:"d,omitempty"`  // raw command segment, truncated
-	Status    string    `json:"st,omitempty"` // ok | fail | cfail | unmeasured | none (no paired result)
+	Kind      string    `json:"k"` // tool | shell | prompt
+	// ToolUseID is the id of the Bash call a shell event came from (ferret-2mf):
+	// the same on every segment of one compound or pipe, so a consumer can count
+	// calls rather than segments. Set on shell events only. A row written before
+	// this field existed decodes with "" — a consumer must group such rows some
+	// other way (mine.shellCalls groups on session+agent+Seq+Time, since every
+	// segment of one call shares the transcript line it was split from).
+	ToolUseID string `json:"tu,omitempty"`
+	Action    string `json:"act"` // tool name; for shell: normalized command
+	Target    string `json:"tgt,omitempty"`
+	Detail    string `json:"d,omitempty"`  // raw command segment, truncated
+	Status    string `json:"st,omitempty"` // ok | fail | cfail | unmeasured | none (no paired result)
 	// unmeasured is set at ingest from shellnorm.Segment.Unmeasured — a
 	// non-last pipe stage or `;`-list statement whose own exit code the
 	// tool_result's is_error bit cannot carry (ferret-wbv). resolve() reads

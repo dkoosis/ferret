@@ -2,6 +2,7 @@ package mine
 
 import (
 	"sort"
+	"time"
 
 	"github.com/dkoosis/ferret/internal/event"
 )
@@ -33,6 +34,14 @@ type Summary struct {
 	By         string      `json:"by"`
 	Buckets    []*Bucket   `json:"buckets"`
 	TopActions []TopAction `json:"topActions,omitempty"` // corpus grain only
+	// Shell is the Bash-against-native call mix over the same events the
+	// buckets cover (ferret-2mf), whatever the grain.
+	Shell ShellMix
+	// Window is the --since/--until window the events were kept by, with
+	// Total and Untimed filled as Build fills them; Kept is how many streams
+	// it kept. Both are zero when no window was set.
+	Window Window
+	Kept   int
 }
 
 // summarizer accumulates buckets and the action tally during one read pass.
@@ -40,20 +49,66 @@ type summarizer struct {
 	by      string
 	buckets map[string]*Bucket
 	actions map[string]*TopAction
+	mix     shellTally
 }
 
 // Summarize streams the artifact once. by ∈ corpus|project|session.
-func Summarize(eventsPath, by string) (*Summary, error) {
+//
+// win windows the artifact the way Build does: a stream (project, session,
+// agent) is kept when its earliest timestamped event falls in the window, so a
+// session that began before Since is out even if it ran on into the window. A
+// window costs one extra pass, to find each stream's start before any event is
+// counted.
+func Summarize(eventsPath, by string, win Window) (*Summary, error) {
+	keep := func(*event.Event) bool { return true }
+	kept := 0
+	if win.Set() {
+		var err error
+		if keep, win, kept, err = streamWindow(eventsPath, win); err != nil {
+			return nil, err
+		}
+	}
 	sm := &summarizer{by: by, buckets: map[string]*Bucket{}, actions: map[string]*TopAction{}}
 	err := event.Read(eventsPath, func(ev *event.Event) error {
+		if !keep(ev) {
+			return nil
+		}
 		sm.addBucket(ev)
 		sm.addAction(ev)
+		sm.mix.add(ev)
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return sm.result(), nil
+	s := sm.result()
+	s.Window, s.Kept = win, kept
+	return s, nil
+}
+
+// streamWindow reads the artifact once for every stream's start and returns a
+// predicate that keeps an event whose stream starts inside w, w with its
+// Total and Untimed counts, and how many streams it kept.
+func streamWindow(eventsPath string, w Window) (keep func(*event.Event) bool, _ Window, kept int, _ error) {
+	start := map[string]time.Time{}
+	all := map[string]struct{}{}
+	err := event.Read(eventsPath, func(ev *event.Event) error {
+		key := streamName(ev)
+		all[key] = struct{}{}
+		noteStart(start, key, ev.Time)
+		return nil
+	})
+	if err != nil {
+		return nil, w, 0, err
+	}
+	w.Total, w.Untimed = len(all), len(all)-len(start)
+	for key := range all {
+		if w.contains(start[key]) {
+			kept++
+		}
+	}
+	keep = func(ev *event.Event) bool { return w.contains(start[streamName(ev)]) }
+	return keep, w, kept, nil
 }
 
 func (sm *summarizer) addBucket(ev *event.Event) {
@@ -139,5 +194,6 @@ func (sm *summarizer) result() *Summary {
 		}
 		return s.TopActions[i].Action < s.TopActions[j].Action
 	})
+	s.Shell = sm.mix.result()
 	return s
 }

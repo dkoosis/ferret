@@ -234,8 +234,9 @@ var CLI struct {
 
 	Summary struct {
 		CommonFlags
+		WindowFlags
 		By string `help:"Aggregation grain: corpus|project|session." default:"corpus" name:"by"`
-	} `cmd:"" help:"Corpus health + tool mix."`
+	} `cmd:"" help:"Corpus health + tool mix, and Bash calls against native file-tool calls."`
 
 	Ngrams struct {
 		CommonFlags
@@ -970,18 +971,22 @@ func corpusWindow(since, until string) (mine.Window, error) {
 // plain streams=N every header printed before ferret-pr4; with one it names
 // the window and counts kept streams against the corpus total, plus the
 // streams dropped for carrying no timestamp.
-func streamsTag(c *mine.Corpus) string {
-	if !c.Window.Set() {
-		return fmt.Sprintf("streams=%d", len(c.Streams))
+func streamsTag(c *mine.Corpus) string { return windowStreams(c.Window, len(c.Streams)) }
+
+// windowStreams is streamsTag for a bare window and the streams it kept, so
+// summary, which builds no Corpus, prints the same tag.
+func windowStreams(w mine.Window, kept int) string {
+	if !w.Set() {
+		return fmt.Sprintf("streams=%d", kept)
 	}
 	var b strings.Builder
-	if !c.Window.Since.IsZero() {
-		fmt.Fprintf(&b, "since=%s ", c.Window.Since.Format(dateLayout))
+	if !w.Since.IsZero() {
+		fmt.Fprintf(&b, "since=%s ", w.Since.Format(dateLayout))
 	}
-	if !c.Window.Until.IsZero() {
-		fmt.Fprintf(&b, "until=%s ", c.Window.Until.Format(dateLayout))
+	if !w.Until.IsZero() {
+		fmt.Fprintf(&b, "until=%s ", w.Until.Format(dateLayout))
 	}
-	fmt.Fprintf(&b, "streams=%d/%d untimed=%d", len(c.Streams), c.Window.Total, c.Window.Untimed)
+	fmt.Fprintf(&b, "streams=%d/%d untimed=%d", kept, w.Total, w.Untimed)
 	return b.String()
 }
 
@@ -989,15 +994,20 @@ func streamsTag(c *mine.Corpus) string {
 // windowed count never reads as a whole-corpus count. Without a window the
 // payload is returned unchanged.
 func withWindow(c *mine.Corpus, m map[string]any) map[string]any {
-	if !c.Window.Set() {
+	return withDateWindow(c.Window, len(c.Streams), m)
+}
+
+// withDateWindow is withWindow for a bare window and the streams it kept.
+func withDateWindow(win mine.Window, kept int, m map[string]any) map[string]any {
+	if !win.Set() {
 		return m
 	}
-	w := map[string]any{"streams": len(c.Streams), keyTotal: c.Window.Total, "untimed": c.Window.Untimed}
-	if !c.Window.Since.IsZero() {
-		w["since"] = c.Window.Since.Format(dateLayout)
+	w := map[string]any{"streams": kept, keyTotal: win.Total, "untimed": win.Untimed}
+	if !win.Since.IsZero() {
+		w["since"] = win.Since.Format(dateLayout)
 	}
-	if !c.Window.Until.IsZero() {
-		w["until"] = c.Window.Until.Format(dateLayout)
+	if !win.Until.IsZero() {
+		w["until"] = win.Until.Format(dateLayout)
 	}
 	m["dateWindow"] = w // not "window": around already uses that key for its step count
 	return m

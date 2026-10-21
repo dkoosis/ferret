@@ -560,6 +560,7 @@ func (b *Builder) fromToolUse(src transcript.Source, raw *transcript.Raw, blk *t
 	_ = json.Unmarshal(blk.Input, &input)
 
 	if blk.Name == "Bash" {
+		base.ToolUseID = blk.ID // every segment of this call shares it (ferret-2mf)
 		cmd, _ := input["command"].(string)
 		segs, fb := shellnorm.Split(cmd)
 		if fb {
