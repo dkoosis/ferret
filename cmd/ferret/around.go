@@ -52,15 +52,7 @@ func cmdAround() error {
 		return err
 	}
 	if !ok {
-		if c.format == fmtJSON {
-			return out.JSON(os.Stdout, withWindow(corpus, map[string]any{keyLens: l.Name(), "token": cmd.Token, "matches": 0}))
-		}
-		where := ""
-		if corpus.Window.Set() {
-			where = " in the date window (" + streamsTag(corpus) + ")"
-		}
-		fmt.Printf("0 matches for %s%s\n", cmd.Token, where)
-		return nil
+		return aroundNoMatch(corpus, l.Name(), cmd.Token, c.format)
 	}
 
 	before, after := neighbours(mine.CountGrams(corpus, 2, cmd.Window+1), id)
@@ -83,6 +75,20 @@ func cmdAround() error {
 		}))
 	}
 	aroundText(corpus, l.Name(), id, cmd.Window, before, after, pats, capped, c)
+	return nil
+}
+
+// aroundNoMatch reports a token no stream holds, naming the date window when
+// one is set so the absence is not read as whole-corpus.
+func aroundNoMatch(corpus *mine.Corpus, lensName, token, format string) error {
+	if format == fmtJSON {
+		return out.JSON(os.Stdout, withWindow(corpus, map[string]any{keyLens: lensName, "token": token, "matches": 0}))
+	}
+	where := ""
+	if corpus.Window.Set() {
+		where = " in the date window (" + streamsTag(corpus) + ")"
+	}
+	fmt.Printf("0 matches for %s%s\n", token, where)
 	return nil
 }
 
