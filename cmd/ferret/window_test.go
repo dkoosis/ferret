@@ -175,3 +175,18 @@ func TestSurpriseWindowHeaderOneStreamsCount(t *testing.T) {
 		t.Errorf("header has %d streams= values, want one with scored=3:\n%s", n, got)
 	}
 }
+
+// TestAroundZeroMatchNamesDateWindow pins that a token the window removed
+// reads as absent from the window, not from the corpus.
+func TestAroundZeroMatchNamesDateWindow(t *testing.T) {
+	saved := CLI.Around
+	t.Cleanup(func() { CLI.Around = saved })
+	CLI.Around.Since = "2026-10-22" // after every session in the fixture
+	got, err := runAround(t, writeDatedCorpus(t), "sh:bd_close", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "0 matches for sh:bd_close in the date window (since=2026-10-22 streams=0/4 untimed=0)\n"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}

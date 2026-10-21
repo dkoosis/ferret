@@ -55,7 +55,11 @@ func cmdAround() error {
 		if c.format == fmtJSON {
 			return out.JSON(os.Stdout, withWindow(corpus, map[string]any{keyLens: l.Name(), "token": cmd.Token, "matches": 0}))
 		}
-		fmt.Printf("0 matches for %s\n", cmd.Token)
+		where := ""
+		if corpus.Window.Set() {
+			where = " in the date window (" + streamsTag(corpus) + ")"
+		}
+		fmt.Printf("0 matches for %s%s\n", cmd.Token, where)
 		return nil
 	}
 
