@@ -962,7 +962,7 @@ func emptyNote(sink *out.Sink, n int, noun string) {
 // kong default tags on CLI.Report by hand (kong tags must be string literals).
 const (
 	reportMinSupport = 20
-	reportMaxGap     = 3
+	reportMaxGap     = mine.ScoreboardMaxGap
 	// reportMaxLen was 5 until ferret-jtv. A wrap preflight or a ship sequence
 	// runs 5-8 calls, so a 5-cap split every one of them into overlapping
 	// fragments that ranked separately and priced separately — the whole
