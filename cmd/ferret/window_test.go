@@ -148,3 +148,30 @@ func TestReportSinceFixesRefusesWindow(t *testing.T) {
 		t.Errorf("err = %v, want errSinceFixesWindow", err)
 	}
 }
+
+// TestTokensWindowNamesDateWindow pins that a session the window dropped is
+// reported as outside the window, not as a session that does not exist.
+func TestTokensWindowNamesDateWindow(t *testing.T) {
+	saved := CLI.Tokens
+	t.Cleanup(func() { CLI.Tokens = saved })
+	CLI.Tokens.Data, CLI.Tokens.Format, CLI.Tokens.Lens = writeDatedCorpus(t), fmtText, "cmd"
+	CLI.Tokens.Session, CLI.Tokens.Since = "s1", "2026-10-19"
+	err := cmdTokens()
+	if !errors.Is(err, errNoStreamMatch) || !strings.Contains(err.Error(), "in the date window") {
+		t.Errorf("err = %v, want errNoStreamMatch naming the date window", err)
+	}
+}
+
+// TestSurpriseWindowHeaderOneStreamsCount pins that a windowed surprise
+// header prints one streams= value and names the scored count scored=.
+func TestSurpriseWindowHeaderOneStreamsCount(t *testing.T) {
+	saved := CLI.Surprise
+	t.Cleanup(func() { CLI.Surprise = saved })
+	CLI.Surprise.Data, CLI.Surprise.Format, CLI.Surprise.Limit = writeDatedCorpus(t), fmtText, -1
+	CLI.Surprise.Lens, CLI.Surprise.Order, CLI.Surprise.MinToks = "cmd", 3, 1
+	CLI.Surprise.Since = "2026-10-19"
+	got := captureStdout(t, cmdSurprise)
+	if n := strings.Count(got, "streams="); n != 1 || !strings.Contains(got, "streams=3/4 untimed=0 scored=3") {
+		t.Errorf("header has %d streams= values, want one with scored=3:\n%s", n, got)
+	}
+}

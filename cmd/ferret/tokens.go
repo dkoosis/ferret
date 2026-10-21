@@ -45,6 +45,9 @@ func cmdTokens() error {
 		}
 	}
 	if len(matches) == 0 {
+		if corpus.Window.Set() {
+			return fmt.Errorf("%w: %q in the date window (%s)", errNoStreamMatch, cmd.Session, streamsTag(corpus))
+		}
 		return fmt.Errorf("%w: %q", errNoStreamMatch, cmd.Session)
 	}
 	if c.format == fmtJSON {

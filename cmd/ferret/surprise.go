@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"slices"
 
@@ -54,8 +55,14 @@ func cmdSurprise() error {
 	about(sink,
 		"≡ surprise: how predictable each session is to a model trained on all your sessions",
 		"≡ (order-N context model). Low bits/tok = rote routine worth scripting; high = novel work or thrash.")
-	sink.Head("surprise lens=%s order=%d%s streams=%d mean=%.2f bits/tok (low=routine/scriptable, high=thrash)",
-		l.Name(), cmd.Order, windowTag(corpus), len(scores), mean)
+	// Under a window the streams= slot already holds kept/total, so the
+	// scored count (streams long enough for --min-toks) is named scored=.
+	scored := fmt.Sprintf("streams=%d", len(scores))
+	if corpus.Window.Set() {
+		scored = fmt.Sprintf("%s scored=%d", streamsTag(corpus), len(scores))
+	}
+	sink.Head("surprise lens=%s order=%d %s mean=%.2f bits/tok (low=routine/scriptable, high=thrash)",
+		l.Name(), cmd.Order, scored, mean)
 	sink.Head("most routine:")
 	for _, s := range routine {
 		sink.Row("%6.2f bits %5d toks  %s", s.Bits, s.Toks, s.Stream)
