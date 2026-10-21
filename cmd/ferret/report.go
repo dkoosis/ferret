@@ -219,7 +219,11 @@ func cmdReport() error {
 				Evidence: exemplar(corpus, f.ExStream, f.ExSeq),
 			})
 		}
-		return out.Markdown(os.Stdout, l.Name(), len(findings), rows)
+		scope := ""
+		if corpus.Window.Set() {
+			scope = streamsTag(corpus)
+		}
+		return out.Markdown(os.Stdout, l.Name(), scope, len(findings), rows)
 	}
 
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)

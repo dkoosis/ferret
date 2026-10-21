@@ -71,12 +71,16 @@ var mdSections = []mdSection{
 // are sorted by burn (heaviest first). Each finding's evidence is tucked into a
 // collapsible <details> so the scan line stays terse. total is the pre-cap
 // finding count, so a capped findings slice surfaces what it dropped rather than
-// truncating silently.
-func Markdown(w io.Writer, lens string, total int, findings []MDFinding) error {
+// truncating silently. scope, when non-empty, names a date window the findings
+// were mined under, so a windowed report never reads as whole-corpus.
+func Markdown(w io.Writer, lens, scope string, total int, findings []MDFinding) error {
 	bw := bufio.NewWriter(w)
 
 	fmt.Fprintln(bw, "# ferret cost report")
 	fmt.Fprintln(bw)
+	if scope != "" {
+		lens += " · " + scope
+	}
 	fmt.Fprintf(bw, "_lens %s · %d findings · cost ≈ burn × Sonnet input price ($3/1M tok)_\n", lens, total)
 
 	byKind := map[string][]MDFinding{}

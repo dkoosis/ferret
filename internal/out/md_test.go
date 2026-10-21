@@ -19,7 +19,7 @@ func TestMarkdownReport(t *testing.T) {
 		{Motif: []string{"go_build", "go_test"}, Kind: "routine", Action: "script", Count: 50, Sessions: 30, FailRate: 0, Burn: 12000, Evidence: "feedface@7"},
 	}
 	var b strings.Builder
-	if err := Markdown(&b, "tool", len(findings), findings); err != nil {
+	if err := Markdown(&b, "tool", "", len(findings), findings); err != nil {
 		t.Fatalf("Markdown: %v", err)
 	}
 	got := b.String()
@@ -63,7 +63,7 @@ func TestMarkdownLabelsSidechainBurn(t *testing.T) {
 		{Motif: []string{"go_build", "go_test"}, Kind: "routine", Action: "script", Count: 5, Sessions: 3, Burn: 12000, Evidence: "feedface@7"},
 	}
 	var b strings.Builder
-	if err := Markdown(&b, "tool", len(findings), findings); err != nil {
+	if err := Markdown(&b, "tool", "", len(findings), findings); err != nil {
 		t.Fatalf("Markdown: %v", err)
 	}
 	got := b.String()
@@ -88,7 +88,7 @@ func TestMarkdownSurfacesDialogue(t *testing.T) {
 			FailRate: 0, Burn: 12000, Evidence: "feedface@7"},
 	}
 	var b strings.Builder
-	if err := Markdown(&b, "tool", len(findings), findings); err != nil {
+	if err := Markdown(&b, "tool", "", len(findings), findings); err != nil {
 		t.Fatalf("Markdown: %v", err)
 	}
 	got := b.String()
@@ -111,7 +111,7 @@ func TestMarkdownEdges(t *testing.T) {
 		{Motif: []string{"Read"}, Kind: "routine", Action: "script", Count: 1, Sessions: 1, FailRate: 0, Burn: 500, Evidence: "x@1"},
 	}
 	var b strings.Builder
-	if err := Markdown(&b, "tool", 6, findings); err != nil {
+	if err := Markdown(&b, "tool", "", 6, findings); err != nil {
 		t.Fatalf("Markdown: %v", err)
 	}
 	got := b.String()
@@ -124,5 +124,16 @@ func TestMarkdownEdges(t *testing.T) {
 	// Empty core sections still render their header (stable, diffable shape).
 	if !strings.Contains(got, "💸") || !strings.Contains(got, "🔁") {
 		t.Errorf("empty cost-leak / churn sections must still render headers")
+	}
+}
+
+// TestMarkdownScopeNamesWindow pins that a scope lands in the header line.
+func TestMarkdownScopeNamesWindow(t *testing.T) {
+	var b strings.Builder
+	if err := Markdown(&b, "tool", "since=2026-10-19 streams=3/4 untimed=0", 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "_lens tool · since=2026-10-19 streams=3/4 untimed=0 · 0 findings") {
+		t.Errorf("header lacks the scope:\n%s", b.String())
 	}
 }
