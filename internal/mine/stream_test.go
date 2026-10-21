@@ -95,6 +95,16 @@ func TestBuildWindowKeepsStreamsByStart(t *testing.T) {
 			if tc.w.Set() && c.Window.Total != 5 {
 				t.Errorf("total = %d, want 5", c.Window.Total)
 			}
+			// Vocab holds exactly the tokens the kept streams hold.
+			held := map[string]bool{}
+			for _, st := range c.Streams {
+				for _, tok := range st {
+					held[c.Vocab[tok.ID]] = true
+				}
+			}
+			if len(held) != len(c.Vocab) {
+				t.Errorf("vocab = %v, want only the held tokens %v", c.Vocab, held)
+			}
 		})
 	}
 }

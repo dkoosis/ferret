@@ -122,7 +122,7 @@ func Build(eventsPath string, l lens.Lens, opts Options) (*Corpus, error) {
 	}
 
 	if windowed {
-		c.window(opts.Window, start)
+		c.window(opts.Window, start, intern)
 	}
 	if opts.Collapse {
 		c.collapse(intern)
@@ -152,10 +152,10 @@ func noteStart(start map[string]time.Time, key string, t time.Time) {
 }
 
 // window drops every stream whose start lies outside w, and every stream with
-// no timestamp at all, recording the counts on c.Window. Vocab ids only the
-// dropped streams held stay in Vocab; the miners count over Streams, so an id
-// no stream holds never surfaces.
-func (c *Corpus) window(w Window, start map[string]time.Time) {
+// no timestamp at all, recording the counts on c.Window. It then drops from
+// Vocab (and intern) every token only the dropped streams held, so a lookup by
+// token text cannot find one the window removed.
+func (c *Corpus) window(w Window, start map[string]time.Time, intern map[string]uint32) {
 	w.Total, w.Untimed = len(c.Streams), 0
 	kept := 0
 	for si, key := range c.StreamKeys {
@@ -172,6 +172,33 @@ func (c *Corpus) window(w Window, start map[string]time.Time) {
 	}
 	c.Streams, c.StreamKeys, c.Sidechain = c.Streams[:kept], c.StreamKeys[:kept], c.Sidechain[:kept]
 	c.Window = w
+	c.compactVocab(intern)
+}
+
+// compactVocab renumbers the ids the streams hold, in first-sight order, and
+// rebuilds Vocab and intern to hold only those tokens.
+func (c *Corpus) compactVocab(intern map[string]uint32) {
+	const unseen = ^uint32(0)
+	remap := make([]uint32, len(c.Vocab))
+	for i := range remap {
+		remap[i] = unseen
+	}
+	var vocab []string
+	for _, st := range c.Streams {
+		for i := range st {
+			old := st[i].ID
+			if remap[old] == unseen {
+				remap[old] = uint32(len(vocab)) //nolint:gosec // bounded by the old vocab size
+				vocab = append(vocab, c.Vocab[old])
+			}
+			st[i].ID = remap[old]
+		}
+	}
+	clear(intern)
+	for id, tok := range vocab {
+		intern[tok] = uint32(id) //nolint:gosec // bounded by the old vocab size
+	}
+	c.Vocab = vocab
 }
 
 // intern returns the stable id for tok, growing the vocab on first sight.
