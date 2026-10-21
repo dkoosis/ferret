@@ -96,6 +96,9 @@ type MisfireReport struct {
 	// its own exit code the tool_result never carried) — not counted as a
 	// fail anywhere above, and not countable as a success either.
 	Unmeasured int `json:"unmeasured"`
+	// Flags is the wrong-flag ranking (ferret-f3f, MineFlagMisfires). Left
+	// nil by MineMisfires — only `ferret misfires` pays for the pass.
+	Flags []FlagRow `json:"flags,omitempty"`
 }
 
 // misfireAgg accumulates one Action key's totals as the corpus walk streams
