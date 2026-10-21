@@ -121,6 +121,12 @@ func BuildScoreboard(corpus *Corpus, findings []*Finding, waste WasteReport, led
 	return sb
 }
 
+// ScoreboardMaxGap is the gapped-match distance the Δ section re-counts a
+// non-finding motif at. cmd/ferret's reportMaxGap (the report's default
+// --max-gap, which `fixes add` baselines with) is defined from it, so the two
+// cannot drift.
+const ScoreboardMaxGap = 3
+
 // buildDelta renders one row per ledger `fix` entry (wontfix/watch verdicts
 // have no baseline burn to delta — they only ever leave the ranking above).
 // It returns every row; BuildScoreboard applies the cap, so the count folded
@@ -138,8 +144,8 @@ func BuildScoreboard(corpus *Corpus, findings []*Finding, waste WasteReport, led
 // order is not).
 func buildDelta(corpus *Corpus, findings []*Finding, idx map[string]fixes.Entry) []ScoreboardDelta {
 	keys := make([]string, 0, len(idx))
-	for key, e := range idx {
-		if e.Disp() == fixes.DispositionFix {
+	for key := range idx {
+		if e := idx[key]; e.Disp() == fixes.DispositionFix {
 			keys = append(keys, key)
 		}
 	}
@@ -155,12 +161,20 @@ func buildDelta(corpus *Corpus, findings []*Finding, idx map[string]fixes.Entry)
 	for _, key := range keys {
 		e := idx[key]
 		displayKey, after := key, 0
+		matched := false
 		for _, f := range findings {
 			if fixes.MotifKey(corpus.Tokens(f.IDs)) == key {
 				displayKey = strings.Join(corpus.Tokens(f.IDs), " ⇝ ")
-				after = f.Burn
+				after, matched = f.Burn, true
 				break
 			}
+		}
+		if !matched {
+			// Not a finding now: it may have fallen below min-support yet still run
+			// (`fixes add` records a true baseline for such a motif, so "after" must
+			// be counted the same way, not assumed 0). A motif whose tokens are not in
+			// the corpus at all still reads 0.
+			after = CountMotif(corpus, fixes.SplitMotifKey(key), ScoreboardMaxGap).Burn
 		}
 		delta = append(delta, ScoreboardDelta{
 			Key: displayKey, Fix: e.Fix, FixedAt: e.AddedAt.Format("2006-01-02"),

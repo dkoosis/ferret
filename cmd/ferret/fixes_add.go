@@ -7,16 +7,18 @@ import (
 	"time"
 
 	"github.com/dkoosis/ferret/internal/fixes"
+	"github.com/dkoosis/ferret/internal/mine"
 )
 
 var errFixMotifRequired = usage("fixes add: --motif must not be empty")
 
 // cmdFixesAdd records motif→fix in the ledger, capturing the motif's CURRENT
-// burn as the baseline. The baseline is measured through the same findings
-// pipeline the report uses, so the later 'report --since-fixes' delta is a true
-// before→after rather than an eyeballed guess. A motif that isn't currently a
-// finding records a 0 baseline (with a stderr note) — the user is recording a
-// fix for friction the corpus no longer shows.
+// burn, session count and occurrence count as the baseline. They are measured
+// with the same gapped match the report prices a finding with (reportMaxGap), so
+// the later 'report --since-fixes' delta is a true before→after rather than an
+// eyeballed guess. A motif that is not a finding (below min-support) still gets
+// its counted baseline; only a motif the corpus never shows records 0 (with a
+// stderr note).
 func cmdFixesAdd() error {
 	cmd := &CLI.Fixes.Add
 	data, err := resolveData(cmd.Data)
@@ -56,23 +58,21 @@ func cmdFixesAdd() error {
 	if err != nil {
 		return err
 	}
-	// nil surprise index: the baseline only needs each motif's burn (surprise-
-	// independent), so the routine/friction split is irrelevant here.
-	findings, _ := mineFindings(corpus, reportMinSupport, reportMaxGap, reportMaxLen, reportOrder, reportTop, nil, 0)
-	for _, f := range findings {
-		if fixes.MotifKey(corpus.Tokens(f.IDs)) == motif {
-			e.BaselineBurn = f.Burn
-			break
-		}
-	}
+	// Count the motif straight from the corpus (the same gapped match the report
+	// measures a finding with) instead of looking it up among the mined findings:
+	// a motif below the report's min-support is not a finding, yet it still has a
+	// true burn, session count and occurrence count to record.
+	n := mine.CountMotif(corpus, fixes.ParseMotif(cmd.Motif), reportMaxGap)
+	e.BaselineBurn, e.BaselineSessions, e.BaselineCount = n.Burn, n.Sessions, n.Count
 
 	if err := fixes.Append(fixes.Path(data), e); err != nil {
 		return err
 	}
-	if e.BaselineBurn == 0 {
+	if n.Count == 0 {
 		fmt.Fprintf(os.Stderr,
-			"ferret: motif %q is not a current finding (lens=%s) — baseline burn recorded as 0\n", motif, cmd.Lens)
+			"ferret: motif %q does not occur in the corpus (lens=%s) — baseline recorded as 0\n", motif, cmd.Lens)
 	}
-	fmt.Printf("recorded fix: %s → %s (baseline burn %d toks)\n", motif, cmd.Fix, e.BaselineBurn)
+	fmt.Printf("recorded fix: %s → %s (baseline burn %d toks, %d sessions, %d occurrences)\n",
+		motif, cmd.Fix, e.BaselineBurn, e.BaselineSessions, e.BaselineCount)
 	return nil
 }
