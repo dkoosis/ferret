@@ -33,7 +33,7 @@ func cmdAround() error {
 		return err
 	}
 	applyDefaultLimit(c, 15)
-	lo := fromLensFlags(cmd.LensFlags)
+	lo := fromCorpusFlags(cmd.LensFlags, cmd.WindowFlags)
 	if err := c.validate("text", fmtJSON); err != nil {
 		return err
 	}
@@ -53,7 +53,7 @@ func cmdAround() error {
 	}
 	if !ok {
 		if c.format == fmtJSON {
-			return out.JSON(os.Stdout, map[string]any{keyLens: l.Name(), "token": cmd.Token, "matches": 0})
+			return out.JSON(os.Stdout, withWindow(corpus, map[string]any{keyLens: l.Name(), "token": cmd.Token, "matches": 0}))
 		}
 		fmt.Printf("0 matches for %s\n", cmd.Token)
 		return nil
@@ -71,12 +71,12 @@ func cmdAround() error {
 
 	if c.format == fmtJSON {
 		b, a := aroundJSON(corpus, before, c.limit), aroundJSON(corpus, after, c.limit)
-		return out.JSON(os.Stdout, map[string]any{
+		return out.JSON(os.Stdout, withWindow(corpus, map[string]any{
 			keyLens: l.Name(), "token": corpus.Vocab[id], "window": cmd.Window, "streams": len(corpus.Streams),
 			"before": b, "after": a, "seqs": seqsJSON(corpus, pats),
 			"beforeTotal": len(before), "afterTotal": len(after), "seqsTotal": seqTotal, "seqsCapped": capped,
 			keyTruncated: len(b) < len(before) || len(a) < len(after) || len(pats) < seqTotal || capped,
-		})
+		}))
 	}
 	aroundText(corpus, l.Name(), id, cmd.Window, before, after, pats, capped, c)
 	return nil
@@ -92,7 +92,7 @@ func aroundText(corpus *mine.Corpus, lensName string, id uint32, window int,
 		"≡ around: the tokens just before and after one token, then the gapped routines through it.",
 		"≡ Nx/Ms = N occurrences in M sessions; a session is a stream (project/session@agent). dN = N steps away.",
 		legendMarks)
-	sink.Head("around %s lens=%s window=%d streams=%d", corpus.Vocab[id], lensName, window, len(corpus.Streams))
+	sink.Head("around %s lens=%s window=%d %s", corpus.Vocab[id], lensName, window, streamsTag(corpus))
 	aroundTable(sink, corpus, "before", before, c.limit)
 	aroundTable(sink, corpus, "after", after, c.limit)
 	sink.Head("seqs through it (min-support=%d max-gap=%d, top %d)", reportMinSupport, reportMaxGap, aroundSeqTop)

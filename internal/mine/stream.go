@@ -3,6 +3,8 @@
 package mine
 
 import (
+	"time"
+
 	"github.com/dkoosis/ferret/internal/event"
 	"github.com/dkoosis/ferret/internal/lens"
 )
@@ -40,6 +42,26 @@ type Corpus struct {
 	StreamKeys []string // "project/session@agent" per stream
 	Sidechain  []bool   // per stream: true = subagent sidechain transcript
 	Vocab      []string // id → token
+	Window     Window   // the --since/--until window the streams were kept by
+}
+
+// Window keeps only streams whose start falls in [Since, Until]. A stream's
+// start is its earliest timestamped event; a zero bound is open. Build fills
+// Total and Untimed so a header can show what the window kept and dropped.
+type Window struct {
+	Since   time.Time
+	Until   time.Time // inclusive: the caller passes the last instant it wants
+	Total   int       // streams before the window was applied
+	Untimed int       // streams dropped because no event carried a timestamp
+}
+
+// Set reports whether either bound is given.
+func (w Window) Set() bool { return !w.Since.IsZero() || !w.Until.IsZero() }
+
+func (w Window) contains(t time.Time) bool {
+	return !t.IsZero() &&
+		(w.Since.IsZero() || !t.Before(w.Since)) &&
+		(w.Until.IsZero() || !t.After(w.Until))
 }
 
 func (c *Corpus) Tokens(ids []uint32) []string {
@@ -55,6 +77,7 @@ type Options struct {
 	MarkFail    bool // append "!" to failed-action tokens
 	Collapse    bool // run-length collapse: read,read,read → read+
 	NoSidechain bool
+	Window      Window // Since/Until only; a zero Window keeps every stream
 }
 
 // Build streams the events artifact through a lens into a Corpus.
@@ -65,24 +88,24 @@ func Build(eventsPath string, l lens.Lens, opts Options) (*Corpus, error) {
 	c := &Corpus{}
 	intern := map[string]uint32{}
 	streamIdx := map[string]int{}
+	windowed := opts.Window.Set()
+	start := map[string]time.Time{} // stream key → earliest event time, any token or none
 
 	err := event.Read(eventsPath, func(ev *event.Event) error {
 		if opts.NoSidechain && ev.Sidechain {
 			return nil
+		}
+		key := ev.Project + "/" + ev.Session + "@" + ev.Agent
+		if windowed {
+			noteStart(start, key, ev.Time)
 		}
 		tok, ok := l.Token(ev)
 		if !ok {
 			return nil
 		}
 		if opts.MarkFail {
-			switch ev.Status {
-			case event.StatusFail:
-				tok += "!"
-			case event.StatusCFail:
-				tok += "?" // part of a failed compound chain; failing segment unknown
-			}
+			tok += failMark(ev.Status)
 		}
-		key := ev.Project + "/" + ev.Session + "@" + ev.Agent
 		si, ok := streamIdx[key]
 		if !ok {
 			si = len(c.Streams)
@@ -98,10 +121,57 @@ func Build(eventsPath string, l lens.Lens, opts Options) (*Corpus, error) {
 		return nil, err
 	}
 
+	if windowed {
+		c.window(opts.Window, start)
+	}
 	if opts.Collapse {
 		c.collapse(intern)
 	}
 	return c, nil
+}
+
+// failMark is the suffix --mark-fail appends for a failed status.
+func failMark(st string) string {
+	switch st {
+	case event.StatusFail:
+		return "!"
+	case event.StatusCFail:
+		return "?" // part of a failed compound chain; failing segment unknown
+	}
+	return ""
+}
+
+// noteStart keeps the earliest non-zero time seen for a stream key.
+func noteStart(start map[string]time.Time, key string, t time.Time) {
+	if t.IsZero() {
+		return
+	}
+	if cur, ok := start[key]; !ok || t.Before(cur) {
+		start[key] = t
+	}
+}
+
+// window drops every stream whose start lies outside w, and every stream with
+// no timestamp at all, recording the counts on c.Window. Vocab ids only the
+// dropped streams held stay in Vocab; the miners count over Streams, so an id
+// no stream holds never surfaces.
+func (c *Corpus) window(w Window, start map[string]time.Time) {
+	w.Total, w.Untimed = len(c.Streams), 0
+	kept := 0
+	for si, key := range c.StreamKeys {
+		t, ok := start[key]
+		if !ok {
+			w.Untimed++
+			continue
+		}
+		if !w.contains(t) {
+			continue
+		}
+		c.Streams[kept], c.StreamKeys[kept], c.Sidechain[kept] = c.Streams[si], key, c.Sidechain[si]
+		kept++
+	}
+	c.Streams, c.StreamKeys, c.Sidechain = c.Streams[:kept], c.StreamKeys[:kept], c.Sidechain[:kept]
+	c.Window = w
 }
 
 // intern returns the stable id for tok, growing the vocab on first sight.

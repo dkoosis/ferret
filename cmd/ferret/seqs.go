@@ -17,7 +17,7 @@ func cmdSeqs() error {
 		return err
 	}
 	applyDefaultLimit(c, 30)
-	lo := fromLensFlags(cmd.LensFlags)
+	lo := fromCorpusFlags(cmd.LensFlags, cmd.WindowFlags)
 	if err := c.validate("text", fmtJSON); err != nil {
 		return err
 	}
@@ -53,10 +53,10 @@ func cmdSeqs() error {
 			}
 			rows = append(rows, jp{corpus.Tokens(p.IDs), p.Support, exemplar(corpus, p.ExStream, p.ExSeq)})
 		}
-		return out.JSON(os.Stdout, map[string]any{
+		return out.JSON(os.Stdout, withWindow(corpus, map[string]any{
 			keyLens: l.Name(), "maxGap": cmd.MaxGap, "patterns": rows,
 			keyTotal: len(pats), keyTruncated: len(rows) < len(pats) || capped,
-		})
+		}))
 	}
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
 	defer sink.Close()
@@ -64,8 +64,8 @@ func cmdSeqs() error {
 		"≡ seqs: ordered subsequences that recur with up to max-gap other actions between steps",
 		"≡ (PrefixSpan) — habits that survive interruptions. Ns = pattern appears in N sessions. ⇝ = gap allowed.",
 		legendMarks)
-	sink.Head("seqs lens=%s%s streams=%d patterns=%d (min-support=%d max-gap=%d max-len=%d)",
-		l.Name(), containsTag(cmd.Contains), len(corpus.Streams), len(pats), cmd.MinSupport, cmd.MaxGap, cmd.MaxLen)
+	sink.Head("seqs lens=%s%s %s patterns=%d (min-support=%d max-gap=%d max-len=%d)",
+		l.Name(), containsTag(cmd.Contains), streamsTag(corpus), len(pats), cmd.MinSupport, cmd.MaxGap, cmd.MaxLen)
 	if capped {
 		sink.Head("‡ search hit the 10000-pattern cap — raise --min-support")
 	}

@@ -28,7 +28,7 @@ func cmdVocab() error {
 	}
 	// The default is every token: the point is to see how a command tokenizes.
 	applyDefaultLimit(c, 0)
-	lo := fromLensFlags(cmd.LensFlags)
+	lo := fromCorpusFlags(cmd.LensFlags, cmd.WindowFlags)
 	if err := c.validate("text", fmtJSON); err != nil {
 		return err
 	}
@@ -46,9 +46,9 @@ func cmdVocab() error {
 		if c.limit > 0 && len(shown) > c.limit {
 			shown = shown[:c.limit]
 		}
-		return out.JSON(os.Stdout, map[string]any{
+		return out.JSON(os.Stdout, withWindow(corpus, map[string]any{
 			keyLens: l.Name(), "tokens": shown, keyTotal: len(rows), keyTruncated: len(shown) < len(rows),
-		})
+		}))
 	}
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
 	defer sink.Close()
@@ -60,7 +60,7 @@ func cmdVocab() error {
 	if cmd.Substring != "" {
 		head += fmt.Sprintf(" contains=%q", cmd.Substring)
 	}
-	sink.Head("%s streams=%d tokens=%d", head, len(corpus.Streams), len(rows))
+	sink.Head("%s %s tokens=%d", head, streamsTag(corpus), len(rows))
 	emptyNote(sink, len(rows), "tokens")
 	for _, r := range rows {
 		sink.Row("  %s  %d occ / %d sessions", r.Token, r.Count, r.Sessions)

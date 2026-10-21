@@ -204,15 +204,15 @@ assembles the prompt without calling anything.
 |---|---|---|---|---|
 | `ferret ingest` | local | — | `--data` `--root` `--project` `--dry-run` `--snipe-usage` | Build ~/.ferret/events.jsonl from transcripts. |
 | `ferret summary` | local | ✓ | `--by` | Corpus health + tool mix. |
-| `ferret ngrams` | local | ✓ | `--lens` `--no-mark-fail` `--no-collapse` `--no-sidechain` `--contains` `--n` `--min-count` `--min-sessions` | Repeated n-grams across streams. |
-| `ferret seqs` | local | ✓ | `--lens` `--no-mark-fail` `--no-collapse` `--no-sidechain` `--contains` `--min-support` `--max-gap` `--max-len` | Gapped subsequences (PrefixSpan). |
-| `ferret around` | local | ✓ | `--lens` `--no-mark-fail` `--no-collapse` `--no-sidechain` `--window` | Tokens before and after one token, with counts, plus the gapped routines through it. |
-| `ferret vocab` | local | ✓ | `--lens` `--no-mark-fail` `--no-collapse` `--no-sidechain` | Distinct tokens under the lens, with occurrence and session counts. |
-| `ferret rank` | local | ✓ | `--lens` `--no-mark-fail` `--no-collapse` `--no-sidechain` `--min-support` `--max-gap` `--max-len` `--order` `--top` | Ranked review queue (cohesion-scored, bucketed). |
-| `ferret report` | local | ✓ | `--lens` `--no-mark-fail` `--no-collapse` `--no-sidechain` `--min-support` `--max-gap` `--max-len` `--order` `--top` `--kind` `--since-fixes` | Findings: motifs classified into actions, ranked by measured burn. |
-| `ferret surprise` | local | ✓ | `--lens` `--no-mark-fail` `--no-collapse` `--no-sidechain` `--order` `--min-toks` | Per-session predictability (low=scriptable, high=thrash). |
-| `ferret graph` | local | ✓ | `--lens` `--no-mark-fail` `--no-collapse` `--no-sidechain` `--contains` `--min-count` `--loops` | Token transition graph. |
-| `ferret tokens` | local | ✓ | `--lens` `--no-mark-fail` `--no-collapse` `--no-sidechain` `--session` | One session's token stream (lens debugger). |
+| `ferret ngrams` | local | ✓ | `--lens` `--no-mark-fail` `--no-collapse` `--no-sidechain` `--since` `--until` `--contains` `--n` `--min-count` `--min-sessions` | Repeated n-grams across streams. |
+| `ferret seqs` | local | ✓ | `--lens` `--no-mark-fail` `--no-collapse` `--no-sidechain` `--since` `--until` `--contains` `--min-support` `--max-gap` `--max-len` | Gapped subsequences (PrefixSpan). |
+| `ferret around` | local | ✓ | `--lens` `--no-mark-fail` `--no-collapse` `--no-sidechain` `--since` `--until` `--window` | Tokens before and after one token, with counts, plus the gapped routines through it. |
+| `ferret vocab` | local | ✓ | `--lens` `--no-mark-fail` `--no-collapse` `--no-sidechain` `--since` `--until` | Distinct tokens under the lens, with occurrence and session counts. |
+| `ferret rank` | local | ✓ | `--lens` `--no-mark-fail` `--no-collapse` `--no-sidechain` `--since` `--until` `--min-support` `--max-gap` `--max-len` `--order` `--top` | Ranked review queue (cohesion-scored, bucketed). |
+| `ferret report` | local | ✓ | `--lens` `--no-mark-fail` `--no-collapse` `--no-sidechain` `--since` `--until` `--min-support` `--max-gap` `--max-len` `--order` `--top` `--kind` `--since-fixes` | Findings: motifs classified into actions, ranked by measured burn. |
+| `ferret surprise` | local | ✓ | `--lens` `--no-mark-fail` `--no-collapse` `--no-sidechain` `--since` `--until` `--order` `--min-toks` | Per-session predictability (low=scriptable, high=thrash). |
+| `ferret graph` | local | ✓ | `--lens` `--no-mark-fail` `--no-collapse` `--no-sidechain` `--since` `--until` `--contains` `--min-count` `--loops` | Token transition graph. |
+| `ferret tokens` | local | ✓ | `--lens` `--no-mark-fail` `--no-collapse` `--no-sidechain` `--since` `--until` `--session` | One session's token stream (lens debugger). |
 | `ferret spine` | local | — | `--session` `--root` | Compact session spine: prompts + thinking + tool calls + result status/size. |
 | `ferret segments` | local | — | `--session` `--root` `--format` | Deterministic task-boundary candidates (1 per user prompt) + thinking-pivot hints. |
 | `ferret dialogue` | local | — | `--session` `--root` `--format` | Tag user turns: per-turn repair/accept moves + PARADISE outcome rollup (regex-first; v1). |

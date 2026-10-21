@@ -18,7 +18,7 @@ func cmdGraph() error {
 		return err
 	}
 	applyDefaultLimit(c, 40)
-	lo := fromLensFlags(cmd.LensFlags)
+	lo := fromCorpusFlags(cmd.LensFlags, cmd.WindowFlags)
 	if err := c.validate("text", "json", "mermaid", "dot", "sankey"); err != nil {
 		return err
 	}
@@ -66,11 +66,11 @@ func cmdGraph() error {
 			}
 			cyc = append(cyc, jc{corpus.Vocab[cy.A], corpus.Vocab[cy.B], cy.Count})
 		}
-		return out.JSON(os.Stdout, map[string]any{
+		return out.JSON(os.Stdout, withWindow(corpus, map[string]any{
 			keyLens: l.Name(),
 			"edges": rows, "edgesTotal": totalEdges, keyTruncated: len(rows) < totalEdges,
 			"cycles": cyc, "cyclesTotal": len(f.Cycles),
-		})
+		}))
 	case "mermaid", "dot", "sankey":
 		return writeGraph(os.Stdout, c.format, corpus, edges)
 	}
@@ -79,7 +79,7 @@ func cmdGraph() error {
 	about(sink,
 		"≡ graph: action→action transition counts (what typically follows what).",
 		"≡ --loops adds A⇄B bounce cycles — back-and-forth churn, often friction.")
-	sink.Head("graph lens=%s%s edges=%d (min-count=%d)", l.Name(), containsTag(cmd.Contains), len(edges), cmd.MinCount)
+	sink.Head("graph lens=%s%s%s edges=%d (min-count=%d)", l.Name(), containsTag(cmd.Contains), windowTag(corpus), len(edges), cmd.MinCount)
 	emptyNote(sink, len(edges), "edges")
 	for _, e := range edges {
 		sink.Row("%6dx  %s → %s", e.Count, corpus.Vocab[e.From], corpus.Vocab[e.To])

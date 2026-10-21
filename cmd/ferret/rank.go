@@ -17,7 +17,7 @@ func cmdRank() error {
 	if err != nil {
 		return err
 	}
-	lo := fromLensFlags(cmd.LensFlags)
+	lo := fromCorpusFlags(cmd.LensFlags, cmd.WindowFlags)
 	if err := c.validate("text", fmtJSON); err != nil {
 		return err
 	}
@@ -72,11 +72,11 @@ func cmdRank() error {
 			}
 			buckets[b] = rows
 		}
-		return out.JSON(os.Stdout, map[string]any{
+		return out.JSON(os.Stdout, withWindow(corpus, map[string]any{
 			keyLens: l.Name(), "order": cmd.Order, "buckets": buckets,
 			"noise": noise, keyTotal: len(cards),
 			keyTruncated: overflow > 0 || capped,
-		})
+		}))
 	}
 	sink := out.NewSink(os.Stdout, 0, c.maxBytes)
 	defer sink.Close()
@@ -84,8 +84,8 @@ func cmdRank() error {
 		"≡ rank: mined seqs deduped + scored into review buckets. Columns: sessions · bits",
 		"≡ (predictability of the chain — lower = tighter habit) · score (review priority).",
 		legendMarks)
-	sink.Head("rank lens=%s patterns=%d → cards=%d noise=%d (min-support=%d order=%d top=%d)",
-		l.Name(), len(pats), len(cards), noise, cmd.MinSupport, cmd.Order, cmd.Top)
+	sink.Head("rank lens=%s%s patterns=%d → cards=%d noise=%d (min-support=%d order=%d top=%d)",
+		l.Name(), windowTag(corpus), len(pats), len(cards), noise, cmd.MinSupport, cmd.Order, cmd.Top)
 	if capped {
 		sink.Head("‡ seqs hit the 10000-pattern cap — raise --min-support")
 	}
