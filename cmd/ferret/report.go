@@ -16,6 +16,9 @@ import (
 var (
 	errBadKind    = usage("bad --kind (want routine|friction|loop|noise)")
 	errMaxBytesMD = usage("--max-bytes is not supported with --format md (whole-document output; use --limit)")
+	// The ledger's baselines were measured over the whole corpus; a windowed
+	// count against them would print ↓ for a fix that did nothing.
+	errSinceFixesWindow = usage("--since-fixes compares against whole-corpus baselines; drop --since/--until")
 )
 
 func cmdReport() error {
@@ -31,6 +34,9 @@ func cmdReport() error {
 	}
 	if c.format == fmtMD && c.maxBytes > 0 {
 		return errMaxBytesMD
+	}
+	if cmd.SinceFixes && (cmd.Since != "" || cmd.Until != "") {
+		return errSinceFixesWindow
 	}
 	switch cmd.Kind {
 	case "", string(mine.KindRoutine), string(mine.KindFriction), string(mine.KindLoop), string(mine.KindNoise):

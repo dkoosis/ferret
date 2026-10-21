@@ -136,3 +136,15 @@ func TestAroundJSONKeepsStepWindowUnderDates(t *testing.T) {
 		t.Errorf("dateWindow = %+v, want since=2026-10-19 streams=3 total=4", d)
 	}
 }
+
+// TestReportSinceFixesRefusesWindow pins that report will not compare the
+// ledger's whole-corpus baselines with a windowed count.
+func TestReportSinceFixesRefusesWindow(t *testing.T) {
+	saved := CLI.Report
+	t.Cleanup(func() { CLI.Report = saved })
+	CLI.Report.Data, CLI.Report.Format = writeDatedCorpus(t), fmtText
+	CLI.Report.SinceFixes, CLI.Report.Since = true, "2026-10-19"
+	if err := cmdReport(); !errors.Is(err, errSinceFixesWindow) {
+		t.Errorf("err = %v, want errSinceFixesWindow", err)
+	}
+}
