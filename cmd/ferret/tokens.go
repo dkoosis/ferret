@@ -23,7 +23,7 @@ func cmdTokens() error {
 		return err
 	}
 	applyDefaultLimit(c, 200)
-	lo := fromLensFlags(cmd.LensFlags)
+	lo := fromCorpusFlags(cmd.LensFlags, cmd.WindowFlags)
 	if cmd.Session == "" {
 		return errSessionRequired
 	}
@@ -45,6 +45,9 @@ func cmdTokens() error {
 		}
 	}
 	if len(matches) == 0 {
+		if corpus.Window.Set() {
+			return fmt.Errorf("%w: %q in the date window (%s)", errNoStreamMatch, cmd.Session, streamsTag(corpus))
+		}
 		return fmt.Errorf("%w: %q", errNoStreamMatch, cmd.Session)
 	}
 	if c.format == fmtJSON {
@@ -71,7 +74,7 @@ func cmdTokens() error {
 			}
 			streams = append(streams, s)
 		}
-		return out.JSON(os.Stdout, map[string]any{keyLens: l.Name(), "streams": streams})
+		return out.JSON(os.Stdout, withWindow(corpus, map[string]any{keyLens: l.Name(), "streams": streams}))
 	}
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
 	defer sink.Close()

@@ -33,7 +33,7 @@ func cmdAround() error {
 		return err
 	}
 	applyDefaultLimit(c, 15)
-	lo := fromLensFlags(cmd.LensFlags)
+	lo := fromCorpusFlags(cmd.LensFlags, cmd.WindowFlags)
 	if err := c.validate("text", fmtJSON); err != nil {
 		return err
 	}
@@ -52,11 +52,7 @@ func cmdAround() error {
 		return err
 	}
 	if !ok {
-		if c.format == fmtJSON {
-			return out.JSON(os.Stdout, map[string]any{keyLens: l.Name(), "token": cmd.Token, "matches": 0})
-		}
-		fmt.Printf("0 matches for %s\n", cmd.Token)
-		return nil
+		return aroundNoMatch(corpus, l.Name(), cmd.Token, c.format)
 	}
 
 	before, after := neighbours(mine.CountGrams(corpus, 2, cmd.Window+1), id)
@@ -71,14 +67,28 @@ func cmdAround() error {
 
 	if c.format == fmtJSON {
 		b, a := aroundJSON(corpus, before, c.limit), aroundJSON(corpus, after, c.limit)
-		return out.JSON(os.Stdout, map[string]any{
+		return out.JSON(os.Stdout, withWindow(corpus, map[string]any{
 			keyLens: l.Name(), "token": corpus.Vocab[id], "window": cmd.Window, "streams": len(corpus.Streams),
 			"before": b, "after": a, "seqs": seqsJSON(corpus, pats),
 			"beforeTotal": len(before), "afterTotal": len(after), "seqsTotal": seqTotal, "seqsCapped": capped,
 			keyTruncated: len(b) < len(before) || len(a) < len(after) || len(pats) < seqTotal || capped,
-		})
+		}))
 	}
 	aroundText(corpus, l.Name(), id, cmd.Window, before, after, pats, capped, c)
+	return nil
+}
+
+// aroundNoMatch reports a token no stream holds, naming the date window when
+// one is set so the absence is not read as whole-corpus.
+func aroundNoMatch(corpus *mine.Corpus, lensName, token, format string) error {
+	if format == fmtJSON {
+		return out.JSON(os.Stdout, withWindow(corpus, map[string]any{keyLens: lensName, "token": token, "matches": 0}))
+	}
+	where := ""
+	if corpus.Window.Set() {
+		where = " in the date window (" + streamsTag(corpus) + ")"
+	}
+	fmt.Printf("0 matches for %s%s\n", token, where)
 	return nil
 }
 
@@ -92,7 +102,7 @@ func aroundText(corpus *mine.Corpus, lensName string, id uint32, window int,
 		"≡ around: the tokens just before and after one token, then the gapped routines through it.",
 		"≡ Nx/Ms = N occurrences in M sessions; a session is a stream (project/session@agent). dN = N steps away.",
 		legendMarks)
-	sink.Head("around %s lens=%s window=%d streams=%d", corpus.Vocab[id], lensName, window, len(corpus.Streams))
+	sink.Head("around %s lens=%s window=%d %s", corpus.Vocab[id], lensName, window, streamsTag(corpus))
 	aroundTable(sink, corpus, "before", before, c.limit)
 	aroundTable(sink, corpus, "after", after, c.limit)
 	sink.Head("seqs through it (min-support=%d max-gap=%d, top %d)", reportMinSupport, reportMaxGap, aroundSeqTop)

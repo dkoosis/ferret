@@ -16,6 +16,9 @@ import (
 var (
 	errBadKind    = usage("bad --kind (want routine|friction|loop|noise)")
 	errMaxBytesMD = usage("--max-bytes is not supported with --format md (whole-document output; use --limit)")
+	// The ledger's baselines were measured over the whole corpus; a windowed
+	// count against them would print ↓ for a fix that did nothing.
+	errSinceFixesWindow = usage("--since-fixes compares against whole-corpus baselines; drop --since/--until")
 )
 
 func cmdReport() error {
@@ -25,12 +28,15 @@ func cmdReport() error {
 		return err
 	}
 	applyDefaultLimit(c, 30)
-	lo := fromLensFlags(cmd.LensFlags)
+	lo := fromCorpusFlags(cmd.LensFlags, cmd.WindowFlags)
 	if err := c.validate("text", fmtJSON, fmtMD); err != nil {
 		return err
 	}
 	if c.format == fmtMD && c.maxBytes > 0 {
 		return errMaxBytesMD
+	}
+	if cmd.SinceFixes && (cmd.Since != "" || cmd.Until != "") {
+		return errSinceFixesWindow
 	}
 	switch cmd.Kind {
 	case "", string(mine.KindRoutine), string(mine.KindFriction), string(mine.KindLoop), string(mine.KindNoise):
@@ -192,7 +198,7 @@ func cmdReport() error {
 			payload["suppressed"] = sup
 		}
 		addGoneFixes(payload, gone, c.limit)
-		return out.JSON(os.Stdout, payload)
+		return out.JSON(os.Stdout, withWindow(corpus, payload))
 	}
 
 	// --format md renders the human cost report: the same findings projected into
@@ -213,7 +219,11 @@ func cmdReport() error {
 				Evidence: exemplar(corpus, f.ExStream, f.ExSeq),
 			})
 		}
-		return out.Markdown(os.Stdout, l.Name(), len(findings), rows)
+		scope := ""
+		if corpus.Window.Set() {
+			scope = streamsTag(corpus)
+		}
+		return out.Markdown(os.Stdout, l.Name(), scope, len(findings), rows)
 	}
 
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
@@ -227,8 +237,8 @@ func cmdReport() error {
 	if fixIdx != nil {
 		sink.Head("≡ since-fixes: [fixed DATE burn BASE→NOW ↓/↑/= sess BASEs→NOWs ↓/↑/=] annotates motifs in the ledger (↓ = fix landed; sessions have their own arrow).")
 	}
-	sink.Head("report lens=%s findings=%d (min-support=%d order=%d)",
-		l.Name(), len(findings), cmd.MinSupport, cmd.Order)
+	sink.Head("report lens=%s%s findings=%d (min-support=%d order=%d)",
+		l.Name(), windowTag(corpus), len(findings), cmd.MinSupport, cmd.Order)
 	emptyNote(sink, len(findings), "findings")
 	if capped {
 		sink.Head("‡ seqs hit the 10000-pattern cap — raise --min-support")

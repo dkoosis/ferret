@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"slices"
 
@@ -17,7 +18,7 @@ func cmdSurprise() error {
 		return err
 	}
 	applyDefaultLimit(c, 20)
-	lo := fromLensFlags(cmd.LensFlags)
+	lo := fromCorpusFlags(cmd.LensFlags, cmd.WindowFlags)
 	if err := c.validate("text", fmtJSON); err != nil {
 		return err
 	}
@@ -43,19 +44,25 @@ func cmdSurprise() error {
 	routine, thrash := splitSurprise(scores, c.limit)
 
 	if c.format == fmtJSON {
-		return out.JSON(os.Stdout, map[string]any{
+		return out.JSON(os.Stdout, withWindow(corpus, map[string]any{
 			keyLens: l.Name(), "order": cmd.Order, "meanBits": mean,
 			"routine": routine, "thrash": thrash,
 			keyTotal: len(scores), keyTruncated: len(routine)+len(thrash) < len(scores),
-		})
+		}))
 	}
 	sink := out.NewSink(os.Stdout, c.limit+2, c.maxBytes)
 	defer sink.Close()
 	about(sink,
 		"≡ surprise: how predictable each session is to a model trained on all your sessions",
 		"≡ (order-N context model). Low bits/tok = rote routine worth scripting; high = novel work or thrash.")
-	sink.Head("surprise lens=%s order=%d streams=%d mean=%.2f bits/tok (low=routine/scriptable, high=thrash)",
-		l.Name(), cmd.Order, len(scores), mean)
+	// Under a window the streams= slot already holds kept/total, so the
+	// scored count (streams long enough for --min-toks) is named scored=.
+	scored := fmt.Sprintf("streams=%d", len(scores))
+	if corpus.Window.Set() {
+		scored = fmt.Sprintf("%s scored=%d", streamsTag(corpus), len(scores))
+	}
+	sink.Head("surprise lens=%s order=%d %s mean=%.2f bits/tok (low=routine/scriptable, high=thrash)",
+		l.Name(), cmd.Order, scored, mean)
 	sink.Head("most routine:")
 	for _, s := range routine {
 		sink.Row("%6.2f bits %5d toks  %s", s.Bits, s.Toks, s.Stream)

@@ -21,7 +21,7 @@ func cmdNgrams() error {
 		return err
 	}
 	applyDefaultLimit(c, 30)
-	lo := fromLensFlags(cmd.LensFlags)
+	lo := fromCorpusFlags(cmd.LensFlags, cmd.WindowFlags)
 	minN, maxN, err := parseRange(cmd.N)
 	if err != nil {
 		return err
@@ -53,10 +53,10 @@ func cmdNgrams() error {
 			}
 			rows = append(rows, jg{corpus.Tokens(g.IDs), g.Count, g.Sessions, exemplar(corpus, g.ExStream, g.ExSeq)})
 		}
-		return out.JSON(os.Stdout, map[string]any{
+		return out.JSON(os.Stdout, withWindow(corpus, map[string]any{
 			keyLens: l.Name(), "n": cmd.N, "grams": rows,
 			keyTotal: len(grams), keyTruncated: len(rows) < len(grams),
-		})
+		}))
 	}
 	sink := out.NewSink(os.Stdout, c.limit, c.maxBytes)
 	defer sink.Close()
@@ -64,8 +64,8 @@ func cmdNgrams() error {
 		"≡ ngrams: exact action sequences repeated verbatim (no gaps). High count across many",
 		"≡ sessions = a habitual routine — script/skill candidate. Nx/Ms = N occurrences in M sessions.",
 		legendMarks)
-	sink.Head("ngrams lens=%s n=%s%s streams=%d grams=%d (min-count=%d min-sessions=%d)",
-		l.Name(), cmd.N, containsTag(cmd.Contains), len(corpus.Streams), len(grams), cmd.MinCount, cmd.MinSessions)
+	sink.Head("ngrams lens=%s n=%s%s %s grams=%d (min-count=%d min-sessions=%d)",
+		l.Name(), cmd.N, containsTag(cmd.Contains), streamsTag(corpus), len(grams), cmd.MinCount, cmd.MinSessions)
 	emptyNote(sink, len(grams), "grams")
 	for _, g := range grams {
 		sink.Row("%5dx/%-4ds %s  ex: %s",

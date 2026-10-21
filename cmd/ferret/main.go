@@ -209,6 +209,14 @@ type LensFlags struct {
 	NoSidechain bool   `help:"Exclude sidechain events." name:"no-sidechain"`
 }
 
+// WindowFlags keep only streams whose session started in a date window, so a
+// before/after count comes from one corpus (ferret-pr4). Spelled as reach
+// spells them. Not on friction: its other legs do not read the corpus.
+type WindowFlags struct {
+	Since string `help:"Only streams that started on or after this date, YYYY-MM-DD." name:"since"`
+	Until string `help:"Only streams that started on or before this date, YYYY-MM-DD, inclusive." name:"until"`
+}
+
 // CLI is the root grammar parsed by kong.
 var CLI struct {
 	// Offline refuses every model-backed command before it runs (ferret-wvo).
@@ -232,6 +240,7 @@ var CLI struct {
 	Ngrams struct {
 		CommonFlags
 		LensFlags
+		WindowFlags
 		ContainsFlags
 		N           string `help:"Gram lengths ≥2, e.g. 3 or 2-5." default:"2-5" name:"n"`
 		MinCount    int    `help:"Min total occurrences." default:"5" name:"min-count"`
@@ -241,6 +250,7 @@ var CLI struct {
 	Seqs struct {
 		CommonFlags
 		LensFlags
+		WindowFlags
 		ContainsFlags
 		MinSupport int `help:"Min distinct streams containing the pattern." default:"20" name:"min-support"`
 		MaxGap     int `help:"Max positions between consecutive items (1 = adjacent)." default:"3" name:"max-gap"`
@@ -250,6 +260,7 @@ var CLI struct {
 	Around struct {
 		CommonFlags
 		LensFlags
+		WindowFlags
 		Token  string `arg:"" help:"Exact token, or a substring that matches only one token." name:"token"`
 		Window int    `help:"Steps out from the token, 1..3." default:"1" name:"window"`
 	} `cmd:"" help:"Tokens before and after one token, with counts, plus the gapped routines through it."`
@@ -257,12 +268,14 @@ var CLI struct {
 	Vocab struct {
 		CommonFlags
 		LensFlags
+		WindowFlags
 		Substring string `arg:"" optional:"" help:"Keep only tokens that contain this text (case-sensitive)." name:"substring"`
 	} `cmd:"" help:"Distinct tokens under the lens, with occurrence and session counts."`
 
 	Rank struct {
 		CommonFlags
 		LensFlags
+		WindowFlags
 		MinSupport int `help:"Min distinct streams containing the pattern." default:"20" name:"min-support"`
 		MaxGap     int `help:"Max positions between consecutive items (1 = adjacent)." default:"3" name:"max-gap"`
 		MaxLen     int `help:"Max pattern length." default:"5" name:"max-len"`
@@ -273,6 +286,7 @@ var CLI struct {
 	Report struct {
 		CommonFlags
 		LensFlags
+		WindowFlags
 		MinSupport int    `help:"Min distinct streams containing the pattern." default:"20" name:"min-support"`
 		MaxGap     int    `help:"Max positions between consecutive items (1 = adjacent)." default:"3" name:"max-gap"`
 		MaxLen     int    `help:"Max pattern length." default:"8" name:"max-len"`
@@ -285,6 +299,7 @@ var CLI struct {
 	Surprise struct {
 		CommonFlags
 		LensFlags
+		WindowFlags
 		Order   int `help:"Model order: predict each token from up to N prior tokens." default:"3" name:"order"`
 		MinToks int `help:"Skip streams shorter than this." default:"20" name:"min-toks"`
 	} `cmd:"" help:"Per-session predictability (low=scriptable, high=thrash)."`
@@ -292,6 +307,7 @@ var CLI struct {
 	Graph struct {
 		CommonFlags
 		LensFlags
+		WindowFlags
 		ContainsFlags
 		MinCount int  `help:"Min edge count." default:"20" name:"min-count"`
 		Loops    bool `help:"Show A→B→A bounce cycles (friction signatures)." name:"loops"`
@@ -300,6 +316,7 @@ var CLI struct {
 	Tokens struct {
 		CommonFlags
 		LensFlags
+		WindowFlags
 		Session string `help:"Session ID prefix (required)." required:"" name:"session"`
 	} `cmd:"" help:"One session's token stream (lens debugger)."`
 
@@ -887,6 +904,8 @@ type lensOpts struct {
 	noMarkFail  bool
 	noCollapse  bool
 	noSidechain bool
+	since       string // YYYY-MM-DD; "" = open
+	until       string // YYYY-MM-DD, inclusive; "" = open
 }
 
 func fromLensFlags(lf LensFlags) *lensOpts {
@@ -898,7 +917,18 @@ func fromLensFlags(lf LensFlags) *lensOpts {
 	}
 }
 
+// fromCorpusFlags is fromLensFlags plus the --since/--until window.
+func fromCorpusFlags(lf LensFlags, wf WindowFlags) *lensOpts {
+	lo := fromLensFlags(lf)
+	lo.since, lo.until = wf.Since, wf.Until
+	return lo
+}
+
 func (lo *lensOpts) corpus(eventsPath string) (*mine.Corpus, lens.Lens, error) {
+	win, err := corpusWindow(lo.since, lo.until)
+	if err != nil {
+		return nil, nil, err
+	}
 	l, err := lens.Get(lo.lens)
 	if err != nil {
 		return nil, nil, err
@@ -907,8 +937,79 @@ func (lo *lensOpts) corpus(eventsPath string) (*mine.Corpus, lens.Lens, error) {
 		MarkFail:    !lo.noMarkFail,
 		Collapse:    !lo.noCollapse,
 		NoSidechain: lo.noSidechain,
+		Window:      win,
 	})
 	return c, l, err
+}
+
+// corpusWindow parses --since/--until as local days, --until inclusive. Unlike
+// reach's window, an unset bound stays open: no flag means the whole corpus.
+func corpusWindow(since, until string) (mine.Window, error) {
+	var w mine.Window
+	if since != "" {
+		t, err := time.ParseInLocation(dateLayout, since, time.Local)
+		if err != nil {
+			return w, fmt.Errorf("%w: %q", errBadSince, since)
+		}
+		w.Since = startOfDay(t)
+	}
+	if until != "" {
+		t, err := time.ParseInLocation(dateLayout, until, time.Local)
+		if err != nil {
+			return w, fmt.Errorf("%w: %q", errBadUntil, until)
+		}
+		w.Until = endOfDay(t)
+	}
+	if !w.Since.IsZero() && !w.Until.IsZero() && w.Since.After(w.Until) {
+		return w, errReachWindow
+	}
+	return w, nil
+}
+
+// streamsTag renders a header's stream count. Without a window it is the
+// plain streams=N every header printed before ferret-pr4; with one it names
+// the window and counts kept streams against the corpus total, plus the
+// streams dropped for carrying no timestamp.
+func streamsTag(c *mine.Corpus) string {
+	if !c.Window.Set() {
+		return fmt.Sprintf("streams=%d", len(c.Streams))
+	}
+	var b strings.Builder
+	if !c.Window.Since.IsZero() {
+		fmt.Fprintf(&b, "since=%s ", c.Window.Since.Format(dateLayout))
+	}
+	if !c.Window.Until.IsZero() {
+		fmt.Fprintf(&b, "until=%s ", c.Window.Until.Format(dateLayout))
+	}
+	fmt.Fprintf(&b, "streams=%d/%d untimed=%d", len(c.Streams), c.Window.Total, c.Window.Untimed)
+	return b.String()
+}
+
+// withWindow adds a "dateWindow" object to a JSON payload when one was set, so a
+// windowed count never reads as a whole-corpus count. Without a window the
+// payload is returned unchanged.
+func withWindow(c *mine.Corpus, m map[string]any) map[string]any {
+	if !c.Window.Set() {
+		return m
+	}
+	w := map[string]any{"streams": len(c.Streams), keyTotal: c.Window.Total, "untimed": c.Window.Untimed}
+	if !c.Window.Since.IsZero() {
+		w["since"] = c.Window.Since.Format(dateLayout)
+	}
+	if !c.Window.Until.IsZero() {
+		w["until"] = c.Window.Until.Format(dateLayout)
+	}
+	m["dateWindow"] = w // not "window": around already uses that key for its step count
+	return m
+}
+
+// windowTag is streamsTag for a header that prints no stream count of its
+// own: empty without a window, so those headers stay as they were.
+func windowTag(c *mine.Corpus) string {
+	if !c.Window.Set() {
+		return ""
+	}
+	return " " + streamsTag(c)
 }
 
 // ---- about lines ----
