@@ -196,7 +196,7 @@ func (c *Corpus) compactVocab(intern map[string]uint32) {
 	}
 	clear(intern)
 	for id, tok := range vocab {
-		intern[tok] = uint32(id) //nolint:gosec // bounded by the old vocab size
+		intern[tok] = uint32(id)
 	}
 	c.Vocab = vocab
 }
