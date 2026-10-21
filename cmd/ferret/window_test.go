@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -105,5 +106,33 @@ func TestNgramsNoWindowUnchanged(t *testing.T) {
 	// A dated corpus without flags keeps every stream too.
 	if got := runNgrams(t, writeDatedCorpus(t), fmtText, ""); got != want {
 		t.Errorf("dated corpus, no window:\ngot  %q\nwant %q", got, want)
+	}
+}
+
+// TestAroundJSONKeepsStepWindowUnderDates pins that a date window does not
+// overwrite around's "window" step count: the dates go under "dateWindow".
+func TestAroundJSONKeepsStepWindowUnderDates(t *testing.T) {
+	saved := CLI.Around
+	t.Cleanup(func() { CLI.Around = saved })
+	CLI.Around.Data, CLI.Around.Format, CLI.Around.Limit = writeDatedCorpus(t), fmtJSON, -1
+	CLI.Around.Lens, CLI.Around.Token, CLI.Around.Window = "cmd", "sh:bd_close", 2
+	CLI.Around.Since = "2026-10-19"
+	var got struct {
+		Window     int `json:"window"`
+		Streams    int `json:"streams"`
+		DateWindow struct {
+			Since   string `json:"since"`
+			Streams int    `json:"streams"`
+			Total   int    `json:"total"`
+		} `json:"dateWindow"`
+	}
+	if err := json.Unmarshal([]byte(captureStdout(t, cmdAround)), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Window != 2 {
+		t.Errorf("window = %d, want the step count 2", got.Window)
+	}
+	if d := got.DateWindow; d.Since != "2026-10-19" || d.Streams != 3 || d.Total != 4 {
+		t.Errorf("dateWindow = %+v, want since=2026-10-19 streams=3 total=4", d)
 	}
 }

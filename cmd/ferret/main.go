@@ -985,7 +985,7 @@ func streamsTag(c *mine.Corpus) string {
 	return b.String()
 }
 
-// withWindow adds a "window" object to a JSON payload when one was set, so a
+// withWindow adds a "dateWindow" object to a JSON payload when one was set, so a
 // windowed count never reads as a whole-corpus count. Without a window the
 // payload is returned unchanged.
 func withWindow(c *mine.Corpus, m map[string]any) map[string]any {
@@ -999,7 +999,7 @@ func withWindow(c *mine.Corpus, m map[string]any) map[string]any {
 	if !c.Window.Until.IsZero() {
 		w["until"] = c.Window.Until.Format(dateLayout)
 	}
-	m["window"] = w
+	m["dateWindow"] = w // not "window": around already uses that key for its step count
 	return m
 }
 
