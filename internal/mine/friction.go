@@ -18,16 +18,16 @@ import (
 // command that had to run is not waste. The currency here is the cost of the
 // calls that SHOULDN'T HAVE HAPPENED:
 //
-//	poll    (repeats beyond the first per session) × the key's bytes-per-call
-//	misfire (calls that failed)                    × the key's bytes-per-call
+//	poll    (repeats beyond the first per session) — those runs' measured bytes
+//	misfire (calls that failed)                    — those calls' measured bytes
 //	motif   (occurrences beyond the first per session) — its share of the
 //	        motif's measured burn
 //
 // One theory across all three: the first occurrence bought information; the
 // rest is the toll for not having fixed it. burn's own rows contribute no
 // waste of their own — a key's GrossBytes and BytesPerCall ride along on
-// every row as CONTEXT (and supply the per-call price the other two multiply
-// by), which is the join burn.go's Key column was already designed for.
+// every row as CONTEXT, which is the join burn.go's Key column was already
+// designed for.
 //
 // Deliberately excluded: SwallowRow. A swallow is a FLOOR on hidden failures,
 // not a count of them (misfire.go) — multiplying a floor by a per-call price
@@ -106,8 +106,8 @@ type WasteReport struct {
 
 // MergeWaste joins the four detectors' reports into one waste-ranked table.
 //
-// burn is required — it supplies the per-call price every other estimate is
-// denominated in, and its Key space ("sh:"-prefixed shell commands, bare tool
+// burn is required — it supplies each row's gross cost and per-call mean, and
+// its Key space ("sh:"-prefixed shell commands, bare tool
 // names — burnKey/misfireKey/pollingKey are the same function three times) is
 // the join key. motifs may be nil; corpus is only read when it isn't.
 func MergeWaste(burn *BurnResult, mis MisfireReport, poll PollingReport, corpus *Corpus, motifs []*Finding) WasteReport {
@@ -151,6 +151,11 @@ func priceIndex(burn *BurnResult) map[string]*BurnRow {
 // per session. TotalRepeats sums the runs over sessions that polled and
 // Sessions counts those sessions, so TotalRepeats−Sessions is exactly the
 // redundant-run count (polling.go's aggregatePolling).
+//
+// The price is those runs' OWN bytes, not the key's mean. A poll row is one
+// exact command and the mean is drawn from every form of its key: 491 repeats
+// of `git diff --stat` at the mean of all `git diff` calls read 2.6MB and
+// topped the ranking, where they cost 117KB.
 func appendPollWaste(rows []WasteRow, poll PollingReport, price map[string]*BurnRow) []WasteRow {
 	for _, p := range poll.Rows {
 		redundant := p.TotalRepeats - p.Sessions
@@ -164,7 +169,7 @@ func appendPollWaste(rows []WasteRow, poll PollingReport, price map[string]*Burn
 			Sessions:    p.Sessions,
 			Detail:      p.Command,
 		}
-		applyPrice(&row, price, float64(redundant))
+		applyMeasuredPrice(&row, price, p.RepeatBytes)
 		rows = append(rows, row)
 	}
 	return rows
@@ -179,9 +184,7 @@ func appendPollWaste(rows []WasteRow, poll PollingReport, price map[string]*Burn
 // failure does not cost what a success costs: a failed Read returns an error
 // string where an average Read returns 7.6KB. On the 2026-08-30 corpus the
 // mean priced 256 Read misfires at 1.9MB — the top friction row, and a row two
-// sessions shipped rules against before anyone checked it. Poll rows keep the
-// mean (appendPollWaste): a repeated `git status` really does return about
-// what an average `git status` returns, so there the model holds.
+// sessions shipped rules against before anyone checked it.
 func appendMisfireWaste(rows []WasteRow, mis MisfireReport, price map[string]*BurnRow) []WasteRow {
 	for _, m := range mis.Rows {
 		if m.Fails <= 0 {
@@ -235,25 +238,8 @@ func appendMotifWaste(rows []WasteRow, corpus *Corpus, motifs []*Finding) []Wast
 	return rows
 }
 
-// applyPrice joins a row to its burn entry: the key's gross cost as context,
-// and n × the per-call price as the waste estimate. A key absent from the burn
-// table leaves the row at zero waste, which MergeWaste then drops — burn walks
-// every non-prompt event, so an absent key means the detector and the burn
-// table disagree about the corpus, and inventing a price would hide that.
-func applyPrice(row *WasteRow, price map[string]*BurnRow, n float64) {
-	b, ok := price[row.Key]
-	if !ok {
-		return
-	}
-	row.GrossBytes = b.Bytes
-	row.BytesPerCall = b.BytesPerCall
-	row.WastedBytes = int(n * b.BytesPerCall)
-}
-
-// applyMeasuredPrice is applyPrice for a detector that already knows what its
-// occurrences actually cost. It joins the same gross/per-call columns so the
-// row still reads against the burn table, but takes the waste as given rather
-// than multiplying a mean.
+// applyMeasuredPrice joins a row to its burn entry: the key's gross cost and
+// per-call mean as context, and the waste as the detector measured it.
 //
 // The burn-membership check is kept deliberately: a key absent from the burn
 // table means the detector and the burn table disagree about the corpus, and

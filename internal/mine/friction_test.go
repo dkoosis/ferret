@@ -2,6 +2,8 @@ package mine
 
 import (
 	"testing"
+
+	"github.com/dkoosis/ferret/internal/event"
 )
 
 // burnFixture builds a BurnResult with one row per (key, bytes, calls),
@@ -34,8 +36,8 @@ func motifCorpus(t *testing.T) motifFixture {
 func TestMergeWaste_ChargesRepeatsBeyondFirstPerSession_When_CommandIsPolled(t *testing.T) {
 	burn := burnFixture(BurnRow{Key: "sh:git_status", Bytes: 1000, Calls: 10})
 	poll := PollingReport{Sessions: 4, Rows: []PollingRow{
-		// 12 runs over 3 polling sessions → 9 runs bought nothing, at 100/call.
-		{Command: "git status --short", Key: "sh:git_status", TotalRepeats: 12, Sessions: 3},
+		// 12 runs over 3 polling sessions → 9 runs bought nothing, measured at 450.
+		{Command: "git status --short", Key: "sh:git_status", TotalRepeats: 12, Sessions: 3, RepeatBytes: 450},
 	}}
 
 	rep := MergeWaste(burn, MisfireReport{}, poll, nil, nil)
@@ -44,8 +46,8 @@ func TestMergeWaste_ChargesRepeatsBeyondFirstPerSession_When_CommandIsPolled(t *
 		t.Fatalf("rows = %d, want 1; got %+v", len(rep.Rows), rep.Rows)
 	}
 	got := rep.Rows[0]
-	if got.WastedBytes != 900 {
-		t.Errorf("wastedBytes = %d, want 900 ((12-3) repeats × 100/call)", got.WastedBytes)
+	if got.WastedBytes != 450 {
+		t.Errorf("wastedBytes = %d, want the measured 450, not (12-3) × the key's 100/call", got.WastedBytes)
 	}
 	if got.Occurrences != 9 {
 		t.Errorf("occurrences = %d, want 9 (repeats beyond the first per session)", got.Occurrences)
@@ -135,7 +137,7 @@ func TestMergeWaste_DropsMisfireRow_When_KeyIsAbsentFromBurn(t *testing.T) {
 func TestMergeWaste_JoinsEveryDetectorOnOneKeySpace_When_KeyIsShell(t *testing.T) {
 	burn := burnFixture(BurnRow{Key: "sh:jq", Bytes: 800, Calls: 8})
 	mis := MisfireReport{Rows: []MisfireRow{{Key: "sh:jq", Fails: 2, FailBytes: 150, FailSess: 2, Calls: 8}}}
-	poll := PollingReport{Rows: []PollingRow{{Command: "jq '.[0]'", Key: "sh:jq", TotalRepeats: 5, Sessions: 1}}}
+	poll := PollingReport{Rows: []PollingRow{{Command: "jq '.[0]'", Key: "sh:jq", TotalRepeats: 5, Sessions: 1, RepeatBytes: 400}}}
 
 	rep := MergeWaste(burn, mis, poll, nil, nil)
 
@@ -253,5 +255,33 @@ func TestMergeWaste_SkipsRoutineAndNoiseMotifs_When_MotifRecursCheaply(t *testin
 		if len(rep.Rows) != 0 {
 			t.Errorf("kind %q produced %+v, want no rows — a recurring routine is the thing to script, not waste", kind, rep.Rows)
 		}
+	}
+}
+
+// TestMergeWaste_PricesACheapFormAtItsOwnBytes_When_ItSharesAKeyWithADearOne is
+// the git diff --stat row: its repeats cost what they returned, though full
+// diffs under the same key pull the mean up by orders of magnitude.
+func TestMergeWaste_PricesACheapFormAtItsOwnBytes_When_ItSharesAKeyWithADearOne(t *testing.T) {
+	run := func(session, command string, bytes int) event.Event {
+		return event.Event{Kind: event.KindShell, Session: session, Action: "git_diff", Detail: command, Bytes: bytes}
+	}
+	events := []event.Event{
+		run("s1", "git diff --stat", 200),
+		run("s1", "git diff --stat", 240),
+		run("s1", "git diff --stat", 260),
+		run("s2", "git diff --stat", 300),
+		run("s2", "git diff --stat", 100),
+		run("s3", "git diff --stat", 900), // run once: not polling
+		run("s1", "git diff", 50000),
+	}
+	burn := burnFixture(BurnRow{Key: "sh:git_diff", Bytes: 52000, Calls: 7})
+
+	rep := MergeWaste(burn, MisfireReport{}, MinePolling(events), nil, nil)
+
+	if len(rep.Rows) != 1 {
+		t.Fatalf("rows = %d, want only the --stat row; got %+v", len(rep.Rows), rep.Rows)
+	}
+	if got := rep.Rows[0].WastedBytes; got != 600 {
+		t.Errorf("wastedBytes = %d, want 600 (240+260+100), its own repeats, not the key's mean", got)
 	}
 }
