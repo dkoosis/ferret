@@ -18,16 +18,16 @@ import (
 // command that had to run is not waste. The currency here is the cost of the
 // calls that SHOULDN'T HAVE HAPPENED:
 //
-//	poll    (repeats beyond the first per session) × the key's bytes-per-call
-//	misfire (calls that failed)                    × the key's bytes-per-call
+//	poll    (repeats beyond the first per session) — those runs' measured bytes
+//	misfire (calls that failed)                    — those calls' measured bytes
 //	motif   (occurrences beyond the first per session) — its share of the
 //	        motif's measured burn
 //
 // One theory across all three: the first occurrence bought information; the
 // rest is the toll for not having fixed it. burn's own rows contribute no
 // waste of their own — a key's GrossBytes and BytesPerCall ride along on
-// every row as CONTEXT (and supply the per-call price the other two multiply
-// by), which is the join burn.go's Key column was already designed for.
+// every row as CONTEXT, which is the join burn.go's Key column was already
+// designed for.
 //
 // Deliberately excluded: SwallowRow. A swallow is a FLOOR on hidden failures,
 // not a count of them (misfire.go) — multiplying a floor by a per-call price
@@ -106,8 +106,8 @@ type WasteReport struct {
 
 // MergeWaste joins the four detectors' reports into one waste-ranked table.
 //
-// burn is required — it supplies the per-call price every other estimate is
-// denominated in, and its Key space ("sh:"-prefixed shell commands, bare tool
+// burn is required — it supplies each row's gross cost and per-call mean, and
+// its Key space ("sh:"-prefixed shell commands, bare tool
 // names — burnKey/misfireKey/pollingKey are the same function three times) is
 // the join key. motifs may be nil; corpus is only read when it isn't.
 func MergeWaste(burn *BurnResult, mis MisfireReport, poll PollingReport, corpus *Corpus, motifs []*Finding) WasteReport {
