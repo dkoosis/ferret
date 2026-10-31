@@ -29,6 +29,7 @@ type PollingRow struct {
 	TotalRepeats  int     `json:"totalRepeats"`  // summed per-session run counts, over sessions that polled (count ≥ 2)
 	Sessions      int     `json:"sessions"`      // distinct sessions that polled this command — the "spread"
 	MaxPerSession int     `json:"maxPerSession"` // worst single session's run count — the headline number
+	RepeatBytes   int     `json:"repeatBytes"`   // measured bytes of the runs beyond the first in each polling session
 	Score         float64 `json:"score"`         // TotalRepeats × Sessions — the corpus-wide rank
 }
 
@@ -57,6 +58,13 @@ type pollAgg struct {
 	totalRepeats  int
 	sessions      int
 	maxPerSession int
+	repeatBytes   int
+}
+
+// pollRuns is one (session, command) pair's runs: how many, their measured
+// bytes in total, and the first run's, which bought the answer the rest repeat.
+type pollRuns struct {
+	n, bytes, first int
 }
 
 // pollingMin is the run count at which repetition becomes polling. Two is the
@@ -72,8 +80,8 @@ const pollingMin = 2
 //
 // Two passes over the same walk: count (session, command) pairs, then roll the
 // qualifying pairs up per command. Event order does not matter to the counts —
-// only to which normalized Action key a command records, which uses first-seen
-// order so repeated runs are byte-stable.
+// only to which run is the first and which normalized Action key a command
+// records, which use first-seen order so repeated runs are byte-stable.
 func MinePolling(events []event.Event) PollingReport {
 	counts, keys, sessions := minePollingCounts(events)
 	return PollingReport{
@@ -85,8 +93,8 @@ func MinePolling(events []event.Event) PollingReport {
 // minePollingCounts does the single walk: per-(session, command) run counts,
 // the first-seen normalized key per command, and the distinct shell-session
 // count for the report's denominator.
-func minePollingCounts(events []event.Event) (map[pollKey]int, map[string]string, int) {
-	counts := map[pollKey]int{}
+func minePollingCounts(events []event.Event) (map[pollKey]pollRuns, map[string]string, int) {
+	counts := map[pollKey]pollRuns{}
 	keys := map[string]string{}
 	sessions := map[string]struct{}{}
 
@@ -96,7 +104,14 @@ func minePollingCounts(events []event.Event) (map[pollKey]int, map[string]string
 			continue
 		}
 		sessions[ev.Session] = struct{}{}
-		counts[pollKey{session: ev.Session, command: ev.Detail}]++
+		pk := pollKey{session: ev.Session, command: ev.Detail}
+		runs := counts[pk]
+		if runs.n == 0 {
+			runs.first = ev.Bytes
+		}
+		runs.n++
+		runs.bytes += ev.Bytes
+		counts[pk] = runs
 		if _, seen := keys[ev.Detail]; !seen {
 			keys[ev.Detail] = pollingKey(ev)
 		}
@@ -107,9 +122,10 @@ func minePollingCounts(events []event.Event) (map[pollKey]int, map[string]string
 // aggregatePolling rolls the per-session counts up per command, keeping only
 // sessions that actually polled (count ≥ pollingMin). A command run once in
 // each of fifty sessions is normal use, not polling, and contributes nothing.
-func aggregatePolling(counts map[pollKey]int, keys map[string]string) map[string]*pollAgg {
+func aggregatePolling(counts map[pollKey]pollRuns, keys map[string]string) map[string]*pollAgg {
 	aggs := map[string]*pollAgg{}
-	for pk, n := range counts {
+	for pk, runs := range counts {
+		n := runs.n
 		if n < pollingMin {
 			continue
 		}
@@ -120,6 +136,7 @@ func aggregatePolling(counts map[pollKey]int, keys map[string]string) map[string
 		}
 		a.totalRepeats += n
 		a.sessions++
+		a.repeatBytes += runs.bytes - runs.first
 		if n > a.maxPerSession {
 			a.maxPerSession = n
 		}
@@ -151,6 +168,7 @@ func rankPolling(aggs map[string]*pollAgg) []PollingRow {
 			TotalRepeats:  a.totalRepeats,
 			Sessions:      a.sessions,
 			MaxPerSession: a.maxPerSession,
+			RepeatBytes:   a.repeatBytes,
 		}
 		row.Score = float64(row.TotalRepeats) * float64(row.Sessions)
 		rows = append(rows, row)
