@@ -94,7 +94,7 @@ var subcmdTools = map[string]bool{
 // internal/snipeusage keys its join on "snipe_"+cmd.
 var subcmdGroups = map[string]map[string]bool{
 	"gh":     {"pr": true, "run": true, "issue": true},
-	"ferret": {"feedback": true, "fixes": true},
+	"ferret": {"feedback": true, "fixes": true, "signatures": true},
 	"trixi": {
 		"context-read": true, "dashboard": true, "doctor": true, "eval": true,
 		"incidents": true, "ingest": true, "kg": true, "loops": true,
