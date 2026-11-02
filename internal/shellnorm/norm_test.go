@@ -50,6 +50,8 @@ func TestSplit(t *testing.T) {
 		{"trixi ask q", []string{"trixi_ask"}},
 		{"bd dep add a b", []string{"bd_dep_add"}},
 		{"snipe diagram arch", []string{"snipe_diagram"}},
+		// ferret-1dd: ferret signatures is a group too.
+		{"ferret signatures seed", []string{"ferret_signatures_seed"}},
 	}
 	for _, c := range cases {
 		segs, _ := Split(c.in)

@@ -18,6 +18,9 @@ import (
 // Seeded friction signatures (internal/friction, ~/.ferret/friction_signatures.jsonl)
 // embed the token too: after a bump, re-run `ferret signatures seed`.
 //
+// v4 (ferret-1dd, 2026-11-02): ferret signatures is a group in subcmdGroups
+// (ferret signatures seed → ferret_signatures_seed, was ferret_signatures).
+//
 // v3 (ferret-ilp, 2026-10-20): sdlc, mnemd, ferret and glance keep their
 // subcommand (sdlc ship → sdlc_ship, was sdlc), and the command groups in
 // subcmdGroups keep a second word (gh pr checks → gh_pr_checks, was gh_pr;
@@ -27,7 +30,7 @@ import (
 // untruncated statement. Segment.Cmd is untouched, so the tool lens is
 // unchanged — but the cmd lens keys 13,747 shell events differently than a v1
 // corpus does, which is exactly the drift this constant exists to declare.
-const Version = "3"
+const Version = "4"
 
 // Segment is one normalized command from a (possibly compound) bash string.
 type Segment struct {
@@ -94,7 +97,7 @@ var subcmdTools = map[string]bool{
 // internal/snipeusage keys its join on "snipe_"+cmd.
 var subcmdGroups = map[string]map[string]bool{
 	"gh":     {"pr": true, "run": true, "issue": true},
-	"ferret": {"feedback": true, "fixes": true},
+	"ferret": {"feedback": true, "fixes": true, "signatures": true},
 	"trixi": {
 		"context-read": true, "dashboard": true, "doctor": true, "eval": true,
 		"incidents": true, "ingest": true, "kg": true, "loops": true,
