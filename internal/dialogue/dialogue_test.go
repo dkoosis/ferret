@@ -239,12 +239,12 @@ func TestLongPaste(t *testing.T) {
 func transcriptPasteFixture() string {
 	filler := strings.Repeat("some ordinary padding text to clear the length floor for this fixture case ", 8)
 	return filler + "\n" +
-		"⏺ trixi ask(query)\n⎿ result: 3 hits\n" +
-		"⏺ trixi get(id)\n⎿ result: ok\n" +
-		"⏺ trixi search(term)\n⎿ result: ok\n" +
-		"⏺ trixi ask(query2)\n⎿ result: ok\n" +
-		"⏺ trixi get(id2)\n⎿ result: ok\n" +
-		"⏺ trixi search(term2)\n⎿ result: ok\n" +
+		"⏺ kb ask(query)\n⎿ result: 3 hits\n" +
+		"⏺ kb get(id)\n⎿ result: ok\n" +
+		"⏺ kb search(term)\n⎿ result: ok\n" +
+		"⏺ kb ask(query2)\n⎿ result: ok\n" +
+		"⏺ kb get(id2)\n⎿ result: ok\n" +
+		"⏺ kb search(term2)\n⎿ result: ok\n" +
 		"❯ wait, that's not what I asked for\n"
 }
 
@@ -259,7 +259,7 @@ func TestParseEmbeddedInteraction(t *testing.T) {
 	if ei.Calls < 6 {
 		t.Errorf("Calls = %d, want >= 6", ei.Calls)
 	}
-	wantTools := []string{"trixi ask", "trixi get", "trixi search"}
+	wantTools := []string{"kb ask", "kb get", "kb search"}
 	for _, want := range wantTools {
 		if !slices.Contains(ei.Tools, want) {
 			t.Errorf("Tools = %v, want to contain %q", ei.Tools, want)

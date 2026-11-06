@@ -1,17 +1,5 @@
 {
   "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/feedback-stop.sh",
-            "async": true,
-            "asyncRewake": true
-          }
-        ]
-      }
-    ],
     "UserPromptSubmit": [
       {
         "hooks": [

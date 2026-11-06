@@ -21,7 +21,7 @@
 # still holds golangci-lint's own internal cache lock, and the wrapped run would
 # then die exit-3. So we also pass --allow-parallel-runners to `run`: that
 # disables golangci-lint's fail-fast internal lock, leaving this wrapper's mkdir
-# mutex as the sole, authoritative serializer (trixi-wudg / rorp Problem B).
+# mutex as the sole, authoritative serializer (rorp Problem B).
 #
 # ---------------------------------------------------------------------------
 # Phantom findings from a stale cache (ferret-b77)
@@ -54,7 +54,7 @@
 # never a loop. The clean happens while we still hold the mutex, so it cannot
 # yank the cache out from under a concurrent peer.
 #
-# Bead: trixi-tr1t, trixi-wudg, ferret-b77
+# Bead: ferret-b77
 # Wired into: make lint (via $(GOLANGCILINT))
 
 set -euo pipefail
@@ -89,7 +89,7 @@ lock_dir="${cache_dir}.lintlock"
 # that relocates GOCACHE off ~/.cache AND disables setup-go caching leaves
 # ~/.cache (or ~/Library/Caches) uncreated, so our pre-golangci-lint mkdir is the
 # first writer and hits ENOENT. mkdir -p the parent so the loop only ever blocks
-# on genuine contention (trixi-2cfa).
+# on genuine contention.
 mkdir -p "$(dirname "$lock_dir")" 2>/dev/null || true
 
 timeout_s="${LINT_LOCK_TIMEOUT:-300}"   # max wait for the lock before giving up
@@ -100,7 +100,7 @@ mtime_of() {
   # fallback: on GNU/Linux `stat -f` is a *valid* flag (--file-system), so
   # `stat -f %m "$1"` SUCCEEDS with garbage (its output starts with `File: …`)
   # and the fallback never fires — that `File:` then lands in the line-66
-  # arithmetic and bursts as `File: unbound variable` under set -u (trixi-g2z6).
+  # arithmetic and bursts as `File: unbound variable` under set -u.
   case "$(uname -s)" in
     Darwin) stat -f %m "$1" 2>/dev/null || echo 0 ;;
     *)      stat -c %Y "$1" 2>/dev/null || echo 0 ;;

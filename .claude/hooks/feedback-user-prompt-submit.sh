@@ -23,8 +23,7 @@ if [ -z "$SESSION_ID" ] || ! command -v ferret >/dev/null 2>&1 || ! command -v j
 fi
 
 # ferret-j33: settle the PRIOR turn's armed ask (if any) before deciding this
-# turn's. Field is `.prompt` (confirmed against six already-deployed working
-# UserPromptSubmit hooks in the sibling trixi repo — NOT `.user_prompt`).
+# turn's. Field is `.prompt` (NOT `.user_prompt`).
 # Best-effort, non-blocking (`|| true`): a failure here must never stop dk's
 # turn. Both stdout and stderr are discarded — `answer` is a side-effecting
 # call with nothing to contribute to this script's single-JSON-blob contract,

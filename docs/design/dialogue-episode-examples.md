@@ -29,7 +29,7 @@ Quotes are verbatim. `[…]` trims length only.
 
 ## Episode 1 — success (repair, then it lands)
 
-Source: trixi `6846a2e8`, turns 12–17. Task: "where should CC plugins be documented?"
+Source: session `6846a2e8`, turns 12–17. Task: "where should CC plugins be documented?"
 
 | # | turn (verbatim) | move | cue |
 |---|---|---|---|
@@ -48,7 +48,7 @@ sources, both genuine. This is the canonical "friction but resolved" shape.
 
 ## Episode 2 — repair-heavy (frustration, still lands)
 
-Source: trixi `6a0af9dc`, turns 1–10. Task: a daily status question that went sideways.
+Source: session `6a0af9dc`, turns 1–10. Task: a daily status question that went sideways.
 
 | # | turn (verbatim) | move | cue |
 |---|---|---|---|
@@ -71,7 +71,7 @@ process", "the test is dead" are NOT affect — see the bbp jargon-trap test.)
 
 ## Episode 3 — the v1 GAP: resolved-by-directive, mislabeled "abandoned"
 
-Source: trixi `ed2205bd`, turns 21–32. Task: pick a multi-agent working model.
+Source: session `ed2205bd`, turns 21–32. Task: pick a multi-agent working model.
 
 | # | turn (verbatim) | move | cue |
 |---|---|---|---|
@@ -93,7 +93,7 @@ episode boundaries (the segmenter sees it; a single move slice does not).
 
 ## Episode 4 — abandoned (approach killed, topic shifts)
 
-Source: trixi `6846a2e8`, turns 18–25. Task: build a "coffee break" idle trigger like /recap.
+Source: session `6846a2e8`, turns 18–25. Task: build a "coffee break" idle trigger like /recap.
 
 | # | turn (verbatim) | move | cue |
 |---|---|---|---|

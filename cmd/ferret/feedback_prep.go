@@ -75,7 +75,7 @@ type cursorState struct {
 }
 
 // prepResult is feedback prep's JSON stdout contract — the hand-off to the
-// bash Stop-hook script, which loops `trixi get` over NugIDs before calling
+// caller, which fetches each of NugIDs before calling
 // `feedback judge`.
 type prepResult struct {
 	Pending       bool     `json:"pending"`
@@ -119,7 +119,7 @@ func cmdFeedbackPrep() error {
 	cPath := cursorPath(data, cmd.Session)
 
 	// Serialize the whole load→scan→save cursor cycle against a concurrent prep
-	// for the SAME session. feedback-stop.sh runs async (settings.json), so a
+	// for the SAME session. the Stop hook (removed) ran async, so a
 	// slow prep on turn N can still be mid-cycle when turn N+1's Stop hook fires
 	// another; without this lock both could load the same offset, double-emit the
 	// same search_event_id (two PAID relevance-judge runs), and clobber each

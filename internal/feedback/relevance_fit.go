@@ -21,7 +21,7 @@ const relevantThreshold = 2
 // could have used wherever it landed.
 //
 // The two verdicts are asymmetric in what they need from the grade set, because a
-// returned nug can be UNGRADED — the Stop hook loops `trixi get` over returnedIDs
+// returned nug can be UNGRADED — the caller fetches each of returnedIDs
 // and skips any that 404 (pruned/consolidated between the search and judge), so
 // `grades` may cover only a subset:
 //
