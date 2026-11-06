@@ -1,7 +1,7 @@
 version: "2"
 
-# Strict config inherited from ~/Projects/trixi (greenfield — tight from day one).
-# Dropped relative to trixi: depguard (no architecture rules yet), loggercheck/
+# Strict config (greenfield — tight from day one).
+# Dropped: depguard (no architecture rules yet), loggercheck/
 # sloglint scope is moot (no logging yet) but kept enabled for when it arrives.
 
 run:
@@ -141,8 +141,7 @@ linters:
         - unlambda
     forbidigo:
       # bugclasses rule 5: context.Background() deep in daemon code should
-      # thread the caller/shutdown ctx (strand st-47z, trixi #606,
-      # trixi-bot gg-8rq.3, canapay can-x38). Path-scoped in exclusions below
+      # thread the caller/shutdown ctx (strand st-47z, canapay can-x38). Path-scoped in exclusions below
       # to ferret's non-CLI packages. Types-aware so a `ctx.Background` field
       # can't misfire.
       analyze-types: true

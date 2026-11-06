@@ -124,19 +124,19 @@ func TestRunDialogueShippedTellUpgradesUnknown(t *testing.T) {
 // transcriptShapedPasteJSON is a synthetic long-paste turn shaped like a pasted
 // CC interaction — 6 inner ⏺ tool-call lines across 3 distinct tools, ⎿ result
 // lines, and one ❯ embedded user meta-turn — matching the ferret-bbp.19 AC shape
-// (the 43ad3b27 evidence case: a trixi-ask misfire paste carrying inner tool
+// (the 43ad3b27 evidence case: a kb-ask misfire paste carrying inner tool
 // calls + a buried human aside that flattened to opaque long-paste text). Built
 // as a Go string literal (not inline JSON) so newlines are real and then
 // json.Marshal'd into the transcript line, keeping the fixture legible.
 func transcriptShapedPasteText() string {
 	filler := strings.Repeat("some ordinary padding text to clear the length floor for this fixture case ", 8)
 	return filler + "\n" +
-		"⏺ trixi ask(query)\n⎿ result: 3 hits\n" +
-		"⏺ trixi get(id)\n⎿ result: ok\n" +
-		"⏺ trixi search(term)\n⎿ result: ok\n" +
-		"⏺ trixi ask(query2)\n⎿ result: ok\n" +
-		"⏺ trixi get(id2)\n⎿ result: ok\n" +
-		"⏺ trixi search(term2)\n⎿ result: ok\n" +
+		"⏺ kb ask(query)\n⎿ result: 3 hits\n" +
+		"⏺ kb get(id)\n⎿ result: ok\n" +
+		"⏺ kb search(term)\n⎿ result: ok\n" +
+		"⏺ kb ask(query2)\n⎿ result: ok\n" +
+		"⏺ kb get(id2)\n⎿ result: ok\n" +
+		"⏺ kb search(term2)\n⎿ result: ok\n" +
 		"❯ wait, that's not what I asked for\n"
 }
 
@@ -166,7 +166,7 @@ func TestRunDialogueTranscriptShapedPasteReportsEmbeddedStats(t *testing.T) {
 	if !strings.Contains(out, "embedded(calls=6") {
 		t.Errorf("want embedded call count >= 6 rendered, got:\n%s", out)
 	}
-	for _, tool := range []string{"trixi ask", "trixi get", "trixi search"} {
+	for _, tool := range []string{"kb ask", "kb get", "kb search"} {
 		if !strings.Contains(out, tool) {
 			t.Errorf("want inner tool name %q rendered, got:\n%s", tool, out)
 		}

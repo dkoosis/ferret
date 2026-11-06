@@ -1,17 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/dkoosis/ferret/internal/analyst"
@@ -28,11 +23,6 @@ func analystContext() (context.Context, context.CancelFunc) {
 
 var errAdjSessionRequired = usage("adjudicate: --session PREFIX required")
 
-// errNoRecallRuns is the empty-honest sentinel: a recall-trace with no runs is a
-// hard error, never a silent zero-finding green (the downstream metric must not
-// read a false baseline off an empty batch). Wrapped with the path at the call.
-var errNoRecallRuns = errors.New("adjudicate: recall-trace has no runs")
-
 // cmdAdjudicate runs the LLM analyst over one session's spine. It is the
 // precision half of the loop: the deterministic spine (recall — every
 // prompt+reasoning+call) is the input; the model judges each call against the
@@ -45,9 +35,6 @@ var errNoRecallRuns = errors.New("adjudicate: recall-trace has no runs")
 // pipeline is exercisable before an API key is wired up.
 func cmdAdjudicate() error {
 	cmd := &CLI.Adjudicate
-	if cmd.RecallTrace != "" {
-		return runRecallTrace()
-	}
 	if cmd.Session == "" {
 		return errAdjSessionRequired
 	}
@@ -252,214 +239,6 @@ func writeProposeText(w io.Writer, res analyst.ProposeResult) error {
 	// placeholders in the ledger.
 	sink.NextHead(`(template — fill from a proposal above) ferret fixes add --motif <tokens> --fix <action>`)
 	return nil
-}
-
-// recallRun mirrors one row of trixi-bot's recall-trace.jsonl (its
-// agent.RecallTrace): the fragments memory surfaced at run start paired with the
-// final answer they may or may not have shaped. Field tags match the emitter
-// (trixi-bot internal/core/agent/trace.go) so the JSONL parses verbatim; the
-// timestamp/chat fields the judge doesn't need are ignored on decode.
-type recallRun struct {
-	RunID     string             `json:"run_id"`
-	Recalled  []recalledFragment `json:"recalled"`
-	FinalText string             `json:"final_text"`
-	Outcome   string             `json:"outcome"`
-}
-
-type recalledFragment struct {
-	Source string `json:"source"`
-	Text   string `json:"text"`
-}
-
-// items projects the row's fragments onto the analyst's input shape.
-func (r recallRun) items() []analyst.RecalledItem {
-	out := make([]analyst.RecalledItem, len(r.Recalled))
-	for i, f := range r.Recalled {
-		out[i] = analyst.RecalledItem{Source: f.Source, Text: f.Text}
-	}
-	return out
-}
-
-// runRecallTrace is the memory-use branch (ferret-izo): instead of a transcript
-// session it reads trixi-bot's recall-trace.jsonl — recalled fragments + the
-// final answer per run — and judges, per run, whether each fragment shaped the
-// answer. Findings across all runs aggregate into ONE Result whose findings shape
-// trixi-bot's eval/adjudicate mapper (gg-8rq.16.2) consumes unchanged. The CLI
-// seam is the contract: subprocess, --format json, keychain key — the judge lives
-// here, never reimplemented downstream.
-func runRecallTrace() error {
-	cmd := &CLI.Adjudicate
-	if err := validateFormat(cmd.Format); err != nil {
-		return err
-	}
-	runs, err := readRecallTrace(cmd.RecallTrace)
-	if err != nil {
-		return err
-	}
-	// The downstream metric (gg-8rq.16.3) must not read a false baseline off an
-	// empty batch; the consumer surfaces this error through its --trace seam.
-	if len(runs) == 0 {
-		return fmt.Errorf("%w: %q", errNoRecallRuns, cmd.RecallTrace)
-	}
-
-	if cmd.EmitPrompt {
-		emitRecallPrompts(os.Stdout, runs)
-		return nil
-	}
-
-	ctx, cfg, stop, err := newAnalystRun(cmd.Model, cmd.Timeout)
-	if err != nil {
-		return err
-	}
-	defer stop()
-
-	judge := func(jctx context.Context, r recallRun) ([]analyst.Finding, string, error) {
-		return analyst.RunRecallTrace(jctx, cfg, r.FinalText, r.Outcome, r.items())
-	}
-	res, err := judgeRecallRuns(ctx, runs, judge)
-	if err != nil {
-		return err
-	}
-	res.Session = recallTraceLabel(cmd.RecallTrace)
-
-	if cmd.Format == fmtJSON {
-		return out.JSON(os.Stdout, res)
-	}
-	return writeAdjudicateText(os.Stdout, res)
-}
-
-// recallJudgeFunc judges one run's recalled fragments against its final answer,
-// returning the findings and the model that produced them. Abstracts
-// analyst.RunRecallTrace so tests can inject a fake judge without a network call.
-type recallJudgeFunc func(ctx context.Context, r recallRun) ([]analyst.Finding, string, error)
-
-// judgeRecallRuns fans the per-run judge calls out across an 8-wide semaphore
-// (ferret-nv3: sequential judging was O(n) wall-clock on large batches). Each
-// run's result lands in its own slot of an index-aligned slice, so the
-// concurrent fan-out cannot scramble finding order — callers downstream
-// (gg-8rq.16.2) assume findings arrive in run order. The first error from any
-// run cancels the shared context (cooperative fail-fast, mirroring the SIGINT
-// wiring in analystContext) and is returned once every in-flight call has
-// drained; it is never swallowed.
-//
-// A run with no recalled fragments has nothing to judge and is skipped — same
-// as the prior sequential loop, it costs no paid call and leaves its result
-// slot at its zero value.
-func judgeRecallRuns(ctx context.Context, runs []recallRun, judge recallJudgeFunc) (analyst.Result, error) {
-	const maxConcurrency = 8
-
-	type runOutcome struct {
-		findings []analyst.Finding
-		model    string
-	}
-	results := make([]runOutcome, len(runs))
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	sem := make(chan struct{}, maxConcurrency)
-	var wg sync.WaitGroup
-	var errOnce sync.Once
-	var firstErr error
-
-	for i, r := range runs {
-		if ctx.Err() != nil {
-			break
-		}
-		if len(r.Recalled) == 0 {
-			continue
-		}
-		sem <- struct{}{}
-		// sem<-struct{}{} can block on a full semaphore and only unblock once
-		// ctx is already canceled (a slot freed by another run's early exit) —
-		// re-check here so that race doesn't still launch one extra judge call
-		// (Codex adversarial review of #95).
-		if ctx.Err() != nil {
-			<-sem
-			break
-		}
-		wg.Go(func() {
-			defer func() { <-sem }()
-			findings, model, err := judge(ctx, r)
-			if err != nil {
-				errOnce.Do(func() {
-					firstErr = fmt.Errorf("adjudicate recall-trace run %s: %w", r.RunID, err)
-					cancel()
-				})
-				return
-			}
-			results[i] = runOutcome{findings: findings, model: model}
-		})
-	}
-	wg.Wait()
-
-	if firstErr != nil {
-		return analyst.Result{}, firstErr
-	}
-
-	var res analyst.Result
-	for _, o := range results {
-		if res.Model == "" && o.model != "" {
-			res.Model = o.model
-		}
-		res.Findings = append(res.Findings, o.findings...)
-	}
-	return res, nil
-}
-
-// readRecallTrace parses a recall-trace.jsonl into its runs. One JSON object per
-// line; blank lines are skipped; a malformed line fails loud with its line number
-// (a truncated or corrupt batch must not be half-scored, mirroring the consumer's
-// trailing-JSON rejection). The scanner buffer is raised because a run's final
-// answer plus recalled fragments can exceed the 64KiB default.
-func readRecallTrace(path string) ([]recallRun, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	var runs []recallRun
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-	for line := 1; sc.Scan(); line++ {
-		b := bytes.TrimSpace(sc.Bytes())
-		if len(b) == 0 {
-			continue
-		}
-		var r recallRun
-		if err := json.Unmarshal(b, &r); err != nil {
-			return nil, fmt.Errorf("recall-trace %s line %d: %w", path, line, err)
-		}
-		runs = append(runs, r)
-	}
-	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("recall-trace %s: %w", path, err)
-	}
-	return runs, nil
-}
-
-// recallTraceLabel names the batch in the Result the way a session id names a
-// spine adjudication — the trace file's basename, prefixed so it reads as a
-// recall-trace batch rather than a Claude Code session.
-func recallTraceLabel(path string) string {
-	return "recall-trace:" + filepath.Base(path)
-}
-
-// emitRecallPrompts is the --emit-prompt escape hatch for the recall-trace mode:
-// assemble and print each run's prompt without a network call, so the pipeline is
-// exercisable before an API key is wired up (same convention as cmdAdjudicate).
-func emitRecallPrompts(w io.Writer, runs []recallRun) {
-	for i, r := range runs {
-		if len(r.Recalled) == 0 {
-			continue
-		}
-		system, user := analyst.BuildRecallPrompt(r.FinalText, r.Outcome, r.items())
-		fmt.Fprintf(w, "=== RUN %d (%s) SYSTEM ===\n", i+1, r.RunID)
-		fmt.Fprintln(w, system)
-		fmt.Fprintf(w, "\n=== RUN %d (%s) USER ===\n", i+1, r.RunID)
-		fmt.Fprintln(w, user)
-		fmt.Fprintln(w)
-	}
 }
 
 // proposeMark maps a fix lever to its glyph (css symbol vocabulary).

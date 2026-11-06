@@ -1,4 +1,4 @@
-# Ferret Makefile — strict QA gates, pattern from ~/Projects/trixi.
+# Ferret Makefile — strict QA gates.
 #
 # Primary: check (vet+lint+test+build) | audit (check+race+fuzz+dupe+nilcheck+vuln)
 

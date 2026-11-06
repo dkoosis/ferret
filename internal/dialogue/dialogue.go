@@ -190,7 +190,7 @@ type Signal struct {
 // EmbeddedInteraction is the parsed structure of a long-paste turn that is
 // itself a pasted CC interaction — ⏺ tool-call / ⎿ result / ❯ embedded user
 // meta-turn markers — rather than opaque code/log content (ferret-bbp.19).
-// Evidence: trixi session 43ad3b27 (2026-07-21), dk pasted a trixi-ask misfire
+// Evidence: session 43ad3b27 (2026-07-21), dk pasted a misfire of a knowledge-base ask command
 // carrying inner tool calls + a buried meta-question that flattened to opaque
 // long-paste text, misdirecting the candidate ranker. Cross-session join (the
 // paste's ORIGIN transcript) is an explicit non-goal here — this only reads

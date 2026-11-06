@@ -1,6 +1,6 @@
-// Package retrievalevent mirrors the trixi⇄ferret retrieval-outcome contract's
-// producer-side row shape (~/Projects/dk/Project/trixi/specs/retrieval-outcome-contract-design.md,
-// authority: trixi's internal/observe/retrievalevent/event.go). This is
+// Package retrievalevent mirrors a retrieval-outcome contract's
+// producer-side row shape (the producer is retired; the shape survives in
+// old event feeds and testdata/retrieval-golden.jsonl). This is
 // ferret's LEAF, stdlib-only copy of that shape — ferret does not import the
 // trixi module; it vendors the fixture (testdata/retrieval-golden.jsonl,
 // tx-dii8m) and decodes it with its own structs so the two modules stay

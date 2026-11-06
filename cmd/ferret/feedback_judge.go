@@ -27,7 +27,7 @@ import (
 var errFeedbackSearchEventRequired = usage("feedback judge: --search-event ID required")
 
 // nugCandidateInput is one stdin candidate: a nug id + its fetched body text
-// (the bash Stop-hook script assembles this by looping `trixi get` over
+// (a caller assembles this by fetching each of
 // `feedback prep`'s nug_ids, skipping any 404s).
 type nugCandidateInput struct {
 	ID   string `json:"id"`
@@ -122,7 +122,7 @@ func readEventsTolerant(path string) ([]retrievalevent.Event, error) {
 }
 
 // readStdinCandidates decodes the [{"id":"...","text":"..."}] candidate
-// bodies the Stop-hook bash script assembled (via `trixi get`) and piped on
+// bodies a caller assembled and piped on
 // stdin.
 func readStdinCandidates() ([]analyst.NugCandidate, error) {
 	var raw []nugCandidateInput
