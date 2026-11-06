@@ -119,8 +119,8 @@ func cmdFeedbackPrep() error {
 	cPath := cursorPath(data, cmd.Session)
 
 	// Serialize the whole load→scan→save cursor cycle against a concurrent prep
-	// for the SAME session. the Stop hook (removed) ran async, so a
-	// slow prep on turn N can still be mid-cycle when turn N+1's Stop hook fires
+	// for the SAME session. An async caller can overlap prep calls, so a
+	// slow prep on turn N can still be mid-cycle when turn N+1 starts
 	// another; without this lock both could load the same offset, double-emit the
 	// same search_event_id (two PAID relevance-judge runs), and clobber each
 	// other's Pending/offset on save. This is the async-overlap the sibling bank

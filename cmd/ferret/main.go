@@ -417,7 +417,7 @@ var CLI struct {
 	} `cmd:"" help:"Adjudicate retrieval outcomes (helped|ignored|misled|conflict|no_signal): join each search event to its task segment by timestamp, then apply the deterministic lattice. Live ts→segment join (bbp.16)."`
 
 	Adjudicate struct {
-		Session    string        `help:"Session ID prefix." name:"session"`
+		Session    string        `help:"Session ID prefix (required)." name:"session"`
 		Root       string        `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
 		Model      string        `help:"Claude model ID (default: claude-sonnet-4-6; use claude-opus-4-8 for calibration)." name:"model"`
 		Format     string        `help:"Output format: text|json." default:"text" name:"format"`
