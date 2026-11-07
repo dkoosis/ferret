@@ -18,6 +18,9 @@ import (
 // Seeded friction signatures (internal/friction, ~/.ferret/friction_signatures.jsonl)
 // embed the token too: after a bump, re-run `ferret signatures seed`.
 //
+// v5 (ferret-onw, 2026-11-06): trixi is no longer a subcommand tool, so its calls
+// normalize to the bare base command (trixi ask q → trixi, was trixi_ask).
+//
 // v4 (ferret-1dd, 2026-11-02): ferret signatures is a group in subcmdGroups
 // (ferret signatures seed → ferret_signatures_seed, was ferret_signatures).
 //
@@ -30,7 +33,7 @@ import (
 // untruncated statement. Segment.Cmd is untouched, so the tool lens is
 // unchanged — but the cmd lens keys 13,747 shell events differently than a v1
 // corpus does, which is exactly the drift this constant exists to declare.
-const Version = "4"
+const Version = "5"
 
 // Segment is one normalized command from a (possibly compound) bash string.
 type Segment struct {
