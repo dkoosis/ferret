@@ -51,7 +51,7 @@ func surfaceCell(path string) string {
 
 // commandRows walks the parsed Kong grammar and returns one row per runnable
 // command (leaf nodes), depth-first in declaration order. Groups that only hold
-// subcommands ("fixes", "feedback") contribute their prefix, not a row.
+// subcommands ("fixes", "signatures") contribute their prefix, not a row.
 func commandRows(t *testing.T) []cmdRow {
 	t.Helper()
 	k, err := kong.New(&CLI, kong.Name("ferret"))
