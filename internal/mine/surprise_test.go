@@ -66,7 +66,7 @@ func TestSurpriseRanksRoutineBelowThrash(t *testing.T) {
 	}
 }
 
-func TestSurpriseIndexAndMeanBits(t *testing.T) {
+func TestSurpriseIndex(t *testing.T) {
 	scores := []StreamScore{
 		{Stream: "p/a@", Bits: 1.0},
 		{Stream: "p/b@", Bits: 3.0},
@@ -74,12 +74,6 @@ func TestSurpriseIndexAndMeanBits(t *testing.T) {
 	idx := SurpriseIndex(scores)
 	if idx["p/a@"] != 1.0 || idx["p/b@"] != 3.0 {
 		t.Errorf("SurpriseIndex = %v, want a@=1.0 b@=3.0", idx)
-	}
-	if m := MeanBits(scores); m != 2.0 {
-		t.Errorf("MeanBits = %.2f, want 2.0", m)
-	}
-	if m := MeanBits(nil); m != 0 {
-		t.Errorf("MeanBits(nil) = %.2f, want 0", m)
 	}
 }
 

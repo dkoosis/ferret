@@ -213,28 +213,6 @@ func TestSuppressed(t *testing.T) {
 	}
 }
 
-// TestValidDisposition: the empty string is valid (normalizes to fix); the three
-// named verdicts are valid; anything else is rejected so the writer can fail
-// fast on a typo.
-func TestValidDisposition(t *testing.T) {
-	cases := []struct {
-		in   string
-		want bool
-	}{
-		{"", true},
-		{DispositionFix, true},
-		{DispositionWontfix, true},
-		{DispositionWatch, true},
-		{"bogus", false},
-		{"FIX", false},
-	}
-	for _, tc := range cases {
-		if got := ValidDisposition(tc.in); got != tc.want {
-			t.Errorf("ValidDisposition(%q) = %v, want %v", tc.in, got, tc.want)
-		}
-	}
-}
-
 // TestDispositionRoundTrip: a non-fix verdict written through Append must come
 // back from Load intact, and a row whose JSON omits the field must Load as a fix
 // — the on-disk back-compat contract, not just the in-memory Disp() default.

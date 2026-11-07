@@ -1,6 +1,6 @@
 # Ferret Makefile — strict QA gates.
 #
-# Primary: check (vet+lint+test+build) | audit (check+race+fuzz+dupe+nilcheck+vuln)
+# Primary: check (vet+lint+test+build) | audit (check+race+fuzz+dupe+nilcheck+deadcode+vuln)
 
 .DEFAULT_GOAL := check
 
@@ -12,7 +12,7 @@ SHELL := /bin/bash
 include .sandbox/lib/Makefile.doctor.mk
 include .sandbox/lib/Makefile.cross.mk
 
-.PHONY: help check audit vet lint test race build selfcheck vuln dupe nilcheck fuzz install deploy clean corpus pack-drift
+.PHONY: help check audit vet lint test race build selfcheck vuln dupe nilcheck deadcode fuzz install deploy clean corpus pack-drift
 
 # Serialize golangci-lint through the machine-global mkdir mutex (see script
 # header — golangci-lint's cache lock fails exit-3 on contention instead of
@@ -22,7 +22,7 @@ GOLANGCILINT := bash scripts/lint-locked
 help: ## Show this help
 	@printf '\n\033[1mFour verbs. Identical in every dkoosis repo.\033[0m\n\n'
 	@printf '  \033[36mcheck \033[0m  fast gate — vet + lint + test + build. Pre-commit; required in CI.\n'
-	@printf '  \033[36maudit \033[0m  check, plus race + fuzz + dupe + nilcheck + vuln. Before you ask for review.\n'
+	@printf '  \033[36maudit \033[0m  check, plus race + fuzz + dupe + nilcheck + deadcode + vuln. Before you ask for review.\n'
 	@printf '  \033[36mdeploy\033[0m  build + install this tool locally.\n'
 	@printf '  \033[36mhelp  \033[0m  this text.\n\n'
 	@printf 'Everything below is an internal step of one of those four. Call the verbs.\n\n'
@@ -39,7 +39,7 @@ fuzz: ## Fuzz the parsers (FUZZTIME=30s)
 # vuln runs LAST: govulncheck needs vuln.go.dev, and a sandbox that blocks that
 # egress used to abort audit before dupe/nilcheck ever ran (sandbox self-audit,
 # 2026-08-22). Network-independent gates now all report before the network one.
-audit: check race fuzz dupe nilcheck vuln ## Exhaustive validation
+audit: check race fuzz dupe nilcheck deadcode vuln ## Exhaustive validation
 	@echo "=== audit pass ==="
 
 vet: ## Run go vet
@@ -84,6 +84,16 @@ dupe: ## Check for code duplication (jscpd; skips if not installed)
 		echo "dupe: jscpd not installed — skipping (install: npm i -g jscpd)"; \
 	else \
 		TMP_JSCPD=$$(mktemp -d); jscpd . --output $$TMP_JSCPD; rm -rf $$TMP_JSCPD; \
+	fi
+
+# deadcode lists each function no path from a main reaches and exits 0 either way,
+# so the target fails on any output. Skips if not installed, like nilcheck.
+deadcode: ## Fail on any function unreachable from main (skips if not installed)
+	@if ! command -v deadcode >/dev/null 2>&1; then \
+		echo "deadcode: not installed — skipping (install: go install golang.org/x/tools/cmd/deadcode@latest)"; \
+	else \
+		out=$$(deadcode ./cmd/...) || { echo "deadcode: could not run"; exit 1; }; \
+		if [ -n "$$out" ]; then echo "$$out"; echo "deadcode: the functions above are unreachable; cut them"; exit 1; fi; \
 	fi
 
 nilcheck: ## Run nilaway (skips if not installed)

@@ -211,28 +211,3 @@ func TestFrictionIgnoredConstraints(t *testing.T) {
 		})
 	}
 }
-
-func TestFrictionRatesAndAny(t *testing.T) {
-	fr := ComputeFriction([]event.Event{
-		fp(0, "do a thing"),
-		fa(1, "Edit", event.StatusFail, false),
-		fa(2, "Edit", event.StatusOK, true),
-	})
-	if fr.Actions != 2 || fr.Prompts != 1 {
-		t.Fatalf("denominators: actions=%d prompts=%d, want 2/1", fr.Actions, fr.Prompts)
-	}
-	if got := fr.FailRate(); got != 0.5 {
-		t.Errorf("FailRate = %v, want 0.5", got)
-	}
-	if got := fr.LatePreconditionRate(); got != 0.5 {
-		t.Errorf("LatePreconditionRate = %v, want 0.5", got)
-	}
-	if !fr.Any() {
-		t.Error("Any() = false, want true (session carried failures)")
-	}
-	// empty stream → no signal, zero-value rates (no divide-by-zero)
-	empty := ComputeFriction(nil)
-	if empty.Any() || empty.FailRate() != 0 || empty.PrematureStopRate() != 0 {
-		t.Errorf("empty stream should be signal-less with zero rates, got %+v", empty)
-	}
-}
