@@ -113,16 +113,8 @@ func (d *Detector) Signatures() []Signature {
 	return out
 }
 
-// Scan runs the detector over a whole event slice in order and returns every
-// match record (2nd+ occurrences). It is the batch entry point the CLI uses; the
-// streaming Observe is exposed for callers that fold matches into another pass.
-func Scan(known []Signature, events []event.Event) []MatchRecord {
-	d := NewDetector(known)
-	return d.ScanInto(events)
-}
-
 // ScanInto runs the detector over events in order, returning every match record.
-// Unlike Scan it uses an existing detector so the caller can inspect the learned
+// It uses an existing detector so the caller can inspect the learned
 // registry afterward (Signatures) to persist it. Order-sensitive, single-pass.
 func (d *Detector) ScanInto(events []event.Event) []MatchRecord {
 	var out []MatchRecord

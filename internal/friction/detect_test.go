@@ -128,7 +128,7 @@ func TestCFailChainRecurs(t *testing.T) {
 		cfailShell(2, "sA", "go_build", "go build ./..."), // distinct, 1st sighting
 		cfailShell(3, "sB", "go_test", "go test ./..."),   // recurrence → flag
 	}
-	got := Scan(nil, events)
+	got := NewDetector(nil).ScanInto(events)
 	if len(got) != 1 {
 		t.Fatalf("cfail chain must recur (1 match), got %d", len(got))
 	}
@@ -145,7 +145,7 @@ func TestScan(t *testing.T) {
 		failShell(4, "s", "go_test", "go test ./c"),         // 3rd: flag
 		failShell(5, "s", "git_push", "git push"),           // 1st distinct: silent
 	}
-	got := Scan(nil, events)
+	got := NewDetector(nil).ScanInto(events)
 	if len(got) != 2 {
 		t.Fatalf("Scan returned %d matches, want 2", len(got))
 	}

@@ -79,29 +79,6 @@ type Friction struct {
 	PrematureStops     int `json:"prematureStops,omitempty"`     // turns prodding the agent to continue / finish / do-the-rest
 }
 
-// FailRate is failed actions over total actions ∈ [0,1]; 0 when no actions.
-func (f Friction) FailRate() float64 { return ratio(f.FailedActions, f.Actions) }
-
-// LatePreconditionRate is retries-after-failure over total actions ∈ [0,1].
-func (f Friction) LatePreconditionRate() float64 { return ratio(f.LatePreconditions, f.Actions) }
-
-// PrematureStopRate is continue/finish prods over total user turns ∈ [0,1].
-func (f Friction) PrematureStopRate() float64 { return ratio(f.PrematureStops, f.Prompts) }
-
-// Any reports whether the session carried any friction signal — the render gate
-// (a signal-less session emits nothing, mirroring reportDialogueNote).
-func (f Friction) Any() bool {
-	return f.FailedActions > 0 || f.LatePreconditions > 0 || f.IgnoredConstraints > 0 ||
-		f.ConfirmationWaste > 0 || f.PrematureStops > 0 || f.GoalReached
-}
-
-func ratio(n, d int) float64 {
-	if d <= 0 {
-		return 0
-	}
-	return float64(n) / float64(d)
-}
-
 // ComputeFriction reduces one session's ordered events into its friction rollup.
 // A single pass tallies the action-side metrics (failures, retries, the terminal
 // goal signal) and collects the per-turn dialogue moves; a short second pass over

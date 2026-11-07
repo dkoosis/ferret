@@ -97,11 +97,6 @@ func readQualitySpec(r io.Reader) (qualitySpec, error) {
 	return spec, nil
 }
 
-// qualitySession segments one session and emits its per-task reference-free axes.
-func qualitySession(p sessionRun) error {
-	return qualitySessionWithSpec(p, nil)
-}
-
 // qualitySessionWithSpec segments one session and emits its per-task axes; when
 // spec carries conformance results keyed by task index, those tasks' adaptivity is
 // computed from the alignment instead of the reference-free proxy. A nil spec is

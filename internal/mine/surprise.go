@@ -103,18 +103,6 @@ func SurpriseIndex(scores []StreamScore) map[string]float64 {
 	return idx
 }
 
-// MeanBits is the corpus-wide mean surprise across the scored streams.
-func MeanBits(scores []StreamScore) float64 {
-	if len(scores) == 0 {
-		return 0
-	}
-	sum := 0.0
-	for _, s := range scores {
-		sum += s.Bits
-	}
-	return sum / float64(len(scores))
-}
-
 // FrictionCut is the surprise threshold above which a recurring routine reads as
 // friction (fix it) rather than something to script: one standard deviation
 // above the corpus-mean session surprise.

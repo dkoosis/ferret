@@ -80,10 +80,10 @@ func TestRunSignaturesSeed_FirstFreshSightingIsOccurrence2(t *testing.T) {
 	fresh := []event.Event{
 		failedShell(t, "s-new", 7, `bd update --description $(awk -v body="$x" '{print}' f)`),
 	}
-	if got := friction.Scan(nil, fresh); len(got) != 0 {
+	if got := friction.NewDetector(nil).ScanInto(fresh); len(got) != 0 {
 		t.Fatalf("unseeded detector flagged %d matches on a single sighting, want 0", len(got))
 	}
-	matches := friction.Scan(sigs, fresh)
+	matches := friction.NewDetector(sigs).ScanInto(fresh)
 	if len(matches) != 1 {
 		t.Fatalf("seeded detector flagged %d matches, want 1", len(matches))
 	}

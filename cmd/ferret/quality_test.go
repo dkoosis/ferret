@@ -33,8 +33,8 @@ func runQualitySession(t *testing.T, lines []string, format string) string {
 	root := t.TempDir()
 	writeSpineFixture(t, root, "-Users-dev-proj", "q.jsonl", lines)
 	var buf bytes.Buffer
-	if err := qualitySession(sessionRun{w: &buf, root: root, session: "q", format: format}); err != nil {
-		t.Fatalf("qualitySession: %v", err)
+	if err := qualitySessionWithSpec(sessionRun{w: &buf, root: root, session: "q", format: format}, nil); err != nil {
+		t.Fatalf("qualitySessionWithSpec: %v", err)
 	}
 	return buf.String()
 }
@@ -133,23 +133,6 @@ func TestQualitySessionWithEmptyRefRejected(t *testing.T) {
 	var buf bytes.Buffer
 	if err := qualitySessionWithSpec(sessionRun{w: &buf, root: root, session: "q", format: fmtJSON}, spec); !errors.Is(err, errConformNoRef) {
 		t.Fatalf("err = %v; want errConformNoRef", err)
-	}
-}
-
-// TestQualitySessionWithNilSpecMatchesReferenceFree pins that the spec-aware entry
-// with a nil spec is identical to the plain reference-free session path.
-func TestQualitySessionWithNilSpecMatchesReferenceFree(t *testing.T) {
-	root := t.TempDir()
-	writeSpineFixture(t, root, "-Users-dev-proj", "q.jsonl", qualitySessionLines())
-	var free, enriched bytes.Buffer
-	if err := qualitySession(sessionRun{w: &free, root: root, session: "q", format: fmtJSON}); err != nil {
-		t.Fatalf("qualitySession: %v", err)
-	}
-	if err := qualitySessionWithSpec(sessionRun{w: &enriched, root: root, session: "q", format: fmtJSON}, nil); err != nil {
-		t.Fatalf("qualitySessionWithSpec: %v", err)
-	}
-	if free.String() != enriched.String() {
-		t.Errorf("nil-spec path diverged from reference-free:\nfree     %s\nenriched %s", free.String(), enriched.String())
 	}
 }
 

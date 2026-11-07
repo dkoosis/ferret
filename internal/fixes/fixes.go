@@ -50,18 +50,6 @@ const (
 	DispositionWatch   = "watch"
 )
 
-// ValidDisposition reports whether s is a recognized verdict. The empty string
-// is valid because it normalizes to DispositionFix (see Entry.Disp) — the
-// writer may leave it unset and old ledger rows omit it entirely.
-func ValidDisposition(s string) bool {
-	switch s {
-	case "", DispositionFix, DispositionWontfix, DispositionWatch:
-		return true
-	default:
-		return false
-	}
-}
-
 // Entry is one recorded fix.
 //
 // Motif is the comma-joined motif token sequence — the same sequence ferret

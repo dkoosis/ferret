@@ -35,9 +35,9 @@ func corpusFromVocab(streams [][]string) *mine.Corpus {
 // ID and ≥1 Tool — a milestone set with no satisfiable milestone scores 0 for
 // everything and is dead weight in the library.
 func TestMilestoneSetsNonEmpty(t *testing.T) {
-	sets := MilestoneSets()
+	sets := milestoneSets
 	if len(sets) == 0 {
-		t.Fatal("MilestoneSets() is empty; the library must ship canned goal patterns")
+		t.Fatal("milestoneSets is empty; the library must ship canned goal patterns")
 	}
 	for _, s := range sets {
 		if s.ID == "" {
@@ -103,7 +103,7 @@ func TestMatchGoalIsDeterministic(t *testing.T) {
 	}
 }
 
-// TestMatchGoalReturnsDeepCopy: MatchGoal and MilestoneSets hand out deep copies,
+// TestMatchGoalReturnsDeepCopy: MatchGoal hands out deep copies,
 // so mutating a result can't reach back into the package-global catalog.
 func TestMatchGoalReturnsDeepCopy(t *testing.T) {
 	set, ok := MatchGoal("ship the feature")
@@ -117,9 +117,6 @@ func TestMatchGoalReturnsDeepCopy(t *testing.T) {
 	fresh, _ := MatchGoal("ship the feature")
 	if fresh.Cues[0] == "MUTATED" || fresh.Milestones[0].ID == "MUTATED" || fresh.Milestones[0].Tools[0] == "MUTATED" {
 		t.Error("MatchGoal aliases the global catalog; a caller's mutation leaked back")
-	}
-	if MilestoneSets()[0].Milestones[0].ID == "MUTATED" {
-		t.Error("MilestoneSets aliases the global catalog")
 	}
 }
 

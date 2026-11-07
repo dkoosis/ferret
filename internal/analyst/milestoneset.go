@@ -116,18 +116,6 @@ var milestoneSets = []MilestoneSet{
 	},
 }
 
-// MilestoneSets returns a deep copy of the v1 catalog of canned goal patterns, so
-// callers can range and even mutate the result without reaching into package state.
-// Slices are reference types: a shallow header copy would still alias the global
-// Cues/Milestones arrays, contradicting the immutability this exposes.
-func MilestoneSets() []MilestoneSet {
-	sets := make([]MilestoneSet, len(milestoneSets))
-	for i, set := range milestoneSets {
-		sets[i] = deepCopySet(set)
-	}
-	return sets
-}
-
 // deepCopySet returns a MilestoneSet sharing no backing storage with set — every
 // slice (Cues, Milestones, each milestone's Tools) is freshly allocated. The
 // exported accessors copy through this so the package-global catalog stays immutable.
