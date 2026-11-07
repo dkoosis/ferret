@@ -21,7 +21,7 @@
 // bump the token below on ANY rule edit; each repo runs check-pack-drift.sh in
 // CI to compare its copy's hash against upstream (golangci.snippet.yml §drift).
 //
-//pack:version v1
+//pack:version v2
 package gorules
 
 import "github.com/quasilyte/go-ruleguard/dsl"
@@ -56,11 +56,10 @@ func scannerDefaultBuffer(m dsl.Matcher) {
 		`$sc := bufio.NewScanner($r)
 		 for $sc.Scan() { $*_ }`,
 	).
-		// Skip tests (fixtures aren't production input) and in-memory readers
-		// (strings/bytes.NewReader is bounded by an already-loaded value —
-		// the same carve-out the alloc-bounds lens makes for ReadAll).
-		Where(!m.File().Name.Matches(`_test\.go$`) &&
-			!m["r"].Text.Matches(`^(strings|bytes)\.NewReader`)).
+		// Skip tests (fixtures aren't production input). An in-memory reader
+		// is not exempt: one line over 64KB in a loaded value still stops
+		// Scan with bufio.ErrTooLong.
+		Where(!m.File().Name.Matches(`_test\.go$`)).
 		Report(`bufio.Scanner default 64KB token cap truncates long input; call $sc.Buffer(buf, max)`)
 }
 
