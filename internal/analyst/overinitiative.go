@@ -116,7 +116,7 @@ func ParseOverInitiative(resp string) (OverInitiativeVerdict, error) {
 // aggregates the flagged verdicts.
 func RunOverInitiative(ctx context.Context, cfg Config, prompt string, actions []AgentAction) (OverInitiativeVerdict, string, error) {
 	system, user := BuildOverInitiativePrompt(prompt, actions)
-	model, text, _, err := complete(ctx, cfg, system, user)
+	model, text, err := complete(ctx, cfg, system, user)
 	if err != nil {
 		return OverInitiativeVerdict{}, "", err
 	}

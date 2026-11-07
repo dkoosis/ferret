@@ -1,6 +1,5 @@
 // Package ledger consolidates the append-only JSONL ledger mechanics that used
-// to be hand-rolled, nearly byte-for-byte identical, in internal/label,
-// internal/fixes, and internal/spool: an uncapped trailing-line reader
+// to be hand-rolled, nearly byte-for-byte identical, in internal/fixes, and internal/spool: an uncapped trailing-line reader
 // (ReadLines) and the durable single-record append spine (AppendJSON) — open,
 // marshal, write, fsync, close. A durability fix here (ferret-isz was the
 // pattern: two concurrent over-threshold appends splicing into one torn line)

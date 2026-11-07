@@ -46,9 +46,6 @@ func surfaceCell(path string) string {
 		// (surface_test.go) fails first if a command has no entry.
 		return "?"
 	}
-	if s.escalates != "" {
-		return fmt.Sprintf("local, model with `%s`", s.escalates)
-	}
 	return string(s.kind)
 }
 

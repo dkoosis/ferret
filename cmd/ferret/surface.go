@@ -30,45 +30,24 @@ const (
 	surfaceHook  surface = "hook"
 )
 
-// cmdSurface classifies one command. escalates names the flag that turns an
-// otherwise-local command into a model call — `retrieval` is local until
-// --hop1, and labelling it a flat "model" would be as misleading as "local".
+// cmdSurface classifies one command.
 type cmdSurface struct {
-	kind      surface
-	escalates string
+	kind surface
 }
 
 // label renders the help prefix.
 func (s cmdSurface) label() string {
-	if s.escalates != "" {
-		return fmt.Sprintf("[%s, model with %s]", s.kind, s.escalates)
-	}
 	return "[" + string(s.kind) + "]"
-}
-
-// callsModel reports whether this command, as invoked, will reach the API.
-// escalating commands consult their flag.
-func (s cmdSurface) callsModel(escalated bool) bool {
-	if s.kind == surfaceModel {
-		return true
-	}
-	return s.escalates != "" && escalated
 }
 
 // commandSurfaces is the classification, keyed by the kong command path with
 // argument placeholders stripped (see normalizeCommand).
 var commandSurfaces = map[string]cmdSurface{
-	// The four that call Anthropic.
+	// The commands that call Anthropic.
 	"adjudicate":      {kind: surfaceModel},
 	"over-initiative": {kind: surfaceModel},
-	"feedback judge":  {kind: surfaceModel},
-	// retrieval is a deterministic scorer; --hop1 adds the LLM judge leg.
-	"retrieval": {kind: surfaceLocal, escalates: "--hop1"},
 
 	// Hook surfaces: invoked by a Claude Code hook, not typed by hand.
-	"feedback prep":   {kind: surfaceHook},
-	"feedback check":  {kind: surfaceHook},
-	"feedback answer": {kind: surfaceHook},
 	"emit":            {kind: surfaceHook},
 	"recurrence":      {kind: surfaceHook},
 	"signatures seed": {kind: surfaceLocal},
@@ -102,13 +81,11 @@ var commandSurfaces = map[string]cmdSurface{
 	"usage":           {kind: surfaceLocal},
 	"substitutable":   {kind: surfaceLocal},
 	"quality":         {kind: surfaceLocal},
-	"helped":          {kind: surfaceLocal},
 	"fixes add":       {kind: surfaceLocal},
 	"fixes list":      {kind: surfaceLocal},
 	"fixes sub":       {kind: surfaceLocal},
 	"fixes subs":      {kind: surfaceLocal},
 	"fixes proposals": {kind: surfaceLocal},
-	"reach":           {kind: surfaceLocal},
 	"floor":           {kind: surfaceLocal},
 }
 
@@ -153,21 +130,11 @@ func labelCommandHelp(model *kong.Application) {
 	walk(model.Node, "")
 }
 
-// escalatedToModel reports whether the invoked command's model-escalating flag
-// is set. Only `retrieval --hop1` escalates today; the switch keeps the check
-// beside the map instead of scattered through dispatch.
-func escalatedToModel(cmd string) bool {
-	if cmd == "retrieval" {
-		return CLI.Retrieval.Hop1
-	}
-	return false
-}
-
 // emitPromptOnly reports whether the invoked command's own --emit-prompt flag
-// is set, for the three commands that ship one. Each assembles and prints its
+// is set, for the commands that ship one. Each assembles and prints its
 // prompt, then returns before touching the analyst — a genuinely offline,
 // zero-cost dry run that predates this guard (adjudicate.go:82,
-// overinitiative.go:285, retrieval_hop1.go:48). guardOffline must not block
+// overinitiative.go:285). guardOffline must not block
 // it: a shell profile that sets FERRET_OFFLINE=1 to prevent an accidental
 // paid call should not also disable the flag documented as "no API key
 // needed".
@@ -177,8 +144,6 @@ func emitPromptOnly(cmd string) bool {
 		return CLI.Adjudicate.EmitPrompt
 	case "over-initiative":
 		return CLI.OverInitiative.EmitPrompt
-	case "retrieval":
-		return CLI.Retrieval.EmitPrompt
 	default:
 		return false
 	}
@@ -195,7 +160,7 @@ func guardOffline(cmd string) error {
 	if !ok {
 		return nil
 	}
-	if !s.callsModel(escalatedToModel(cmd)) {
+	if s.kind != surfaceModel {
 		return nil
 	}
 	if emitPromptOnly(cmd) {

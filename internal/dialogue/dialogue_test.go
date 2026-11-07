@@ -312,8 +312,7 @@ func TestTagMoveStillLongPasteOnTranscriptShapedPaste(t *testing.T) {
 }
 
 // TestIsRepairMove pins the predicate the repair→reject split rides on: both moves
-// count as repairs so episode.Classify / AttributeHop / the retrieval tells stay
-// behavior-preserving.
+// count as repairs so the repair→reject split stays behavior-preserving.
 func TestIsRepairMove(t *testing.T) {
 	for _, m := range []Move{MoveRepair, MoveReject} {
 		if !IsRepairMove(m) {
@@ -324,31 +323,6 @@ func TestIsRepairMove(t *testing.T) {
 		if IsRepairMove(m) {
 			t.Errorf("IsRepairMove(%q) = true, want false", m)
 		}
-	}
-}
-
-// TestIsBenignNo pins the exported wrapper's contract for internal/feedback's
-// answer-recognition grammar (ferret-j33): a benign-reassurance "no" reads
-// true, a genuine leading negative reads false — exactly matchRepair's own
-// guard, reused via the exported name rather than a second regex.
-func TestIsBenignNo(t *testing.T) {
-	tests := []struct {
-		name string
-		s    string
-		want bool
-	}{
-		{"no worries", "no worries, that's fine", true},
-		{"no problem", "no problem at all", true},
-		{"nope no rush", "nope, no rush", false}, // "nope" isn't followed directly by a reassurance word
-		{"genuine no", "no, use snipe instead", false},
-		{"bare no", "no", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := IsBenignNo(tt.s); got != tt.want {
-				t.Errorf("IsBenignNo(%q) = %v, want %v", tt.s, got, tt.want)
-			}
-		})
 	}
 }
 
@@ -412,29 +386,6 @@ func TestClassifyTurns(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := ClassifyTurns(tt.turns); got != tt.want {
 				t.Errorf("ClassifyTurns(%q) = %q, want %q", tt.turns, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestAttributeHop(t *testing.T) {
-	tests := []struct {
-		name string
-		move Move
-		ctx  TurnContext
-		want Hop
-	}{
-		{"non-repair is none", MoveAccept, TurnContext{SelfRequery: true}, HopNone},
-		{"self-requery is interp", MoveRepair, TurnContext{SelfRequery: true}, HopInterp},
-		{"empty result is retrieval", MoveRepair, TurnContext{EmptyResult: true}, HopRetrieval},
-		{"oversized is retrieval", MoveRepair, TurnContext{OversizedResult: true}, HopRetrieval},
-		{"no signal is none", MoveRepair, TurnContext{}, HopNone},
-		{"self-requery beats retrieval", MoveRepair, TurnContext{SelfRequery: true, EmptyResult: true}, HopInterp},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := AttributeHop(tt.move, tt.ctx); got != tt.want {
-				t.Errorf("AttributeHop(%q, %+v) = %q, want %q", tt.move, tt.ctx, got, tt.want)
 			}
 		})
 	}

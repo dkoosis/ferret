@@ -12,8 +12,8 @@ import (
 
 // Offline mode and the call-cost notice (ferret-wvo).
 //
-// Four ferret commands send transcript-derived material to Anthropic:
-// adjudicate, over-initiative, feedback judge, and retrieval --hop1. Nothing
+// Two ferret commands send transcript-derived material to Anthropic:
+// adjudicate and over-initiative. Nothing
 // used to distinguish them from the ~37 purely local commands, so an accidental
 // paid call was one typo away and nothing stated what left the machine. Two
 // guards, both funnelled through complete() — the package's single transport:

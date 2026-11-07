@@ -304,7 +304,7 @@ func cmdOverInitiative() error {
 
 // runOverInitJudge is the per-candidate judge seam — analyst.RunOverInitiative in
 // production, a fake in tests so fan-out order/fail-fast are exercisable without
-// a live API (same shape as hop1Judge).
+// a live API.
 var runOverInitJudge = analyst.RunOverInitiative
 
 // judgeOverInitiative runs the analyst over each no-pushback candidate and collects

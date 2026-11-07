@@ -40,7 +40,7 @@ func TestScanSource_ClassifiesHookAndRosterBeforeFirstAssistantResponse(t *testi
 		`{"type":"mode","mode":"normal"}`,
 		`{"type":"permission-mode","permissionMode":"auto"}`,
 		`{"type":"attachment","attachment":{"type":"hook_success","stdout":"banner text"}}`,
-		`{"type":"attachment","attachment":{"type":"hook_success","stdout":"<itzy-context>fresh recall block</itzy-context>"}}`,
+		`{"type":"attachment","attachment":{"type":"hook_success","stdout":"extra hook output"}}`,
 		`{"type":"attachment","attachment":{"type":"hook_system_message","content":"printed banner"}}`,
 		`{"type":"user","isMeta":true,"message":{"role":"user","content":"<local-command-caveat>Caveat</local-command-caveat>"}}`,
 		`{"type":"user","message":{"role":"user","content":"<command-name>/model</command-name>"}}`,
@@ -58,14 +58,10 @@ func TestScanSource_ClassifiesHookAndRosterBeforeFirstAssistantResponse(t *testi
 	}
 
 	wantHook := len(`{"type":"hook_success","stdout":"banner text"}`) +
-		len(`{"type":"hook_success","stdout":"<itzy-context>fresh recall block</itzy-context>"}`) +
+		len(`{"type":"hook_success","stdout":"extra hook output"}`) +
 		len(`{"type":"hook_system_message","content":"printed banner"}`)
 	if sess.Cat.HookBytes != wantHook {
 		t.Errorf("HookBytes = %d, want %d", sess.Cat.HookBytes, wantHook)
-	}
-	wantItzy := len("<itzy-context>fresh recall block</itzy-context>")
-	if sess.Cat.ItzyBytes != wantItzy {
-		t.Errorf("ItzyBytes = %d, want %d", sess.Cat.ItzyBytes, wantItzy)
 	}
 	wantRoster := len(`{"type":"deferred_tools_delta","addedNames":["Monitor"]}`) +
 		len(`{"type":"skill_listing","content":"skills: a, b, c"}`)

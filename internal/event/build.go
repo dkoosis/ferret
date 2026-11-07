@@ -3,7 +3,6 @@ package event
 import (
 	"encoding/json"
 	"hash/fnv"
-	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -425,7 +424,6 @@ func (b *Builder) resolve(st *fileState, blk *transcript.Block, ts time.Time) {
 		b.Stats.CwdResets++
 	}
 	b.joinUsage(evs, ts)
-	attachRetrievalHits(evs, blk.Content)
 	b.resolved[blk.ToolUseID] = struct{}{}
 	delete(st.pending, blk.ToolUseID)
 	delete(st.callTime, blk.ToolUseID)
@@ -454,58 +452,6 @@ func (b *Builder) joinUsage(evs []*Event, ts time.Time) {
 			ev.IndexState = rec.IndexState
 			b.Stats.UsageJoined++
 		}
-	}
-}
-
-// attachRetrievalHits captures a query-mode retrieval event's returned hits in
-// rank order from its tool_result — a get_nug MCP call, or a CLI trixi ask/search
-// shell segment (ferret-sq.d0, ferret-bbp.20). An errored/empty result yields no
-// hits. The MCP arm is never compound (a single tool_use), so a lone query event
-// dispatches by Kind; the shell arm can be compound, when two query-mode trixi
-// calls chain in one Bash tool_use and share one tool_result.
-//
-// Only a successful call yields real hits: parseHexHits is a plain-text scan, so
-// a failed trixi ask/search whose error body happens to carry a 12-hex token (a
-// session id, trace hash, truncated digest) would otherwise fabricate hits from
-// error text (ferret-bbp.20 review). Every segment of a block shares one status,
-// so evs[0] is representative; StatusCFail (a chained peer failed, which trixi
-// call is unknown) is treated as non-success, matching finish()'s no-attribution
-// stance on compound failures.
-func attachRetrievalHits(evs []*Event, content json.RawMessage) {
-	if len(evs) == 0 || evs[0].Status != StatusOK {
-		return
-	}
-	if len(evs) == 1 {
-		if evs[0].Query == "" {
-			return
-		}
-		if evs[0].Kind == KindTool {
-			evs[0].Results = parseNugHits(content)
-		} else {
-			evs[0].Results = parseHexHits(content)
-		}
-		return
-	}
-	attachCompoundShellHits(evs, content)
-}
-
-// attachCompoundShellHits applies the bbp.20 compound-command attribution rule:
-// two query-mode trixi calls chained in one Bash tool_use share one tool_result,
-// so the shared hits are extracted once and attributed to EACH query-mode shell
-// segment in the chain (plain CLI text carries no per-command delimiter to split
-// on).
-func attachCompoundShellHits(evs []*Event, content json.RawMessage) {
-	var hits []NugHit
-	haveHits := false
-	for _, ev := range evs {
-		if ev.Kind != KindShell || ev.Query == "" {
-			continue
-		}
-		if !haveHits {
-			hits = parseHexHits(content)
-			haveHits = true
-		}
-		ev.Results = hits
 	}
 }
 
@@ -592,7 +538,6 @@ func (b *Builder) fromToolUse(src transcript.Source, raw *transcript.Raw, blk *t
 	// segment's bare command text (event.go InBytes).
 	ev.InBytes = len(blk.Input)
 	ev.Bytes = ev.InBytes // no tool_result share applied yet; resolve() adds it
-	ev.Query = getNugQuery(blk.Name, input)
 	return []*Event{&ev}
 }
 
@@ -616,164 +561,7 @@ func shellSegmentEvent(base Event, seg shellnorm.Segment, compound bool) *Event 
 	// trunc above would cut a long command's option list off first
 	// (event.go Flags, ferret-dep).
 	ev.Flags = seg.Flags
-	ev.Query = trixiCLIQuery(seg.Cmd, seg.Raw)
 	return &ev
-}
-
-// toolGetNug is the trixi search tool whose query-mode calls are retrieval
-// episodes (ferret-sq.d0). By-id fetches of the same tool carry no query arg.
-const toolGetNug = "mcp__trixi__get_nug"
-
-// getNugQuery returns the full search string of a query-mode get_nug call, or ""
-// for any other tool or a by-id fetch. A non-empty return marks the event as a
-// retrieval episode whose result ids/scores resolve() captures into Results.
-func getNugQuery(name string, input map[string]any) string {
-	if name != toolGetNug {
-		return ""
-	}
-	q, _ := input["query"].(string)
-	return strings.TrimSpace(q)
-}
-
-// trixiAskCmd / trixiSearchCmd are the shellnorm-normalized Action tokens for a
-// query-mode trixi CLI recall call (ferret-bbp.20) — the Bash-tool counterpart
-// of toolGetNug. shellnorm.Split already folds "trixi ask ..." to "trixi_ask"
-// (subcmdTools, internal/shellnorm/norm.go), so no shellnorm change is needed:
-// this is scorer/ingest admission of a token shellnorm already mints. A `trixi
-// get <id>` by-id fetch normalizes to "trixi_get" and is deliberately excluded
-// — it carries no query, mirroring the MCP get_nug by-id arm.
-const (
-	trixiAskCmd    = "trixi_ask"
-	trixiSearchCmd = "trixi_search"
-)
-
-// trixiQueryWord splits a shell statement into words, honoring single- and
-// double-quoted spans, so trixiCLIQuery can find the first positional
-// (non-flag) argument without a full shell re-parse.
-var trixiQueryWord = regexp.MustCompile(`"(?:[^"\\]|\\.)*"|'[^']*'|\S+`)
-
-// trixiCLIQuery extracts the query string of a query-mode trixi CLI call from
-// its shellnorm segment (ferret-bbp.20 extraction rule: deterministic,
-// regex-first). cmd gates on trixi_ask/trixi_search (trixi_get and every other
-// command return ""); raw is walked word-by-word, skipping the "trixi
-// <subcommand>" prefix and any flag token (leading "-"), and the first
-// remaining word — unquoted — is the query. One query per parsed command.
-func trixiCLIQuery(cmd, raw string) string {
-	if cmd != trixiAskCmd && cmd != trixiSearchCmd {
-		return ""
-	}
-	words := trixiQueryWord.FindAllString(raw, -1)
-	for _, w := range words[min(2, len(words)):] {
-		if strings.HasPrefix(w, "-") {
-			continue
-		}
-		return unquoteShellWord(w)
-	}
-	return ""
-}
-
-// unquoteShellWord strips a single matching pair of surrounding quotes (the only
-// quoting trixiQueryWord can produce) and decodes the escapes that quoting
-// honored, so Event.Query matches the value the CLI actually received rather than
-// its escaped source text (ferret-bbp.20 review). Single quotes preserve their
-// contents verbatim; inside double quotes the shell drops a backslash only before
-// $, `, ", \ or newline, so those pairs collapse to the escaped char.
-func unquoteShellWord(w string) string {
-	if len(w) < 2 || w[0] != w[len(w)-1] {
-		return w
-	}
-	inner := w[1 : len(w)-1]
-	switch w[0] {
-	case '\'':
-		return inner
-	case '"':
-		return unescapeDoubleQuoted(inner)
-	}
-	return w
-}
-
-// unescapeDoubleQuoted collapses shell double-quote backslash escapes: a
-// backslash is literal except before $, `, ", \ or newline, where it is dropped
-// and the following char kept.
-func unescapeDoubleQuoted(s string) string {
-	if !strings.Contains(s, `\`) {
-		return s
-	}
-	var b strings.Builder
-	b.Grow(len(s))
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\\' && i+1 < len(s) {
-			switch s[i+1] {
-			case '$', '`', '"', '\\', '\n':
-				i++
-			}
-		}
-		b.WriteByte(s[i])
-	}
-	return b.String()
-}
-
-// hexHitToken matches a returned nug id embedded in plain-text trixi CLI
-// output (ferret-bbp.20 extraction rule): a lowercase 12-hex token. Robust to
-// arbitrary head-caps/table/list formatting around it; a rare false hex hit is
-// an accepted trade-off — deterministic beats fragile CLI-text parsing.
-var hexHitToken = regexp.MustCompile(`\b[0-9a-f]{12}\b`)
-
-// parseHexHits scrapes ordered, deduped nug hits from a trixi CLI tool_result's
-// plain text — the CLI counterpart of parseNugHits' JSON-array parse for the
-// MCP arm. No per-hit score is available from CLI text, so Score stays zero.
-func parseHexHits(content json.RawMessage) []NugHit {
-	text, ok := resultText(content)
-	if !ok {
-		return nil
-	}
-	matches := hexHitToken.FindAllString(text, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-	seen := make(map[string]bool, len(matches))
-	hits := make([]NugHit, 0, len(matches))
-	for _, m := range matches {
-		if seen[m] {
-			continue
-		}
-		seen[m] = true
-		hits = append(hits, NugHit{ID: m})
-	}
-	return hits
-}
-
-// parseNugHits extracts the returned nug hits from a get_nug tool_result, in rank
-// (result) order. The result body is a JSON array of hit objects, each with an
-// "id" and a per-query "score"; an error/timeout result (a bare string) or any
-// non-array body yields no hits. Score is captured as-is — zero when a hit omits
-// it — so all rank-keyed metrics work and the score-distribution metric is unblocked.
-func parseNugHits(content json.RawMessage) []NugHit {
-	text, ok := resultText(content)
-	if !ok {
-		return nil
-	}
-	if text = strings.TrimSpace(text); text == "" || text[0] != '[' {
-		return nil
-	}
-	var raw []struct {
-		ID    string  `json:"id"`
-		Score float64 `json:"score"`
-	}
-	if json.Unmarshal([]byte(text), &raw) != nil {
-		return nil
-	}
-	hits := make([]NugHit, 0, len(raw))
-	for _, r := range raw {
-		if r.ID == "" {
-			continue
-		}
-		hits = append(hits, NugHit{ID: r.ID, Score: r.Score})
-	}
-	if len(hits) == 0 {
-		return nil
-	}
-	return hits
 }
 
 // target pulls the most identifying input field, by priority.

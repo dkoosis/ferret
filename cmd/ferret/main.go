@@ -393,28 +393,11 @@ var CLI struct {
 
 	Substitutable SubstitutableCmd `cmd:"" help:"Rank Bash calls a native tool (Grep/Glob/Read) could replace — deterministic, no judge." name:"substitutable"`
 
-	Retrieval struct {
-		CommonFlags
-		Session    string        `help:"Only episodes from sessions matching this prefix/substring (omit for whole corpus)." name:"session"`
-		Hop1       bool          `help:"Grade each episode's Hop1 interp-fidelity (LLM judge; requires --session, reports its own token cost)." name:"hop1"`
-		Model      string        `help:"Claude model ID for --hop1 (default: claude-sonnet-4-6)." name:"model"`
-		EmitPrompt bool          `help:"With --hop1: assemble + print each escalated episode's judge prompt without calling the model." name:"emit-prompt"`
-		Timeout    time.Duration `help:"With --hop1: operator deadline for the analyst call across all retries (0 = SDK defaults)." default:"5m" name:"timeout"`
-	} `cmd:"" help:"Score get_nug retrieval episodes: RU northstar (consumed/firsttry/nonabandon) + det Q/R/C scorers."`
-
 	Quality struct {
 		Session string `help:"Session ID prefix for per-task axes. Omit for corpus-wide pass^k consistency (cluster recurring task-shapes across all sessions)." name:"session"`
 		Root    string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
 		Format  string `help:"Output format: text|json." default:"text" name:"format"`
 	} `cmd:"" help:"Reference-free quality: per-task efficiency/adaptivity axes (--session), or corpus pass^k consistency over recurring task-shapes (no --session)."`
-
-	Helped struct {
-		Session string `help:"Session ID prefix (required): the transcript whose task segments the events join against." required:"" name:"session"`
-		Events  string `help:"Retrieval-event JSONL (trixi sidecar rows); '-' or empty = stdin." name:"events"`
-		Root    string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
-		Data    string `help:"Artifact directory (the label ledger this session's feedback-tap probe answers are excluded via)." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
-		Format  string `help:"Output format: text|json." default:"text" name:"format"`
-	} `cmd:"" help:"Adjudicate retrieval outcomes (helped|ignored|misled|conflict|no_signal): join each search event to its task segment by timestamp, then apply the deterministic lattice. Live ts→segment join (bbp.16)."`
 
 	Adjudicate struct {
 		Session    string        `help:"Session ID prefix (required)." name:"session"`
@@ -435,32 +418,6 @@ var CLI struct {
 		EmitPrompt bool          `help:"Assemble + print each candidate's judge prompt without calling the model (no API key needed)." name:"emit-prompt"`
 		Timeout    time.Duration `help:"Operator deadline for the analyst call across all retries (0 = SDK defaults)." default:"5m" name:"timeout"`
 	} `cmd:"" name:"over-initiative" help:"LLM judge of the NO-PUSHBACK over-initiative case: episodes where the agent took a mutating action beyond an advice/review-scoped prompt and the human let it stand (the case the deterministic floor can't read). Precision layer; dk validates. (bbp.18)"`
-
-	Feedback struct {
-		Prep struct {
-			Session string `help:"Session ID prefix (required)." required:"" name:"session"`
-			Data    string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
-			Events  string `help:"Retrieval-live events directory (default ~/.trixi/telemetry; the newest retrieval-live-YYYY-MM.jsonl in it is tailed)." name:"events"`
-		} `cmd:"" help:"Pure, network-free: tail the live retrieval-event feed for the oldest settled kind:search row this session hasn't judged yet. Prints {\"pending\":bool,\"search_event_id\":...,\"nug_ids\":[...]}."`
-		Judge struct {
-			Session     string        `help:"Session ID prefix (required)." required:"" name:"session"`
-			Root        string        `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
-			Data        string        `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
-			Events      string        `help:"Retrieval-live events directory (default ~/.trixi/telemetry)." name:"events"`
-			SearchEvent string        `help:"The kind:search event id to judge (from 'feedback prep')." required:"" name:"search-event"`
-			Model       string        `help:"Claude model ID (default: claude-sonnet-4-6)." name:"model"`
-			Timeout     time.Duration `help:"Operator deadline for the analyst call across all retries (0 = SDK defaults)." default:"2m" name:"timeout"`
-		} `cmd:"" help:"Re-derive the deterministic helped verdict for one search event, run analyst.RunRelevance over its returned nugs' bodies ([{id,text}] on stdin), and bank an AskCandidate on disagreement (feedback.Select). No-ops silently when the lattice has no record or SearchFit can't classify."`
-		Check struct {
-			Session string `help:"Session ID prefix (required)." required:"" name:"session"`
-			Data    string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
-		} `cmd:"" help:"UserPromptSubmit side: read the banked AskCandidate (if any), check feedback.Reserve's budget, print {\"ask\":bool,\"question\":string}. One-shot: clears the bank file either way."`
-		Answer struct {
-			Session string `help:"Session ID prefix (required)." required:"" name:"session"`
-			Root    string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
-			Data    string `help:"Artifact directory." default:"~/.ferret" env:"FERRET_DATA" name:"data"`
-		} `cmd:"" help:"UserPromptSubmit side, one turn after a granted 'check': read dk's raw prompt from stdin, consume the armed candidate, confirm the ask actually rendered, classify the leading y/n/s token (ferret-j33), and write the gold label. No armed candidate = silent no-op."`
-	} `cmd:"" help:"In-session feedback tap live-wiring (ferret-wf9.1/j33): prep (tail+settle) -> judge (RunRelevance+Select) -> check (budget+inject) -> answer (recognize+label). See .claude/hooks/feedback-*.sh."`
 
 	Fixes struct {
 		Add struct {
@@ -495,17 +452,6 @@ var CLI struct {
 	} `cmd:"" help:"Fix ledger: record motif→fix, then 'report --since-fixes' computes burn-delta."`
 
 	Floor FloorCmd `cmd:"" help:"Per-session fixed load floor: SessionStart hook + tool/skill roster bytes paid before dk's first real turn, as a share of total session bytes (rule files measured from disk)." name:"floor"`
-
-	Reach struct {
-		Root     string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
-		Since    string `help:"Window start YYYY-MM-DD (default: 7 days ago)." name:"since"`
-		Until    string `help:"Window end YYYY-MM-DD, inclusive (default: today)." name:"until"`
-		Project  string `help:"Only projects whose slug contains this substring." name:"project"`
-		Session  string `help:"Only sessions matching this prefix/substring." name:"session"`
-		Format   string `help:"Output format: text|json|md (md = ledger-appendable block)." default:"text" name:"format"`
-		Limit    int    `help:"Max opportunity rows (0 = unlimited)." default:"0" name:"limit"`
-		MaxBytes int    `help:"Max output bytes, text only (0 = unlimited)." default:"0" name:"max-bytes"`
-	} `cmd:"" help:"Reach-rate: at recall opportunities in a date window, did Claude reach the trixi store FIRST (store) vs grep/gh/none. Keystone metric for tx-qw86; transcript-only (Phase 1)."`
 
 	Recurrence struct {
 		CommonFlags
@@ -650,24 +596,12 @@ func main() {
 		err = cmdUsage(&CLI.Usage)
 	case "substitutable":
 		err = cmdSubstitutable(CLI.Substitutable)
-	case "retrieval":
-		err = cmdRetrieval()
 	case "quality":
 		err = cmdQuality()
-	case "helped":
-		err = cmdHelped()
 	case "adjudicate":
 		err = cmdAdjudicate()
 	case "over-initiative":
 		err = cmdOverInitiative()
-	case "feedback prep":
-		err = cmdFeedbackPrep()
-	case "feedback judge":
-		err = cmdFeedbackJudge()
-	case "feedback check":
-		err = cmdFeedbackCheck()
-	case "feedback answer":
-		err = cmdFeedbackAnswer()
 	case "fixes add":
 		err = cmdFixesAdd()
 	case "fixes list":
@@ -680,8 +614,6 @@ func main() {
 		err = cmdFixesProposals()
 	case "floor":
 		err = cmdFloor()
-	case "reach":
-		err = cmdReach()
 	case "recurrence":
 		err = cmdRecurrence()
 	case "signatures seed":
@@ -961,7 +893,7 @@ func corpusWindow(since, until string) (mine.Window, error) {
 		w.Until = endOfDay(t)
 	}
 	if !w.Since.IsZero() && !w.Until.IsZero() && w.Since.After(w.Until) {
-		return w, errReachWindow
+		return w, errWindowOrder
 	}
 	return w, nil
 }
@@ -1144,4 +1076,30 @@ func pct(part, whole int) float64 {
 		return 0
 	}
 	return 100 * float64(part) / float64(whole)
+}
+
+const dateLayout = "2006-01-02"
+
+var (
+	errBadSince    = usage("bad --since (want YYYY-MM-DD)")
+	errBadUntil    = usage("bad --until (want YYYY-MM-DD)")
+	errWindowOrder = usage("--since must not be after --until")
+)
+
+func startOfDay(t time.Time) time.Time {
+	y, m, d := t.Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, t.Location())
+}
+
+func endOfDay(t time.Time) time.Time {
+	y, m, d := t.Date()
+	return time.Date(y, m, d, 23, 59, 59, int(time.Second-time.Nanosecond), t.Location())
+}
+
+// shortSession trims a session UUID to its leading segment for legible output.
+func shortSession(s string) string {
+	if len(s) > 8 {
+		return s[:8]
+	}
+	return s
 }

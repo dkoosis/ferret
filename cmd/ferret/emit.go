@@ -28,7 +28,7 @@ var emitNow = time.Now
 // windows the token sequence, scores each window's per-span surprisal, hashes its
 // Drain fingerprint, counts friction recurrence, threads the transcript path, and
 // appends a candidate row to ~/.ferret/spool/candidates-YYYY-MM.jsonl. Output is
-// inspectable JSONL a human (and later the trixi-bot distiller) consumes; ferret
+// inspectable JSONL a human consumes; ferret
 // emits WHERE a fact might live, never WHAT it is — no claim text, ever.
 func cmdEmit() error {
 	data, err := resolveData(CLI.Emit.Data)

@@ -229,7 +229,7 @@ func resolveSpineSource(root, session string) (transcript.Source, int, error) {
 //
 // ph is the per-render placeholder table (ferret-5c0): nil (the human `ferret
 // spine` CLI path) renders every occurrence in full, exactly as before this
-// change. Non-nil (the LLM-prompt-bound render path — adjudicate/hop1/
+// change. Non-nil (the LLM-prompt-bound render path — adjudicate/
 // over-initiative) renders the first distinct value in full and every repeat
 // within the same render pass as that value's stable short token, so a
 // volatile constant (a repo's absolute path, a scratch dir) that recurs across

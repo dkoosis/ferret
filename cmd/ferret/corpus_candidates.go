@@ -23,7 +23,7 @@ import (
 // total context it has cost you.
 //
 // Shape = the sorted SET of tool-shape tokens a task touches (Read, Edit,
-// sh:git_commit, mcp:trixi.set_nug …). Set, not sequence, is deliberate: two runs
+// sh:git_commit, mcp:notes.set_note …). Set, not sequence, is deliberate: two runs
 // of the same routine that interleave their reads and edits differently are the
 // same shape, so the clustering is robust to ordering the way Jones&Klinkner's
 // same-task-pair classifier is robust to surface variation. ferret stops at the

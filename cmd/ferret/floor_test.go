@@ -72,8 +72,8 @@ func TestRunFloor_MeasuresRuleFilesFromDisk(t *testing.T) {
 func floorTestReport() floor.Report {
 	return floor.Report{
 		Sessions: []floor.Session{
-			{Session: "aaaaaaaa-short", Project: "proj", TranscriptBytes: 500, Cat: floor.Category{HookBytes: 300, ItzyBytes: 100, RosterBytes: 100}},
-			{Session: "bbbbbbbb-long", Project: "proj", TranscriptBytes: 500000, Cat: floor.Category{HookBytes: 300, ItzyBytes: 100, RosterBytes: 100}},
+			{Session: "aaaaaaaa-short", Project: "proj", TranscriptBytes: 500, Cat: floor.Category{HookBytes: 300, RosterBytes: 100}},
+			{Session: "bbbbbbbb-long", Project: "proj", TranscriptBytes: 500000, Cat: floor.Category{HookBytes: 300, RosterBytes: 100}},
 		},
 		RuleFilesGlobal: 8, RuleBytesGlobal: 4000,
 		RuleFilesProject: 4, RuleBytesProject: 1000,

@@ -67,9 +67,8 @@ type Segment struct {
 	LastCall  int    `json:"lastCall"`
 	// FirstTS/LastTS are the transcript timestamps (RFC3339Nano) of this
 	// segment's first and last owned call — its wall-clock span. Empty when the
-	// segment owns no calls. The bridge the retrieval-outcome contract's ts→
-	// segment join rides: a search event (trixi's sidecar clock) lands in the
-	// segment whose [FirstTS,LastTS] interval contains its ts (ferret-bbp.16).
+	// segment owns no calls. Lets a timestamp be
+	// mapped to the segment whose [FirstTS,LastTS] interval contains it.
 	FirstTS  string   `json:"firstTS,omitempty"`
 	LastTS   string   `json:"lastTS,omitempty"`
 	InBytes  int      `json:"inBytes,omitempty"`  // tool_use input bytes the task spent

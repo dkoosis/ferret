@@ -14,9 +14,7 @@ type coarse struct{}
 
 func (coarse) Name() string { return "coarse" }
 
-// Coarse behavior classes. Exported so string-facing consumers (internal/reach)
-// project their own buckets onto the SAME class source the event lens uses,
-// instead of re-listing commands in a parallel table that drifts.
+// Coarse behavior classes. Exported for any string-facing consumer.
 const (
 	ClassRead   = "read"
 	ClassSearch = "search"
@@ -100,27 +98,7 @@ func IsVCS(action string) bool {
 		action == "gh" || strings.HasPrefix(action, "gh_")
 }
 
-// ShellClass returns the coarse behavior class for a shellnorm-normalized command
-// (Segment.Cmd, e.g. "rg", "git_log", "make"). It is the string-facing twin of
-// coarse.Token's KindShell branch — same coarseShell table, same IsVCS family
-// gate — exported so command-string consumers (internal/reach's reach-channel
-// taxonomy) classify against THIS single source instead of re-listing the
-// commands, so the two never drift. A search/read tool added to coarseShell then
-// buckets consistently in every consumer. ok=false means unclassified (the coarse
-// lens would emit the "sh" catch-all). NOTE: the "vcs" class is the FAMILY gate
-// (true for git_commit/push/status too); a consumer wanting only the read subset
-// must narrow further itself.
-func ShellClass(cmd string) (cls string, ok bool) {
-	if c, ok := coarseShell[cmd]; ok {
-		return c, true
-	}
-	if IsVCS(cmd) {
-		return ClassVCS, true
-	}
-	return "", false
-}
-
-// ---- tool: tool identity (Read, sh:git_diff, mcp:trixi.set_nug) ----
+// ---- tool: tool identity (Read, sh:git_diff, mcp:notes.set_note) ----
 
 type tool struct{}
 

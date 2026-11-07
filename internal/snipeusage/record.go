@@ -4,8 +4,7 @@
 // (sn-r1do.2). This is ferret's LEAF, stdlib-only copy of that shape —
 // ferret does not import the snipe module; it reads snipe's own
 // .snipe/usage.jsonl files directly and decodes them with its own struct,
-// so the two modules stay independently buildable (same rationale as
-// internal/retrievalevent's mirror of trixi's contract, event.go:1-7).
+// so the two modules stay independently buildable.
 package snipeusage
 
 import (

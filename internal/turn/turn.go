@@ -3,8 +3,8 @@
 // and deciding whether that prompt is a real task boundary or a non-boundary that
 // continues the current one (ClassifyBoundary). These are low-level transcript
 // concepts with no scoring semantics, so they live here — below internal/score —
-// and are shared by both the segmentation engine (internal/score) and the recall
-// autopsy (internal/reach) without either reaching UP into the other.
+// and are shared by the segmentation engine (internal/score) and the cmd layer
+// without either reaching UP into the other.
 package turn
 
 import (

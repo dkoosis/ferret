@@ -46,8 +46,6 @@ func TestSplit(t *testing.T) {
 		{"gh pr 12", []string{"gh_pr"}},
 		{"bd dep --json 12", []string{"bd_dep"}},
 		{"gh api x", []string{"gh_api"}},
-		{"trixi project create", []string{"trixi_project_create"}},
-		{"trixi ask q", []string{"trixi_ask"}},
 		{"bd dep add a b", []string{"bd_dep_add"}},
 		{"snipe diagram arch", []string{"snipe_diagram"}},
 		// ferret-1dd: ferret signatures is a group too.
@@ -494,7 +492,7 @@ var helpUnsplit = map[string]map[string]bool{"snipe": {"diagram": true}}
 // does not split (ferret-ilp). A tool not on PATH is skipped, so CI passes
 // without them.
 func TestSubcmdGroupsMatchHelp(t *testing.T) {
-	for _, tool := range []string{"sdlc", "ferret", "snipe", "trixi"} {
+	for _, tool := range []string{"sdlc", "ferret", "snipe"} {
 		t.Run(tool, func(t *testing.T) {
 			path, err := exec.LookPath(tool)
 			if err != nil {

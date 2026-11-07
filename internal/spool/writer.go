@@ -1,7 +1,7 @@
 // Package spool is ferret's candidate spool: an append-only, monthly-rotated
 // JSONL sink for candidate records (sensor→kg v1, epic gg-eqn). It is the
-// producer end of the frozen contract in internal/candidate; the trixi-bot
-// distiller tails these files.
+// producer end of the frozen contract in internal/candidate; no consumer
+// tails these files today.
 //
 // The write discipline mirrors internal/fixes.Append — flock-serialized,
 // O_APPEND, fsync the row, fsync the parent dir on first create — so a candidate
