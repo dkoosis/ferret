@@ -22,7 +22,7 @@ func TestCallShapeTokens(t *testing.T) {
 		want []string
 	}{
 		{"builtin", transcript.Block{Name: "Read", Input: json.RawMessage(`{"file_path":"a.go"}`)}, []string{"Read"}},
-		{"mcp", transcript.Block{Name: "mcp__trixi__set_nug"}, []string{"mcp:trixi.set_nug"}},
+		{"mcp", transcript.Block{Name: "mcp__notes__set_note"}, []string{"mcp:notes.set_note"}},
 		{"bash compound", transcript.Block{Name: "Bash", Input: json.RawMessage(`{"command":"git add -A && git commit -m x"}`)}, []string{"sh:git_add", "sh:git_commit"}},
 		{"bash empty", transcript.Block{Name: "Bash", Input: json.RawMessage(`{}`)}, []string{"sh"}},
 		{"no name", transcript.Block{Name: ""}, nil},

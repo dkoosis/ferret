@@ -41,8 +41,6 @@ func TestNormalizeCommand(t *testing.T) {
 		{"search <query>", "search"},
 		{"ingest", "ingest"},
 		{"fixes add", "fixes add"},
-		{"feedback judge", "feedback judge"},
-		{"retrieval", "retrieval"},
 	}
 	for _, tt := range tests {
 		if got := normalizeCommand(tt.in); got != tt.want {
@@ -52,8 +50,7 @@ func TestNormalizeCommand(t *testing.T) {
 }
 
 // TestGuardOffline covers the refusal itself: every surfaceModel command
-// (adjudicate, over-initiative, feedback judge — retrieval escalates
-// separately, see TestRetrievalEscalatesOnlyUnderHop1) is refused under both
+// (adjudicate, over-initiative) is refused under both
 // forms of the kill-switch, and a local command is never refused by either.
 func TestGuardOffline(t *testing.T) {
 	var modelCmds []string
@@ -101,59 +98,24 @@ func TestGuardOffline(t *testing.T) {
 	})
 }
 
-// TestRetrievalEscalatesOnlyUnderHop1 pins the one command whose surface
-// depends on a flag: `retrieval` is local until --hop1 turns on the LLM
-// interp-fidelity judge, and it must be refused only in that state.
-func TestRetrievalEscalatesOnlyUnderHop1(t *testing.T) {
-	origHop1, origOffline := CLI.Retrieval.Hop1, CLI.Offline
-	t.Cleanup(func() {
-		CLI.Retrieval.Hop1 = origHop1
-		CLI.Offline = origOffline
-	})
-	CLI.Offline = true
-
-	CLI.Retrieval.Hop1 = false
-	if escalatedToModel("retrieval") {
-		t.Error("escalatedToModel(retrieval) = true with Hop1 unset")
-	}
-	if err := guardOffline("retrieval"); err != nil {
-		t.Errorf("guardOffline(retrieval) with Hop1 unset, under --offline = %v, want nil", err)
-	}
-
-	CLI.Retrieval.Hop1 = true
-	if !escalatedToModel("retrieval") {
-		t.Error("escalatedToModel(retrieval) = false with Hop1 set")
-	}
-	var uerr *usageError
-	if err := guardOffline("retrieval"); !errors.As(err, &uerr) {
-		t.Errorf("guardOffline(retrieval) with Hop1 set, under --offline = %v (%T), want *usageError", err, err)
-	}
-}
-
 // TestGuardOfflineExemptsEmitPrompt pins the case that regresses if
 // guardOffline ever stops consulting emitPromptOnly: adjudicate,
-// over-initiative, and retrieval --hop1 each return before calling the
-// analyst when --emit-prompt is set (adjudicate.go:82, overinitiative.go:285,
-// retrieval_hop1.go:48), so --offline / FERRET_OFFLINE must not refuse them.
+// and over-initiative each return before calling the analyst when
+// --emit-prompt is set (adjudicate.go:82, overinitiative.go:285), so --offline / FERRET_OFFLINE must not refuse them.
 func TestGuardOfflineExemptsEmitPrompt(t *testing.T) {
 	origOffline := CLI.Offline
 	origAdjEmit := CLI.Adjudicate.EmitPrompt
 	origOIEmit := CLI.OverInitiative.EmitPrompt
-	origHop1, origHop1Emit := CLI.Retrieval.Hop1, CLI.Retrieval.EmitPrompt
 	t.Cleanup(func() {
 		CLI.Offline = origOffline
 		CLI.Adjudicate.EmitPrompt = origAdjEmit
 		CLI.OverInitiative.EmitPrompt = origOIEmit
-		CLI.Retrieval.Hop1 = origHop1
-		CLI.Retrieval.EmitPrompt = origHop1Emit
 	})
 	CLI.Offline = true
 	CLI.Adjudicate.EmitPrompt = true
 	CLI.OverInitiative.EmitPrompt = true
-	CLI.Retrieval.Hop1 = true
-	CLI.Retrieval.EmitPrompt = true
 
-	for _, cmd := range []string{"adjudicate", "over-initiative", "retrieval"} {
+	for _, cmd := range []string{"adjudicate", "over-initiative"} {
 		if err := guardOffline(cmd); err != nil {
 			t.Errorf("guardOffline(%q) under --offline with --emit-prompt = %v, want nil (dry run never calls the model)", cmd, err)
 		}
@@ -162,8 +124,7 @@ func TestGuardOfflineExemptsEmitPrompt(t *testing.T) {
 	// Without --emit-prompt, the same commands must still be refused.
 	CLI.Adjudicate.EmitPrompt = false
 	CLI.OverInitiative.EmitPrompt = false
-	CLI.Retrieval.EmitPrompt = false
-	for _, cmd := range []string{"adjudicate", "over-initiative", "retrieval"} {
+	for _, cmd := range []string{"adjudicate", "over-initiative"} {
 		var uerr *usageError
 		if err := guardOffline(cmd); !errors.As(err, &uerr) {
 			t.Errorf("guardOffline(%q) under --offline without --emit-prompt = %v (%T), want *usageError", cmd, err, err)

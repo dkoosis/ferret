@@ -1,5 +1,5 @@
 // Package floor measures the fixed cost every session pays before dk's first
-// real turn: the SessionStart hook render (the ⭐ banner + itzy context block)
+// real turn: the SessionStart hook render (the ⭐ banner)
 // and the deferred-tool/agent/mcp/skill roster the harness injects once at
 // open. That cost is identical for a 3-turn session and a 3-hour one, so it
 // scales with SESSION COUNT, not with work done — ferret-khh, filed after
@@ -8,9 +8,8 @@
 // This is a different question from the scoreboard (internal/mine/
 // scoreboard.go, ferret-4vx): the scoreboard ranks per-COMMAND burn inside a
 // session; floor measures the per-SESSION tax paid before any command runs,
-// straight off the raw transcripts (transcript.Walk/ReadLines), the same way
-// internal/reach mines recall-opportunity moments without going through the
-// ingested events corpus.
+// straight off the raw transcripts (transcript.Walk/ReadLines), without going
+// through the ingested events corpus.
 //
 // Rule files (~/.claude/rules/**, .claude/rules/**) are the fourth item the
 // bead names, but they never appear as their own line in any transcript:
@@ -27,14 +26,13 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/dkoosis/ferret/internal/transcript"
 )
 
 // hookAttachTypes are SessionStart hook records. One hook fires several: a
 // stdout blob (hookSpecificOutput.additionalContext — this is where the ⭐
-// banner and the <itzy-context> block actually live), a systemMessage
+// banner actually lives), a systemMessage
 // duplicate of the banner, and an additionalContext note.
 var hookAttachTypes = map[string]bool{
 	"hook_success": true, "hook_system_message": true, "hook_additional_context": true,
@@ -49,57 +47,26 @@ var rosterAttachTypes = map[string]bool{
 }
 
 // attachPayload is the subset of an attachment record's own fields floor
-// reads to classify it and to find the itzy marker. content/stdout/stderr
-// are searched as plain text — itzy's render rides inside a hook's stdout as
-// a JSON *string*, not as a field of its own.
+// reads to classify it.
 type attachPayload struct {
-	Type    string `json:"type"`
-	Content string `json:"content"`
-	Stdout  string `json:"stdout"`
-	Stderr  string `json:"stderr"`
-}
-
-const (
-	itzyOpenTag  = "<itzy-context>"
-	itzyCloseTag = "</itzy-context>"
-)
-
-// itzyBytes measures the <itzy-context>…</itzy-context> block inside s, 0
-// when the tag is absent. Best-effort text scan (the block is embedded plain
-// text inside a JSON string, not a field), matching the tolerance every other
-// ferret transcript scanner uses for schema drift.
-func itzyBytes(s string) int {
-	start := strings.Index(s, itzyOpenTag)
-	if start < 0 {
-		return 0
-	}
-	rest := s[start:]
-	if end := strings.Index(rest, itzyCloseTag); end >= 0 {
-		return end + len(itzyCloseTag)
-	}
-	return len(rest) // no closing tag observed — count to the end of the field
+	Type string `json:"type"`
 }
 
 // Category buckets one session's pre-first-turn attachment bytes by what
 // generated them.
 type Category struct {
 	// HookBytes is the whole serialized SessionStart hook record(s) —
-	// banner + itzy context + any additionalContext note. Whole-payload, not
+	// banner + any additionalContext note. Whole-payload, not
 	// just the content/stdout/stderr fields: ferret-wmb's own lesson is that a
 	// per-field allowlist hid ~235MB corpus-wide by dropping routing metadata
 	// (hookName, toolUseID, the command string) that still enters context.
 	HookBytes int `json:"hookBytes"`
-	// ItzyBytes is the <itzy-context> block specifically — a SUBSET of
-	// HookBytes, reported separately because it is one of the bead's four
-	// named sources, never added a second time into Sum.
-	ItzyBytes int `json:"itzyBytes"`
 	// RosterBytes is deferred_tools_delta + agent_listing_delta +
 	// mcp_instructions_delta + skill_listing, whole-payload.
 	RosterBytes int `json:"rosterBytes"`
 }
 
 // Sum is this category's contribution to the transcript-measured floor.
-// ItzyBytes is excluded: it is a subset of HookBytes, not an addend.
 func (c Category) Sum() int { return c.HookBytes + c.RosterBytes }
 
 // Session is one main-session transcript's floor measurement.
@@ -191,7 +158,6 @@ func classifyAttachment(raw json.RawMessage, cat *Category) {
 	switch {
 	case hookAttachTypes[p.Type]:
 		cat.HookBytes += n
-		cat.ItzyBytes += itzyBytes(p.Content) + itzyBytes(p.Stdout) + itzyBytes(p.Stderr)
 	case rosterAttachTypes[p.Type]:
 		cat.RosterBytes += n
 	}

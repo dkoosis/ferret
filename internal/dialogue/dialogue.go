@@ -102,10 +102,8 @@ const (
 	MoveRecordDeposit Move = "record-deposit"
 )
 
-// MoveContext carries the per-turn context a context-sensitive move needs. Kept
-// SEPARATE from internal/dialogue/attribute.go's TurnContext (retrieval-hop
-// attribution, bbp.4/.5) so the two concerns don't entangle: this one is about the
-// dialogue turn's neighbours, that one about a retrieval episode's result set.
+// MoveContext carries the per-turn context a context-sensitive move needs. It is about
+// the dialogue turn's neighbours.
 //
 // PriorAgentQuestion is the Phase C signal for MoveClarify — whether the agent's
 // immediately-preceding turn was a question the human is now answering. Populating
@@ -203,9 +201,8 @@ type EmbeddedInteraction struct {
 
 // IsRepairMove reports whether a move counts as a repair for Outcome purposes —
 // both the narrowed MoveRepair (Redo-Differently) and MoveReject (Disagree-Correct).
-// Callers that gate on "did the human push back on this action" (episode.Classify,
-// AttributeHop, the retrieval closing-move tells) MUST use this rather than a bare
-// `== MoveRepair`, so the v2 repair→reject split stays behavior-preserving.
+// Callers that gate on "did the human push back on this action"
+// MUST use this rather than a bare `== MoveRepair`, so the v2 repair→reject split stays behavior-preserving.
 func IsRepairMove(m Move) bool { return m == MoveRepair || m == MoveReject }
 
 // rejectCues — Disagree-Correct: the human contests a claim/deliverable as WRONG.
@@ -268,15 +265,6 @@ func matchRepair(target string) (cue string, ok bool) {
 	}
 	return "", false
 }
-
-// IsBenignNo reports whether s opens on a benign-reassurance "no" ("no
-// worries", "no problem", "no rush"...) rather than a genuine negative —
-// exactly the guard matchRepair applies internally, exported so a sibling
-// package (internal/feedback's answer-recognition grammar, ferret-j33) can
-// reuse the identical guard-word list instead of copying it. A future edit to
-// the list then can't silently drift out of sync between the two packages
-// (the same false-positive class: "no worries" is not a "no" vote either way).
-func IsBenignNo(s string) bool { return benignNoRe.MatchString(s) }
 
 // metaCues — Partner Communication Management (ISO 24617-2): feedback on HOW the
 // agent communicates, not the task. Narrowed (dk plan-review) to communication-

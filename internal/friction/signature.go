@@ -178,8 +178,7 @@ var syncDir = durable.SyncDir
 // lockSignatures takes an advisory exclusive lock on the signatures file's
 // data dir so two concurrent PersistLearned calls serialize instead of
 // interleaving their load-merge-rewrite. Mirrors the flock-around-RMW pattern
-// already used by internal/fixes/lock.go (lockLedger, for RecordSub) and
-// internal/feedback/budget.go (lockBudget, for Reserve) — built by ferret-isz
+// already used by internal/fixes/lock.go (lockLedger, for RecordSub) — built by ferret-isz
 // (merged #63) for the analogous fixes-ledger race.
 //
 // The sentinel (.friction_signatures.lock) is dir-scoped to the signatures

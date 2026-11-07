@@ -24,7 +24,7 @@ import (
 // v3 (ferret-ilp, 2026-10-20): sdlc, mnemd, ferret and glance keep their
 // subcommand (sdlc ship → sdlc_ship, was sdlc), and the command groups in
 // subcmdGroups keep a second word (gh pr checks → gh_pr_checks, was gh_pr;
-// trixi project create → trixi_project_create; bd dep add → bd_dep_add).
+// bd dep add → bd_dep_add).
 //
 // v2 (ferret-dep, 2026-08-30): Segment.Flags is computed at ingest from the
 // untruncated statement. Segment.Cmd is untouched, so the tool lens is
@@ -85,26 +85,19 @@ type Segment struct {
 var subcmdTools = map[string]bool{
 	"git": true, "go": true, "npm": true, "pnpm": true, "yarn": true,
 	"cargo": true, "docker": true, "gh": true, "kubectl": true,
-	"make": true, "bd": true, "snipe": true, "trixi": true, "mage": true,
+	"make": true, "bd": true, "snipe": true, "mage": true,
 	"brew": true, "pip": true, "uv": true, "bun": true, "loto": true,
 	"sdlc": true, "mnemd": true, "ferret": true, "glance": true,
 }
 
 // subcmdGroups are the subcommands whose own next word is a command too
-// (gh pr checks, trixi project create), so the token keeps both words. The
+// (gh pr checks, bd dep add), so the token keeps both words. The
 // lists come from each tool's --help; TestSubcmdGroupsMatchHelp fails when a
 // kong-style tool lists a group missing here. snipe diagram stays one word:
 // internal/snipeusage keys its join on "snipe_"+cmd.
 var subcmdGroups = map[string]map[string]bool{
 	"gh":     {"pr": true, "run": true, "issue": true},
 	"ferret": {"feedback": true, "fixes": true, "signatures": true},
-	"trixi": {
-		"context-read": true, "dashboard": true, "doctor": true, "eval": true,
-		"incidents": true, "ingest": true, "kg": true, "loops": true,
-		"metrics": true, "pack": true, "permissions": true, "project": true,
-		"proposals": true, "recipe": true, "retrieval": true, "self": true,
-		"session": true, "skills": true, "triage": true, "workflow": true,
-	},
 	"bd": {
 		"dep": true, "epic": true, "config": true, "vc": true, "swarm": true,
 		"label": true,

@@ -120,8 +120,8 @@ func cmdReport() error {
 		warnLensDivergence(fixIdx, corpus, findings, suppressed, l.Name())
 	}
 
-	// De-island the dialogue + Hop2 retrieval scorers (ferret-bbp.6): roll each
-	// session's human-side Outcome + worst Hop2 grade onto the findings that recur
+	// De-island the dialogue scorer (ferret-bbp.6): roll each
+	// session's human-side Outcome onto the findings that recur
 	// in it, so report/out surface them beside burn. Pure read of the same events
 	// the corpus was built from; keyed identically to the corpus streams.
 	dlgIdx, err := streamDialogueIndex(c.eventsPath())
@@ -148,8 +148,6 @@ func cmdReport() error {
 			SideBurn int      `json:"sideBurn"` // slice of burn from subagent sidechain streams
 			Surprise float64  `json:"surprise"`
 			Outcome  string   `json:"outcome,omitempty"`
-			Hop2     string   `json:"hop2,omitempty"`
-			Hop1     string   `json:"hop1,omitempty"`
 			Repairs  int      `json:"repairs,omitempty"`
 			Accepts  int      `json:"accepts,omitempty"`
 			// OddsRatio/OddsRatioN (ferret-qus): the odds-ratio-vs-outcome second
@@ -179,7 +177,7 @@ func cmdReport() error {
 				Motif: corpus.Tokens(f.IDs), Kind: string(f.Kind), Action: string(f.Action),
 				Count: f.Count, Sessions: f.Sessions, FailRate: f.FailRate,
 				Burn: f.Burn, SideBurn: f.SideBurn, Surprise: f.Surprise,
-				Outcome: f.Outcome, Hop2: f.Hop2, Hop1: f.Hop1, Repairs: f.Repairs, Accepts: f.Accepts,
+				Outcome: f.Outcome, Repairs: f.Repairs, Accepts: f.Accepts,
 				OddsRatio: f.OutcomeOddsRatio, OddsRatioN: f.OddsRatioSupport,
 				Evidence: exemplar(corpus, f.ExStream, f.ExSeq),
 			}
@@ -214,7 +212,7 @@ func cmdReport() error {
 				Motif: corpus.Tokens(f.IDs), Kind: string(f.Kind), Action: string(f.Action),
 				Count: f.Count, Sessions: f.Sessions, FailRate: f.FailRate,
 				Burn: f.Burn, SideBurn: f.SideBurn,
-				Outcome: f.Outcome, Hop2: f.Hop2, Repairs: f.Repairs, Accepts: f.Accepts,
+				Outcome: f.Outcome, Repairs: f.Repairs, Accepts: f.Accepts,
 				OddsRatio: f.OutcomeOddsRatio, OddsRatioN: f.OddsRatioSupport,
 				Evidence: exemplar(corpus, f.ExStream, f.ExSeq),
 			})

@@ -122,7 +122,7 @@ func windowMisfireEvents(events []event.Event, since, until string) ([]event.Eve
 		return nil, err
 	}
 	if lo.After(hi) {
-		return nil, errReachWindow // an inverted window would print an empty report as if clean
+		return nil, errWindowOrder // an inverted window would print an empty report as if clean
 	}
 	kept := make([]event.Event, 0, len(events))
 	for i := range events {

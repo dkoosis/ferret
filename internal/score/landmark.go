@@ -33,7 +33,7 @@ import (
 
 // Milestone is one necessary goal landmark. The analyst supplies ID + Tools (the
 // Shape tokens that satisfy it, e.g. ["Read"], ["sh:git_commit"],
-// ["mcp:trixi.get_nug"] — any one of them counts as a hit). Weight is the
+// ["mcp:notes.get_note"] — any one of them counts as a hit). Weight is the
 // uniqueness weight: engine-filled from inverse corpus frequency by WeighByCorpus
 // (omitempty so an analyst spec needn't carry it), unless the caller sets a
 // non-zero value, which is honored as an override.

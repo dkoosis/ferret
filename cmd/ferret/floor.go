@@ -25,7 +25,7 @@ const floorDefaultLimit = 10
 // command burn ranking (internal/mine/scoreboard.go, ferret-4vx).
 //
 // No CommonFlags: this reads raw transcripts directly (transcript.Walk, the
-// same convention `ferret reach` uses), not the ingested events.jsonl corpus
+// same convention the other transcript scanners use), not the ingested events.jsonl corpus
 // — --data/ensureData would imply a dependency this command doesn't have.
 type FloorCmd struct {
 	Root     string `help:"Transcript root (dir of ~/.claude/projects layout)." name:"root"`
@@ -132,7 +132,7 @@ func writeFloorText(w io.Writer, rep floor.Report, limit, maxBytes int) error {
 
 	about(sink,
 		"≡ floor: the fixed cost every session pays before dk's first real turn — the",
-		"≡ SessionStart hook render (⭐ banner + itzy context) and the deferred-tool/",
+		"≡ SessionStart hook render (⭐ banner) and the deferred-tool/",
 		"≡ agent/mcp/skill roster the harness injects once at open. Rule files",
 		"≡ (~/.claude/rules/**, .claude/rules/**) never appear as their own line in any",
 		"≡ transcript — CC folds them into the system prompt — so they're read straight",
@@ -161,9 +161,9 @@ func writeFloorText(w io.Writer, rep floor.Report, limit, maxBytes int) error {
 
 	sink.Head("sessions ranked by floor share (worst first):")
 	for _, s := range sessions {
-		if !sink.Row("  %5.1f%%  floor=%-8s turn=%-8s total=%-8s  hook=%-7s itzy=%-6s roster=%-7s  %s",
+		if !sink.Row("  %5.1f%%  floor=%-8s turn=%-8s total=%-8s  hook=%-7s roster=%-7s  %s",
 			s.Share(ruleBytes)*100, humanBytes(s.FloorBytes(ruleBytes)), humanBytes(s.TurnBytes()), humanBytes(s.TranscriptBytes+ruleBytes),
-			humanBytes(s.Cat.HookBytes), humanBytes(s.Cat.ItzyBytes), humanBytes(s.Cat.RosterBytes), shortSession(s.Session)) {
+			humanBytes(s.Cat.HookBytes), humanBytes(s.Cat.RosterBytes), shortSession(s.Session)) {
 			break
 		}
 	}

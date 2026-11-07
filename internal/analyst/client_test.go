@@ -37,7 +37,7 @@ func TestCompleteRespectsOperatorTimeout(t *testing.T) {
 	cfg := Config{APIKey: "sk-test", Timeout: 50 * time.Millisecond, HTTPClient: hangingDoer{}}
 
 	start := time.Now()
-	_, _, _, err := complete(t.Context(), cfg, "system", "user")
+	_, _, err := complete(t.Context(), cfg, "system", "user")
 	elapsed := time.Since(start)
 
 	if err == nil {
@@ -61,7 +61,7 @@ func TestCompleteCancelsOnContextCancel(t *testing.T) {
 	}()
 
 	start := time.Now()
-	_, _, _, err := complete(ctx, cfg, "system", "user")
+	_, _, err := complete(ctx, cfg, "system", "user")
 	if err == nil {
 		t.Fatal("complete() err = nil; want a cancellation error")
 	}

@@ -134,7 +134,7 @@ func (c Config) model() string {
 // not needed, so thinking display stays at the default.
 func Run(ctx context.Context, cfg Config, session, spine string) (Result, error) {
 	system, user := BuildPrompt(spine)
-	model, text, _, err := complete(ctx, cfg, system, user)
+	model, text, err := complete(ctx, cfg, system, user)
 	if err != nil {
 		return Result{}, err
 	}
@@ -156,23 +156,23 @@ func usageFrom(u anthropic.Usage) Usage {
 }
 
 // complete sends one (system, user) turn to Claude with adaptive thinking and
-// returns the responding model id, the concatenated text content, and the call's
-// token usage. The shared transport for every analyst mode (adjudicate, propose,
-// relevance, coverage) — the modes differ only in prompt assembly and response
-// parsing, not in how the model is called.
-func complete(ctx context.Context, cfg Config, system, user string) (model, text string, usage Usage, err error) {
+// returns the responding model id and the concatenated text content. The shared
+// transport for every analyst mode (adjudicate, propose, over-initiative) — the modes
+// differ only in prompt assembly and response parsing, not in how the model is
+// called.
+func complete(ctx context.Context, cfg Config, system, user string) (model, text string, err error) {
 	// Offline first: refuse before resolving a credential, so the kill-switch
 	// works identically on a machine that has a key and one that does not
 	// (ferret-wvo).
 	if cfg.offline() {
-		return "", "", Usage{}, ErrOffline
+		return "", "", ErrOffline
 	}
 	key, err := resolveKey(cfg)
 	if err != nil {
-		return "", "", Usage{}, err
+		return "", "", err
 	}
 	if key == "" {
-		return "", "", Usage{}, ErrNoAPIKey
+		return "", "", ErrNoAPIKey
 	}
 	// Operator deadline: bound the whole call (all retries) so a wedged/throttled
 	// API can't busy the CLI for ~30min with no settable ceiling (ferret-c71).
@@ -208,13 +208,13 @@ func complete(ctx context.Context, cfg Config, system, user string) (model, text
 		},
 	})
 	if err != nil {
-		return "", "", Usage{}, fmt.Errorf("analyst: messages call failed: %w", err)
+		return "", "", fmt.Errorf("analyst: messages call failed: %w", err)
 	}
 
 	// max_tokens is the authoritative truncation signal — the response is
 	// well-formed-but-incomplete and parsing it would fail with a bare decode
 	// error. Surface the typed error here, before parsing, so every mode
-	// (adjudicate, propose, relevance, coverage) reports the paid call hit the
+	// (adjudicate, propose, over-initiative) reports the paid call hit the
 	// %d-token cap rather than silently discarding it as malformed (ferret-e6s).
 	if resp.StopReason == anthropic.StopReasonMaxTokens {
 		// A truncated response was still billed, so it still gets a footer —
@@ -224,7 +224,7 @@ func complete(ctx context.Context, cfg Config, system, user string) (model, text
 			usd, priced := CostUSD(resp.Model, tu)
 			cfg.Reporter.Complete(resp.Model, tu, usd, priced)
 		}
-		return "", "", tu, fmt.Errorf("%w (cap=%d)", ErrTruncatedResponse, maxTokens)
+		return "", "", fmt.Errorf("%w (cap=%d)", ErrTruncatedResponse, maxTokens)
 	}
 
 	// Thinking blocks precede the text block; collect the text content.
@@ -241,5 +241,5 @@ func complete(ctx context.Context, cfg Config, system, user string) (model, text
 		usd, priced := CostUSD(resp.Model, u)
 		cfg.Reporter.Complete(resp.Model, u, usd, priced)
 	}
-	return resp.Model, b.String(), u, nil
+	return resp.Model, b.String(), nil
 }

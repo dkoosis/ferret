@@ -1,15 +1,13 @@
 // Package candidate defines ferret's candidate record — the frozen row shape
-// ferret emits to the JSONL spool the trixi-bot distiller consumes (sensor→kg
-// v1, epic gg-eqn). ferret is the PRODUCER side of a versioned contract:
-// schema_version rides every row and the consumer loudly rejects a mismatch, so
-// any shape change here is breaking and must bump SchemaVersion. This is the
-// mirror image of internal/retrievalevent, where ferret is the consumer; here
-// ferret produces and trixi-bot consumes.
+// ferret emits to the JSONL spool (sensor→kg v1, epic gg-eqn). No consumer
+// reads the spool today. ferret is the PRODUCER side of a versioned contract:
+// schema_version rides every row and a consumer should reject a mismatch, so
+// any shape change here is breaking and must bump SchemaVersion.
 //
 // LLM-free invariant: a candidate carries statistical SIGNALS about a transcript
 // span (novelty, recurrence, a content fingerprint) plus a pointer to the span —
 // never any claim text. ferret proposes WHERE a fact might live, never WHAT it
-// is; the LLM proposer and judge live downstream in trixi-bot. The struct has no
+// is; any LLM proposer or judge belongs downstream. The struct has no
 // field for claim text by construction, so a caller cannot violate the invariant.
 package candidate
 
@@ -21,7 +19,7 @@ import (
 )
 
 // SchemaVersion is the candidate row schema this producer emits. It rides every
-// row (Candidate.SchemaVersion) and the trixi-bot consumer rejects any row whose
+// row (Candidate.SchemaVersion) and a consumer should reject any row whose
 // value differs — a shape change that isn't version-bumped must break the join
 // loudly, not compute silently-wrong numbers. Bump on any field change.
 const SchemaVersion = 1
@@ -32,8 +30,9 @@ const Sensor = "ferret"
 
 // AgentParent is the agent label for a main-thread (non-subagent) transcript.
 // ferret's event model uses "" for the main thread; the contract row spells it
-// "parent" (matching internal/retrievalevent.AgentTypeParent) so a consumer
-// never has to special-case the empty string.
+// "parent" so a consumer never has to
+//
+//	special-case the empty string.
 const AgentParent = "parent"
 
 // idPrefix namespaces the candidate id ("fc-" = ferret candidate) so an id is
@@ -51,7 +50,7 @@ const fingerprintAlgo = "sha256:"
 
 // Candidate is one emitted spool row: a pointer to a salient transcript span
 // plus the deterministic signals that surfaced it. JSON keys are the frozen
-// contract (spec: sensor-to-kg-v1.md §Spool schema); the trixi-bot consumer
+// contract (spec: sensor-to-kg-v1.md §Spool schema); a consumer
 // decodes exactly these fields.
 type Candidate struct {
 	SchemaVersion int     `json:"schema_version"`

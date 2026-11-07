@@ -141,8 +141,8 @@ func TestMineMisfires_FallsBackToKeyLevelPair_When_EventsCarryNoDetailText(t *te
 	// Tool events set no Detail (only shell events carry raw command text —
 	// see internal/event/build.go fromToolUse). The repair pair still fires,
 	// collapsed to key-level per the bead's v1 fallback allowance.
-	failedEv := event.Event{Session: "s1", Kind: event.KindTool, Action: "mcp__trixi__get_nug", Target: "abc", Status: event.StatusFail}
-	fixedEv := event.Event{Session: "s1", Kind: event.KindTool, Action: "mcp__trixi__get_nug", Target: "abc", Status: event.StatusOK, Retry: true}
+	failedEv := event.Event{Session: "s1", Kind: event.KindTool, Action: "mcp__notes__get_note", Target: "abc", Status: event.StatusFail}
+	fixedEv := event.Event{Session: "s1", Kind: event.KindTool, Action: "mcp__notes__get_note", Target: "abc", Status: event.StatusOK, Retry: true}
 
 	rep := MineMisfires([]event.Event{failedEv, fixedEv})
 	if len(rep.Repairs) != 1 {
@@ -152,7 +152,7 @@ func TestMineMisfires_FallsBackToKeyLevelPair_When_EventsCarryNoDetailText(t *te
 	if p.FailedRaw != "" || p.FixedRaw != "" {
 		t.Errorf("pair = %+v, want empty raw forms (no Detail on tool events)", p)
 	}
-	if p.Key != "mcp__trixi__get_nug" || p.Count != 1 {
+	if p.Key != "mcp__notes__get_note" || p.Count != 1 {
 		t.Errorf("pair = %+v, want key-level count of 1", p)
 	}
 }

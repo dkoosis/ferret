@@ -24,7 +24,7 @@ func TestTerminalAction(t *testing.T) {
 		{"merge fires", []string{"sh:git_merge"}, "sh:git_merge", true},
 		{"read-only vcs does not fire", []string{"sh:git_status", "sh:git_diff"}, "", false},
 		{"non-vcs shell does not fire", []string{"sh:go_test", "sh:rg"}, "", false},
-		{"tool tokens ignored", []string{"Read", "Edit", "mcp:trixi.set_nug"}, "", false},
+		{"tool tokens ignored", []string{"Read", "Edit", "mcp:notes.set_note"}, "", false},
 		{"empty shape", nil, "", false},
 		{"last terminal action wins", []string{"sh:git_commit", "Edit", "sh:git_push"}, "sh:git_push", true},
 		{"read-only between mutations still last-mutation", []string{"sh:git_commit", "sh:git_status"}, "sh:git_commit", true},

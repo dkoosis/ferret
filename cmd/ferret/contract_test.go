@@ -30,9 +30,9 @@ func TestExitCodeFor_SeparatesUsageFromFailure_When_ErrorIsValidation(t *testing
 		errBadFormat, errBadKind, errBadSource, errMaxBytesJSON, errMaxBytesMD,
 		errMinSupport, errMaxGap, errMaxLen, errOrder,
 		errBadBy, errBadRange, errEmitWindow,
-		errBadSince, errBadUntil, errReachWindow,
-		errAdjSessionRequired, errSpineSessionRequired, errFeedbackSessionRequired,
-		errFeedbackSearchEventRequired, errFixMotifRequired, errOverInitSessionRequired,
+		errBadSince, errBadUntil, errWindowOrder,
+		errAdjSessionRequired, errSpineSessionRequired,
+		errFixMotifRequired, errOverInitSessionRequired,
 	}
 	for _, err := range sentinels {
 		if got := exitCodeFor(err); got != exitUsage {

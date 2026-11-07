@@ -48,7 +48,7 @@ var terminalVCS = map[string]bool{
 // tracked artifact instead of a commit (mint a bead, close a bead) and that IS a
 // shipped signal in dk's workflow, same shape as a commit/push. Normalized forms
 // are shellnorm's base_subcommand ("bd create" -> "bd_create"), confirmed against
-// internal/reach/reach_test.go's bd_update fixture.
+// shellnorm's output.
 //
 // bd_update is deliberately EXCLUDED: it fires on every status flip (in_progress,
 // blocked, priority, comment) — chatty, not terminal, too weak a tell even for
