@@ -59,7 +59,7 @@ type ObsCall struct {
 	Call  int    `json:"call"`
 	Tool  string `json:"tool"`
 	Step  string `json:"step,omitempty"`
-	Noise bool   `json:"noise,omitempty"`
+	Noise bool   `json:"noise,omitempty"` //nolint:omitemptyscalar // absent means the step is not noise; consumers read missing as false
 }
 
 // Move is one step of the alignment. Step is set for sync/model moves (the

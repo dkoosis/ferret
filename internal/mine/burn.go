@@ -43,7 +43,7 @@ type BurnRow struct {
 	// tool/shell row: those have no comparable content-only figure to disclose
 	// against. This is disclosure, not re-accounting: Bytes is unchanged either
 	// way (ferret-wmb Rules — the fix is not a per-class content allowlist).
-	Overcount bool `json:"overcount,omitempty"`
+	Overcount bool `json:"overcount,omitempty"` //nolint:omitemptyscalar // disclosure flag: absent means not overcounted; readers treat missing as false
 
 	// VisibleTokens is an at:* row's model-visible tokens: the visible bytes
 	// ingest priced from the ferret-z35 capture (event.Event.VisibleBytes)

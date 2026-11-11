@@ -159,7 +159,7 @@ func cmdReport() error {
 			OddsRatio    *float64 `json:"oddsRatio,omitempty"`
 			OddsRatioN   int      `json:"oddsRatioN,omitempty"`
 			Evidence     string   `json:"evidence"`
-			Fixed        bool     `json:"fixed,omitempty"`
+			Fixed        bool     `json:"fixed,omitempty"` //nolint:omitemptyscalar // absent means not fixed; consumers read missing as false
 			Fix          string   `json:"fix,omitempty"`
 			FixedAt      string   `json:"fixedAt,omitempty"`
 			BaselineBurn int      `json:"baselineBurn,omitempty"`
