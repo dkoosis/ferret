@@ -192,7 +192,7 @@ func Load(path string) ([]Entry, error) {
 		return []Entry{}, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open file: %w", err)
 	}
 	defer f.Close()
 
@@ -229,7 +229,7 @@ func parseLedger(path string, lines []string) ([]Entry, error) {
 // before returning so a recorded fix is not lost to a crash.
 func Append(path string, e Entry) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+		return fmt.Errorf("create directory: %w", err)
 	}
 	// Serialize concurrent appends so two over-threshold writes can't interleave
 	// into one torn ledger line (ferret-isz). lockLedger also creates the dir.

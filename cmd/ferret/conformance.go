@@ -170,7 +170,10 @@ func writeConformanceText(w io.Writer, spec conformSpec, res conform.Result) err
 			"⚠ invoked != served: precision %.2f — most calls served no planned step "+
 				"(reference too loose, or task drifted off-plan)\n", res.Precision)
 	}
-	return bw.Flush()
+	if err := bw.Flush(); err != nil {
+		return fmt.Errorf("flush output: %w", err)
+	}
+	return nil
 }
 
 // obsLabel renders a move's observed phase as "call N Tool" (or "call N (K

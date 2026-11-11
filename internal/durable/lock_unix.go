@@ -9,6 +9,7 @@ package durable
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -24,17 +25,17 @@ import (
 // guarded file itself.
 func Lock(lockPath string) (release func(), err error) {
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create directory: %w", err)
 	}
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open file: %w", err)
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
 		return nil, errors.Join(err, f.Close())
 	}
 	return func() {
 		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:errcheck // best-effort unlock; closing the descriptor next releases the lock anyway
-		_ = f.Close()                                   //nolint:errcheck // best-effort close of a lock file we only flock
+		_ = f.Close()
 	}, nil
 }

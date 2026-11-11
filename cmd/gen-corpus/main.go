@@ -42,7 +42,7 @@ func run(out, project string, sessions int, seed int64) error {
 	rng := rand.New(rand.NewSource(seed)) //nolint:gosec // determinism is the point, not security
 	projDir := filepath.Join(out, project)
 	if err := os.MkdirAll(projDir, 0o755); err != nil {
-		return err
+		return fmt.Errorf("create directory: %w", err)
 	}
 
 	// Weighted archetype mix: routines dominate (so n-grams rank them),
@@ -138,7 +138,7 @@ func (g *gen) flush() error {
 	if len(g.subLines) > 0 {
 		dir := filepath.Join(g.projDir, g.session, "subagents")
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
+			return fmt.Errorf("create directory: %w", err)
 		}
 		sub := strings.Join(g.subLines, "\n") + "\n"
 		if err := writeAtomic(filepath.Join(dir, "agent-"+g.subAgent+".jsonl"), []byte(sub)); err != nil {
@@ -159,7 +159,7 @@ func writeAtomic(path string, data []byte) error {
 	const perm os.FileMode = 0o600
 	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
 	if err != nil {
-		return err
+		return fmt.Errorf("create temp file: %w", err)
 	}
 	tmp := f.Name()
 	// Until the rename lands, any return is a failure: drop the temp file
@@ -172,19 +172,19 @@ func writeAtomic(path string, data []byte) error {
 		}
 	}()
 	if _, e := f.Write(data); e != nil {
-		return e
+		return fmt.Errorf("write temp file: %w", e)
 	}
 	if e := f.Chmod(perm); e != nil {
-		return e
+		return fmt.Errorf("chmod temp file: %w", e)
 	}
 	if e := f.Sync(); e != nil {
-		return e
+		return fmt.Errorf("sync temp file: %w", e)
 	}
 	if e := f.Close(); e != nil {
-		return e
+		return fmt.Errorf("close temp file: %w", e)
 	}
 	if e := renameFile(tmp, path); e != nil {
-		return e
+		return fmt.Errorf("rename temp file: %w", e)
 	}
 	renamed = true
 	// fsync the parent dir so the rename itself survives a crash/power-loss —

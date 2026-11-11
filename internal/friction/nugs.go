@@ -66,10 +66,18 @@ func ReadFrictionNugs(root string) ([]Nug, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("walk directory: %w", err)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, nil
+}
+
+// scanErr wraps a scanner error with context; nil stays nil.
+func scanErr(err error) error {
+	if err != nil {
+		return fmt.Errorf("scan nug: %w", err)
+	}
+	return nil
 }
 
 // readNug parses one markdown file. ok is false when the file is not a friction
@@ -77,7 +85,7 @@ func ReadFrictionNugs(root string) ([]Nug, error) {
 func readNug(path string) (n Nug, ok bool, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return Nug{}, false, err
+		return Nug{}, false, fmt.Errorf("open file: %w", err)
 	}
 	defer f.Close()
 
@@ -106,7 +114,7 @@ func readNug(path string) (n Nug, ok bool, err error) {
 		}
 	}
 	if !closed || kind != NugKind {
-		return Nug{}, false, sc.Err()
+		return Nug{}, false, scanErr(sc.Err())
 	}
 	var body strings.Builder
 	for sc.Scan() {

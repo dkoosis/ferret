@@ -23,6 +23,7 @@ package floor
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -174,7 +175,7 @@ func RuleFiles(globs ...string) (files, totalBytes int, err error) {
 		}
 		matches, gerr := filepath.Glob(g)
 		if gerr != nil {
-			return files, totalBytes, gerr
+			return files, totalBytes, fmt.Errorf("glob files: %w", gerr)
 		}
 		for _, m := range matches {
 			fi, serr := os.Stat(m)

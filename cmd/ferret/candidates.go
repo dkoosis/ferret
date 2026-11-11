@@ -298,7 +298,10 @@ func candidates(p sessionRun, top int, conformancePath string) error {
 func writeCandidatesJSON(w io.Writer, res candResult) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(res)
+	if err := enc.Encode(res); err != nil {
+		return fmt.Errorf("encode output: %w", err)
+	}
+	return nil
 }
 
 // writeCandidatesText emits the human/analyst-readable ranking.
@@ -346,5 +349,8 @@ func writeCandidatesText(w io.Writer, res candResult) error {
 	if len(res.Candidates) > 0 {
 		out.Next(bw, fmt.Sprintf("ferret adjudicate --session %s --propose", res.Session))
 	}
-	return bw.Flush()
+	if err := bw.Flush(); err != nil {
+		return fmt.Errorf("flush output: %w", err)
+	}
+	return nil
 }

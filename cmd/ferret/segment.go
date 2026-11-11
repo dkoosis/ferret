@@ -86,7 +86,10 @@ func segments(p sessionRun) error {
 func writeSegmentsJSON(w io.Writer, res score.Result) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(res)
+	if err := enc.Encode(res); err != nil {
+		return fmt.Errorf("encode output: %w", err)
+	}
+	return nil
 }
 
 // writeSegmentsText emits the human-readable spine-style rendering.
@@ -138,7 +141,10 @@ func writeSegmentsText(w io.Writer, res score.Result) error {
 		fmt.Fprintf(bw, " decode-errs=%d", res.DecodeErrs)
 	}
 	fmt.Fprintln(bw)
-	return bw.Flush()
+	if err := bw.Flush(); err != nil {
+		return fmt.Errorf("flush output: %w", err)
+	}
+	return nil
 }
 
 // outcomeNote renders the WEAK terminal-action success flag (kuv.8) as a trailing

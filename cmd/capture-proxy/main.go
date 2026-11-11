@@ -81,10 +81,13 @@ func main() {
 func saveBody(root *os.Root, n int64, r *http.Request) error {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		return err
+		return fmt.Errorf("read input: %w", err)
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	name := fmt.Sprintf("%04d-%s_%s.json", n, time.Now().UTC().Format("150405.000"),
 		strings.ReplaceAll(strings.Trim(r.URL.Path, "/"), "/", "_"))
-	return root.WriteFile(name, body, 0o600)
+	if err := root.WriteFile(name, body, 0o600); err != nil {
+		return fmt.Errorf("write request body: %w", err)
+	}
+	return nil
 }

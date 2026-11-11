@@ -422,7 +422,7 @@ func (cur *emitCursor) mark(observed map[string]string) {
 func saveEmitCursor(path string, cur *emitCursor) error {
 	b, err := json.Marshal(cur)
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal json: %w", err)
 	}
 	if err := durable.WriteTempRename(path, b); err != nil {
 		return err

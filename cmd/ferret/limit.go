@@ -27,7 +27,7 @@ type Limit int
 func (l *Limit) Decode(ctx *kong.DecodeContext) error {
 	var raw string
 	if err := ctx.Scan.PopValueInto("limit", &raw); err != nil {
-		return err
+		return fmt.Errorf("read limit value: %w", err)
 	}
 	v, err := parseLimit(raw)
 	if err != nil {

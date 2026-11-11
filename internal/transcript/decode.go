@@ -3,6 +3,7 @@ package transcript
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 )
@@ -82,14 +83,14 @@ func (b *Blocks) UnmarshalJSON(data []byte) error {
 	if len(data) > 0 && data[0] == '"' {
 		var s string
 		if err := json.Unmarshal(data, &s); err != nil {
-			return err
+			return fmt.Errorf("decode json: %w", err)
 		}
 		*b = Blocks{{Type: "text", Text: s}}
 		return nil
 	}
 	var a []Block
 	if err := json.Unmarshal(data, &a); err != nil {
-		return err
+		return fmt.Errorf("decode json: %w", err)
 	}
 	*b = Blocks(a)
 	return nil
@@ -113,7 +114,7 @@ type Block struct {
 func ReadLines(path string, fn func(line []byte) error) error {
 	f, err := os.Open(path)
 	if err != nil {
-		return err
+		return fmt.Errorf("open file: %w", err)
 	}
 	defer f.Close()
 	r := bufio.NewReaderSize(f, 1<<20)
@@ -128,7 +129,7 @@ func ReadLines(path string, fn func(line []byte) error) error {
 			return nil
 		}
 		if err != nil {
-			return err
+			return fmt.Errorf("read transcript line: %w", err)
 		}
 	}
 }

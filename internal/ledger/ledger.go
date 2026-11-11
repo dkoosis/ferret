@@ -26,6 +26,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -51,7 +52,7 @@ func ReadLines(f *os.File) ([]string, error) {
 			if errors.Is(rerr, io.EOF) {
 				return lines, nil // the final unterminated line was captured above
 			}
-			return nil, rerr
+			return nil, fmt.Errorf("read ledger: %w", rerr)
 		}
 	}
 }
@@ -64,11 +65,11 @@ func ReadLines(f *os.File) ([]string, error) {
 // with the caller.
 func AppendJSON[T any](path string, v T) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+		return fmt.Errorf("create directory: %w", err)
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		return err
+		return fmt.Errorf("open file: %w", err)
 	}
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -81,5 +82,8 @@ func AppendJSON[T any](path string, v T) error {
 	if err := f.Sync(); err != nil {
 		return errors.Join(err, f.Close())
 	}
-	return f.Close()
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close ledger: %w", err)
+	}
+	return nil
 }

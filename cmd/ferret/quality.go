@@ -218,7 +218,10 @@ func writeQualitySessionText(w io.Writer, res score.Result) error {
 
 	fmt.Fprintf(bw, "--- tasks=%d calls=%d cost=%s\n",
 		boundaryCount(res), res.TotalCalls, humanBytes(res.TotalIn+res.TotalOut))
-	return bw.Flush()
+	if err := bw.Flush(); err != nil {
+		return fmt.Errorf("flush output: %w", err)
+	}
+	return nil
 }
 
 // writeQualitySessionJSON emits the per-task axes (the contract).
@@ -267,7 +270,10 @@ func writeQualityCorpusText(w io.Writer, root string, sessions, tasks int, clust
 
 	fmt.Fprintf(bw, "--- recurring-shapes=%d single-attempt=%d sessions=%d tasks=%d\n",
 		len(multi), singletons, sessions, tasks)
-	return bw.Flush()
+	if err := bw.Flush(); err != nil {
+		return fmt.Errorf("flush output: %w", err)
+	}
+	return nil
 }
 
 // writeQualityCorpusJSON emits the consistency clusters (the contract). Only the
