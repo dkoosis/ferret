@@ -17,6 +17,7 @@ linters:
   enable:
     # Error handling
     - err113
+    - wrapcheck
     - errchkjson
     - errorlint
     - nilerr
@@ -49,7 +50,9 @@ linters:
     # Style & correctness
     - asciicheck
     - copyloopvar
+    - dupl
     - dupword
+    - godoclint
     - durationcheck
     - errname
     - exptostd
@@ -74,6 +77,7 @@ linters:
     - sloglint
     - staticcheck    # baseline floor: a golangci default, named explicitly
     - unconvert
+    - unqueryvet
     - unparam
     - usestdlibvars
     - wastedassign
@@ -98,6 +102,9 @@ linters:
       # repair/accept and defaults the neutral + reserved-v2 cases).
       default-signifies-exhaustive: true
     errcheck:
+      # Blank discards fail too; a deliberate one names itself with //nolint:errcheck // reason.
+      # Test files are exempt (exclusion below).
+      check-blank: true
       exclude-functions:
         - (io.Closer).Close
         - (*os.File).Close
@@ -107,6 +114,12 @@ linters:
         - fmt.Println
         - fmt.Fprint
         - fmt.Fprintln
+    wrapcheck:
+      # The module's own packages already add context to the errors they return,
+      # so re-wrapping at each internal call site would only double-prefix.
+      # Errors from outside the module still must be wrapped.
+      ignore-package-globs:
+        - github.com/dkoosis/ferret/*
     goconst:
       min-len: 4
       min-occurrences: 5
@@ -118,7 +131,7 @@ linters:
       # bugclasses pack (ccp-sbp, decision nug d7ea466a8172): the ruleguard
       # checker runs the shared machine rules for the recurring cross-repo Go
       # defect classes. Rules live in .golangci-rules/bugclasses.go — a verbatim
-      # copy of the upstream pack, drift-guarded by scripts/check-pack-drift.sh.
+      # copy of the upstream pack, drift-guarded by repo-standard's lint-pack rule.
       enabled-checks:
         - ruleguard
       settings:
@@ -197,6 +210,12 @@ linters:
       - legacy
       - std-error-handling
     rules:
+      # check-blank applies to non-test code only (lintbrush baseline).
+      - path: _test\.go$
+        linters:
+          - errcheck
+        text: Error return value
+        source: '(^|[^A-Za-z0-9_.])_\s*(,\s*[A-Za-z0-9_]+\s*)*(:=|=[^=])|,\s*_\s*(:=|=[^=])'
       # Test files: relax security, complexity, and context requirements
       - linters:
           - gosec
@@ -210,6 +229,8 @@ linters:
         path: _test\.go
       - linters:
           - noctx
+          - dupl
+          - wrapcheck
         path: _test\.go
       - linters:
           - unparam

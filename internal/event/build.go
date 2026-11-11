@@ -120,7 +120,7 @@ func (b *Builder) consumeLine(src transcript.Source, st *fileState, line []byte)
 	if b.isDuplicate(raw.UUID) {
 		return
 	}
-	ts, _ := time.Parse(time.RFC3339, raw.Timestamp)
+	ts, _ := time.Parse(time.RFC3339, raw.Timestamp) //nolint:errcheck // a missing or malformed timestamp stays the zero time
 	if probe.Type == "attachment" {
 		b.attachmentLine(src, st, &raw, ts)
 		return
@@ -202,7 +202,7 @@ type attachContent struct {
 // and a PostToolUse hook_success with the same shape reached none.
 func attachFields(payload []byte) (contentBytes int, hookEvent string) {
 	var c attachContent
-	_ = json.Unmarshal(payload, &c) // best-effort; absence/mismatch just reads ""
+	_ = json.Unmarshal(payload, &c) //nolint:errcheck // best-effort; absence/mismatch just reads ""
 	return len(c.Content), c.HookEvent
 }
 
@@ -503,7 +503,7 @@ func (b *Builder) fromToolUse(src transcript.Source, raw *transcript.Raw, blk *t
 		Version: raw.Version,
 	}
 	var input map[string]any
-	_ = json.Unmarshal(blk.Input, &input)
+	_ = json.Unmarshal(blk.Input, &input) //nolint:errcheck // best-effort; a malformed tool input leaves input empty
 
 	if blk.Name == "Bash" {
 		base.ToolUseID = blk.ID // every segment of this call shares it (ferret-2mf)

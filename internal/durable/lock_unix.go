@@ -4,6 +4,7 @@
 // Windows. ferret is a unix-only personal tool; this build tag makes that
 // explicit so a non-unix build fails loudly here rather than silently shipping
 // unguarded concurrent writes.
+
 package durable
 
 import (
@@ -33,7 +34,7 @@ func Lock(lockPath string) (release func(), err error) {
 		return nil, errors.Join(err, f.Close())
 	}
 	return func() {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-		_ = f.Close()
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:errcheck // best-effort unlock; closing the descriptor next releases the lock anyway
+		_ = f.Close()                                   //nolint:errcheck // best-effort close of a lock file we only flock
 	}, nil
 }

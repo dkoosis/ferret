@@ -638,7 +638,8 @@ func main() {
 // command-line validation sentinels are usage errors, everything else is a
 // failed run.
 func exitCodeFor(err error) int {
-	if _, ok := errors.AsType[*usageError](err); ok {
+	var ue *usageError
+	if errors.As(err, &ue) {
 		return exitUsage
 	}
 	return exitFailure
