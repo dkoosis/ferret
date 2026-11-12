@@ -40,7 +40,7 @@ func TestFlushRollsBackOnSubagentFailure(t *testing.T) {
 
 	// The acceptance criterion: no orphaned session .jsonl remains in projDir.
 	sessionFile := filepath.Join(projDir, session+".jsonl")
-	if _, err := os.Stat(sessionFile); !os.IsNotExist(err) {
+	if _, err := os.Stat(sessionFile); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("orphaned session file present: stat err = %v, want IsNotExist", err)
 	}
 }
@@ -94,7 +94,7 @@ func TestFlushNoSubagentWritesSessionOnly(t *testing.T) {
 	if _, err := os.Stat(sessionFile); err != nil {
 		t.Fatalf("session file missing: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(projDir, session)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(projDir, session)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("unexpected session dir created: stat err = %v, want IsNotExist", err)
 	}
 }

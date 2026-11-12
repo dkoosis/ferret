@@ -214,7 +214,7 @@ func TestWriteManifestAtomic(t *testing.T) {
 	}
 
 	// No dangling temp file after a successful publish.
-	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+	if _, err := os.Stat(path + ".tmp"); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("expected manifest .tmp cleaned up, stat err=%v", err)
 	}
 }

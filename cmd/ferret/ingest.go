@@ -185,7 +185,7 @@ func ingest(dataDir, root, project, snipeUsageGlob string, dryRun bool) error {
 		// Removing it first means any mid-publish failure reads as "no corpus",
 		// which ensureData repairs by re-ingesting.
 		manifestPath := filepath.Join(dataDir, "manifest.json")
-		if rerr := os.Remove(manifestPath); rerr != nil && !os.IsNotExist(rerr) {
+		if rerr := os.Remove(manifestPath); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
 			w.Abort()
 			return fmt.Errorf("remove file: %w", rerr)
 		}

@@ -12,7 +12,7 @@ type Event struct {
 	Project   string    `json:"p"`
 	Session   string    `json:"s"`
 	Agent     string    `json:"a,omitempty"`  // subagent id; "" = main thread
-	Sidechain bool      `json:"sc,omitempty"` //nolint:omitemptyscalar // compact event format: absent reads as false on decode
+	Sidechain bool      `json:"sc,omitempty"` //omitemptyscalar:ignore compact event format: absent reads as false on decode
 	Kind      string    `json:"k"`            // tool | shell | prompt
 	// ToolUseID is the id of the Bash call a shell event came from (ferret-2mf):
 	// the same on every segment of one compound or pipe, so a consumer can count
@@ -32,8 +32,8 @@ type Event struct {
 	// serialized: what it records is fully carried by Status itself.
 	unmeasured bool
 	DurMS      int64 `json:"ms,omitempty"` // tool_use → tool_result latency
-	Retry      bool  `json:"rt,omitempty"` // same action+target shortly after a failure //nolint:omitemptyscalar // compact event format: absent reads as false on decode
-	Compound   bool  `json:"cp,omitempty"` // segment of a split compound bash chain //nolint:omitemptyscalar // compact event format: absent reads as false on decode
+	Retry      bool  `json:"rt,omitempty"` // same action+target shortly after a failure //omitemptyscalar:ignore compact event format: absent reads as false on decode
+	Compound   bool  `json:"cp,omitempty"` // segment of a split compound bash chain //omitemptyscalar:ignore compact event format: absent reads as false on decode
 	// Swallow marks a shell segment in the left arm of `cmd 2>/dev/null ||
 	// fallback` (ferret-cax) — a failure that is structurally invisible to
 	// Status, because the error text is discarded and the chain exits with the
@@ -42,12 +42,12 @@ type Event struct {
 	// shellnorm.Split has already dissolved the `||` by the time Detail is
 	// written, so the two halves land in separate events and no downstream pass
 	// can put them back together. Set from Segment.Swallowed.
-	Swallow bool `json:"sw,omitempty"` //nolint:omitemptyscalar // compact event format: absent reads as false on decode
+	Swallow bool `json:"sw,omitempty"` //omitemptyscalar:ignore compact event format: absent reads as false on decode
 	// Pipe marks a shell segment that came from a pipeline (`a | b`) — info
 	// shellnorm.Split's pipe collapse dissolves by the time Detail is written
 	// (same one-way loss Swallow exists to capture), so it must be captured
 	// here, at ingest. Set from Segment.Piped (ferret-cax item 3).
-	Pipe bool `json:"pi,omitempty"` //nolint:omitemptyscalar // compact event format: absent reads as false on decode
+	Pipe bool `json:"pi,omitempty"` //omitemptyscalar:ignore compact event format: absent reads as false on decode
 	// Flags is a shell segment's option NAMES, values stripped — the cmd lens's
 	// token material, set from Segment.Flags (ferret-dep).
 	//
@@ -63,8 +63,8 @@ type Event struct {
 	// a session's working directory out from under an in-flight sequence of
 	// relative-path commands. Set in resolve() on a raw-content string match,
 	// gated to a trailing KindShell segment the same way Approx is attributed.
-	CwdReset bool `json:"cw,omitempty"` //nolint:omitemptyscalar // compact event format: absent reads as false on decode
-	Approx   bool `json:"ax,omitempty"` // tool served via fuzzy/semantic fallback (snipe ~approx marker in tool_result); silence = exact match //nolint:omitemptyscalar // compact event format: absent reads as false on decode
+	CwdReset bool `json:"cw,omitempty"` //omitemptyscalar:ignore compact event format: absent reads as false on decode
+	Approx   bool `json:"ax,omitempty"` // tool served via fuzzy/semantic fallback (snipe ~approx marker in tool_result); silence = exact match //omitemptyscalar:ignore compact event format: absent reads as false on decode
 	// Rung/CandidateCount/TriedRungs/IndexState come from a session+ts-joined
 	// .snipe/usage.jsonl row (sn-r1do.2, internal/snipeusage). Empty Rung means
 	// unjoined — either no usage.jsonl was loaded for this ingest run, or this
@@ -108,7 +108,7 @@ type Event struct {
 	// VisibleBytes == 0 means "unknown", not "hidden". Target carries the hook
 	// event, which the table is keyed by.
 	VisibleBytes int    `json:"vb,omitempty"`
-	Calibrated   bool   `json:"cal,omitempty"` //nolint:omitemptyscalar // compact event format: absent reads as false on decode
+	Calibrated   bool   `json:"cal,omitempty"` //omitemptyscalar:ignore compact event format: absent reads as false on decode
 	Skill        string `json:"skill,omitempty"`
 	Plugin       string `json:"plug,omitempty"`
 	MCP          string `json:"mcp,omitempty"`

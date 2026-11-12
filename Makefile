@@ -95,7 +95,7 @@ vuln: ## Scan for known vulnerabilities (govulncheck, pinned)
 	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VER) ./...
 
 dupe: ## Check for code duplication (jscpd, pinned)
-	TMP_JSCPD=$$(mktemp -d); npx --yes jscpd@$(JSCPD_VER) . --ignore "**/.git/**,**/.sandbox/**,**/.beads/**" --output $$TMP_JSCPD; rm -rf "$$TMP_JSCPD"
+	TMP_JSCPD=$$(mktemp -d); npx --yes jscpd@$(JSCPD_VER) . --threshold 3 --ignore "**/.git/**,**/.sandbox/**,**/.beads/**" --output $$TMP_JSCPD; rm -rf "$$TMP_JSCPD"
 
 nilcheck: ## Run nilaway (pinned)
 	go run go.uber.org/nilaway/cmd/nilaway@$(NILAWAY_VER) -include-pkgs=github.com/dkoosis/ferret ./...
