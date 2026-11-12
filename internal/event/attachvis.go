@@ -3,6 +3,7 @@ package event
 import (
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -86,7 +87,7 @@ func mustVisibility(b []byte) visibilityTable {
 func parseVisibility(b []byte) (visibilityTable, error) {
 	var av AttachVisibility
 	if err := json.Unmarshal(b, &av); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode json: %w", err)
 	}
 	return tableOf(av.Subkeys), nil
 }

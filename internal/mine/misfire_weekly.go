@@ -74,7 +74,7 @@ func weekRange(times []time.Time) []string {
 type WeekBucket struct {
 	Week       string `json:"week"`
 	Count      int    `json:"count"`
-	Uncaptured bool   `json:"uncaptured,omitempty"`
+	Uncaptured bool   `json:"uncaptured,omitempty"` //omitemptyscalar:ignore absent means captured; the flag marks only the uncaptured weeks
 }
 
 // ReasonWeekly is one reason's per-week histogram under a key, ordered by

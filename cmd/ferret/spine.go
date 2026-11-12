@@ -99,7 +99,10 @@ func spine(w io.Writer, root, session string, ph *placeholderTable) error {
 		fmt.Fprintf(bw, " decode-errs=%d", c.decodeErrs)
 	}
 	fmt.Fprintln(bw)
-	return bw.Flush()
+	if err := bw.Flush(); err != nil {
+		return fmt.Errorf("flush output: %w", err)
+	}
+	return nil
 }
 
 // emitSpineLine decodes one transcript line and writes its spine rows. Only

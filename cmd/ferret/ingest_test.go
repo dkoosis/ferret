@@ -126,7 +126,7 @@ func TestIngestAbortsOnWriteError(t *testing.T) {
 	if stub.closeCalled {
 		t.Error("mid-write failure must NOT call Close (which would publish the truncated tmp)")
 	}
-	if _, err := os.Stat(filepath.Join(dataDir, "manifest.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dataDir, "manifest.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("no manifest must be sealed over a partial run, stat err=%v", err)
 	}
 }

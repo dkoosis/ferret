@@ -63,7 +63,10 @@ func (s *Sink) Close() error {
 	if s.truncated > 0 {
 		fmt.Fprintf(s.w, "… +%d more (raise -limit / -max-bytes)\n", s.truncated)
 	}
-	return s.w.Flush()
+	if err := s.w.Flush(); err != nil {
+		return fmt.Errorf("flush output: %w", err)
+	}
+	return nil
 }
 
 // JSON emits v as a single JSON document, ignoring row limits
@@ -71,5 +74,8 @@ func (s *Sink) Close() error {
 func JSON(w io.Writer, v any) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", " ")
-	return enc.Encode(v)
+	if err := enc.Encode(v); err != nil {
+		return fmt.Errorf("encode output: %w", err)
+	}
+	return nil
 }

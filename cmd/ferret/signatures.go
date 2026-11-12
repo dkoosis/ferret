@@ -35,7 +35,7 @@ func cmdSignaturesSeed() error {
 		return err
 	}
 	if err := os.MkdirAll(c.data, 0o755); err != nil {
-		return err
+		return fmt.Errorf("create directory: %w", err)
 	}
 	sigPath := CLI.Signatures.Seed.Signatures
 	if sigPath == "" {

@@ -134,7 +134,7 @@ func ingest(dataDir, root, project, snipeUsageGlob string, dryRun bool) error {
 	var w eventSink
 	if !dryRun {
 		if err := os.MkdirAll(dataDir, 0o755); err != nil {
-			return err
+			return fmt.Errorf("create directory: %w", err)
 		}
 		// Serialize concurrent ingests on the same data dir (ferret-0vz): without
 		// this, two ferret processes both triggered by ensureData would write the
@@ -185,9 +185,9 @@ func ingest(dataDir, root, project, snipeUsageGlob string, dryRun bool) error {
 		// Removing it first means any mid-publish failure reads as "no corpus",
 		// which ensureData repairs by re-ingesting.
 		manifestPath := filepath.Join(dataDir, "manifest.json")
-		if rerr := os.Remove(manifestPath); rerr != nil && !os.IsNotExist(rerr) {
+		if rerr := os.Remove(manifestPath); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
 			w.Abort()
-			return rerr
+			return fmt.Errorf("remove file: %w", rerr)
 		}
 		if cerr := w.Close(); cerr != nil {
 			// Close failed: the atomic Writer never sealed events.jsonl, so no

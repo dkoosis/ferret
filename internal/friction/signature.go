@@ -38,7 +38,7 @@ func LoadSignatures(path string) ([]Signature, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open file: %w", err)
 	}
 	defer f.Close()
 
@@ -59,7 +59,7 @@ func LoadSignatures(path string) ([]Signature, error) {
 			if errors.Is(rerr, io.EOF) {
 				return out, nil
 			}
-			return nil, rerr
+			return nil, fmt.Errorf("read signatures: %w", rerr)
 		}
 	}
 }
@@ -160,7 +160,7 @@ func writeSignaturesAtomic(path string, sigs []Signature) error {
 	for _, s := range sigs {
 		b, err := json.Marshal(s)
 		if err != nil {
-			return err
+			return fmt.Errorf("marshal json: %w", err)
 		}
 		buf.Write(b)
 		buf.WriteByte('\n')

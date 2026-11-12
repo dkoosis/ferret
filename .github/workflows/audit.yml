@@ -1,0 +1,50 @@
+name: audit
+
+# The slow gates (race, fuzz, dupe, nilcheck, deadcode, omitempty, vuln), nightly and on
+# demand. repo-standard's ci-audit-schedule rule needs a cron here and a
+# step that runs make audit.
+on:
+  schedule:
+    - cron: '41 7 * * *' # daily; off the hour to dodge GitHub's top-of-hour queue
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: false
+
+      # keyring is a private dkoosis module; same token as check.yml.
+      - name: configure access to private dkoosis modules
+        env:
+          PRIVATE_GO_MODULES_TOKEN: ${{ secrets.PRIVATE_GO_MODULES_TOKEN }}
+        run: |
+          if [ -z "$PRIVATE_GO_MODULES_TOKEN" ]; then
+            echo "::error::PRIVATE_GO_MODULES_TOKEN secret not set — add it in repo Settings → Secrets."
+            exit 1
+          fi
+          echo "GOPRIVATE=github.com/dkoosis/*" >> "$GITHUB_ENV"
+          git config --global url."https://x-access-token:${PRIVATE_GO_MODULES_TOKEN}@github.com/dkoosis/".insteadOf "https://github.com/dkoosis/"
+
+      # dupe runs jscpd through npx.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: install linter (version pinned in .sandbox/project.conf)
+        run: |
+          . ./.sandbox/project.conf
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@"$GOLANGCI_LINT_VERSION"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: audit
+        run: make audit

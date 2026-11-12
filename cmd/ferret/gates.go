@@ -83,7 +83,10 @@ func writeGatesText(w io.Writer, rep gates.Report) error {
 
 	if len(rep.Gates) == 0 {
 		fmt.Fprintln(bw, "gates: no gate checks found in corpus (looked for code-review/plan-review/precommit/QA tool calls)")
-		return bw.Flush()
+		if err := bw.Flush(); err != nil {
+			return fmt.Errorf("flush output: %w", err)
+		}
+		return nil
 	}
 
 	fmt.Fprintf(bw, "gates (%d checks across %d gate(s)):\n", len(rep.Checks), len(rep.Gates))
@@ -109,7 +112,10 @@ func writeGatesText(w io.Writer, rep gates.Report) error {
 		}
 		fmt.Fprintf(bw, "  %-12s %-12s revisions=%d  (%s)\n", lp.Session, lp.Gate, lp.Revisions, status)
 	}
-	return bw.Flush()
+	if err := bw.Flush(); err != nil {
+		return fmt.Errorf("flush output: %w", err)
+	}
+	return nil
 }
 
 // omegaCut is the redundancy threshold for the human verdict: at/above it two

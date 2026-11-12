@@ -45,7 +45,7 @@ func cmdUsage(cmd *UsageCmd) error {
 	path := filepath.Join(c.data, apiusage.Artifact)
 	rep, err := apiusage.Aggregate(path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("%w at %s — this corpus was ingested before the ledger existed; run 'ferret ingest' to capture it", errNoLedger, path)
 		}
 		return err

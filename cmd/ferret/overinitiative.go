@@ -417,7 +417,10 @@ func emitOverInitPrompts(w io.Writer, cands []overInitCandidate) error {
 	if len(cands) == 0 {
 		fmt.Fprintln(bw, "no no-pushback episodes with a mutating action")
 	}
-	return bw.Flush()
+	if err := bw.Flush(); err != nil {
+		return fmt.Errorf("flush output: %w", err)
+	}
+	return nil
 }
 
 // writeOverInitText renders the flagged episodes densely: the actionable subset dk

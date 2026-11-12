@@ -97,7 +97,10 @@ func runDialogue(p sessionRun) error {
 	if p.format == fmtJSON {
 		enc := json.NewEncoder(p.w)
 		enc.SetIndent("", "  ")
-		return enc.Encode(res)
+		if err := enc.Encode(res); err != nil {
+			return fmt.Errorf("encode output: %w", err)
+		}
+		return nil
 	}
 	return writeDialogueText(p.w, res)
 }
@@ -291,5 +294,8 @@ func writeDialogueText(w io.Writer, res dlgResult) error {
 		fmt.Fprintf(bw, " decode-errs=%d", res.DecodeErrs)
 	}
 	fmt.Fprintln(bw)
-	return bw.Flush()
+	if err := bw.Flush(); err != nil {
+		return fmt.Errorf("flush output: %w", err)
+	}
+	return nil
 }

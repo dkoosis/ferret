@@ -112,7 +112,10 @@ func Markdown(w io.Writer, lens, scope string, total int, findings []MDFinding) 
 		fmt.Fprintln(bw)
 		fmt.Fprintf(bw, "_… +%d more findings (raise --limit)._\n", total-len(findings))
 	}
-	return bw.Flush()
+	if err := bw.Flush(); err != nil {
+		return fmt.Errorf("flush output: %w", err)
+	}
+	return nil
 }
 
 // writeMDFinding renders one finding as a scannable bullet plus its collapsible

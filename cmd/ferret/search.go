@@ -382,5 +382,8 @@ func writeSearchText(
 	if total > len(hits) {
 		fmt.Fprintf(bw, "… +%d more hits (raise --limit)\n", total-len(hits))
 	}
-	return bw.Flush()
+	if err := bw.Flush(); err != nil {
+		return fmt.Errorf("flush output: %w", err)
+	}
+	return nil
 }

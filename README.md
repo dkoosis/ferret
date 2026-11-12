@@ -269,7 +269,7 @@ Coarse finds shapes, exact finds culprits. Start at `tool`.
 ```console
 git clone https://github.com/dkoosis/ferret.git
 cd ferret
-make check      # vet + lint + test + build + conform  (the gate)
+make check      # vet + lint + test + build + repo-standard  (the gate)
 make audit      # check + race + fuzz + dupe + nilcheck + vuln
 ```
 

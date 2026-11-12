@@ -2,6 +2,7 @@
 package transcript
 
 import (
+	"fmt"
 	"io/fs"
 	"path/filepath"
 	"strings"
@@ -45,5 +46,8 @@ func Walk(root string) ([]Source, error) {
 		out = append(out, s)
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return out, fmt.Errorf("walk directory: %w", err)
+	}
+	return out, nil
 }

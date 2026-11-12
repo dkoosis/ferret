@@ -122,13 +122,18 @@ func NewWriter(path string) (*Writer, error) {
 	// the atomic rename publishes exactly one run's events. Matches gen-corpus.
 	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create temp file: %w", err)
 	}
 	buf := bufio.NewWriterSize(f, 1<<20)
 	return &Writer{f: f, buf: buf, enc: json.NewEncoder(buf), tmp: f.Name(), path: path}, nil
 }
 
-func (w *Writer) Write(ev *Event) error { return w.enc.Encode(ev) }
+func (w *Writer) Write(ev *Event) error {
+	if err := w.enc.Encode(ev); err != nil {
+		return fmt.Errorf("encode event: %w", err)
+	}
+	return nil
+}
 
 func (w *Writer) Close() error {
 	if w.closed {
@@ -142,7 +147,7 @@ func (w *Writer) Close() error {
 	}
 	if w.tmp != "" {
 		if err := os.Rename(w.tmp, w.path); err != nil {
-			return err
+			return fmt.Errorf("rename file: %w", err)
 		}
 		// fsync the parent dir so the rename itself is crash-durable.
 		return syncDir(filepath.Dir(w.path))
@@ -172,7 +177,10 @@ func (w *Writer) finish() error {
 	if err := w.f.Sync(); err != nil {
 		return errors.Join(err, w.f.Close())
 	}
-	return w.f.Close()
+	if err := w.f.Close(); err != nil {
+		return fmt.Errorf("close events file: %w", err)
+	}
+	return nil
 }
 
 // Read streams events back from the artifact.
@@ -207,7 +215,7 @@ func (w *Writer) finish() error {
 func Read(path string, fn func(*Event) error) error {
 	f, err := os.Open(path)
 	if err != nil {
-		return err
+		return fmt.Errorf("open file: %w", err)
 	}
 	defer f.Close()
 
@@ -277,7 +285,7 @@ func readLine(r *bufio.Reader) (line []byte, ok, delimited bool, err error) {
 		return nil, false, false, nil
 	}
 	if readErr != nil && !errors.Is(readErr, io.EOF) {
-		return nil, false, false, readErr
+		return nil, false, false, fmt.Errorf("read line: %w", readErr)
 	}
 	if len(b) > 0 && b[len(b)-1] == '\n' {
 		return b[:len(b)-1], true, true, nil
@@ -314,30 +322,30 @@ func decodeLine(path string, lineNo int, trimmed []byte, hasMore, delimited bool
 func WriteManifest(path string, m *Manifest) error {
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal json: %w", err)
 	}
 	tmp := path + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		return err
+		return fmt.Errorf("open file: %w", err)
 	}
 	if _, err := f.Write(data); err != nil {
 		_ = f.Close()
 		_ = os.Remove(tmp)
-		return err
+		return fmt.Errorf("write manifest: %w", err)
 	}
 	if err := f.Sync(); err != nil {
 		_ = f.Close()
 		_ = os.Remove(tmp)
-		return err
+		return fmt.Errorf("sync manifest: %w", err)
 	}
 	if err := f.Close(); err != nil {
 		_ = os.Remove(tmp)
-		return err
+		return fmt.Errorf("close manifest: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
-		return err
+		return fmt.Errorf("rename file: %w", err)
 	}
 	// fsync the parent dir so the manifest rename is crash-durable and cannot
 	// diverge from the events.jsonl rename across a power-loss window.

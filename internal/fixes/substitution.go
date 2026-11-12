@@ -75,7 +75,7 @@ func LoadSubs(path string) ([]Substitution, error) {
 		return []Substitution{}, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open file: %w", err)
 	}
 	defer f.Close()
 
@@ -165,7 +165,7 @@ func writeSubs(path string, subs []Substitution) error {
 	for i := range subs {
 		b, err := json.Marshal(subs[i])
 		if err != nil {
-			return err
+			return fmt.Errorf("marshal json: %w", err)
 		}
 		buf = append(buf, b...)
 		buf = append(buf, '\n')

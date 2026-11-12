@@ -1,6 +1,7 @@
 package apiusage
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -176,11 +177,11 @@ func TestAggregate_RanksSessionsByDollars_When_LedgerMixesModels(t *testing.T) {
 }
 
 // TestAggregate_ReportsMissingArtifact_When_LedgerAbsent pins that a corpus
-// ingested before the ledger existed reports itself as such — os.IsNotExist
+// ingested before the ledger existed reports itself as such — errors.Is(err, os.ErrNotExist)
 // must survive, since the CLI turns it into the re-ingest instruction.
 func TestAggregate_ReportsMissingArtifact_When_LedgerAbsent(t *testing.T) {
 	_, err := Aggregate(filepath.Join(t.TempDir(), Artifact))
-	if !os.IsNotExist(err) {
+	if !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("err = %v, want a not-exist error the CLI can recognize", err)
 	}
 }

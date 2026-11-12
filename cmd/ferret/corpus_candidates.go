@@ -257,7 +257,10 @@ func corpusCandidates(w io.Writer, root, format string, top, minSessions int) er
 func writeCorpusJSON(w io.Writer, res corpusResult) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(res)
+	if err := enc.Encode(res); err != nil {
+		return fmt.Errorf("encode output: %w", err)
+	}
+	return nil
 }
 
 // writeCorpusText emits the human/analyst-readable recurrence ranking.
@@ -289,5 +292,8 @@ func writeCorpusText(w io.Writer, res corpusResult) error {
 		fmt.Fprintf(bw, " decode-errs=%d", res.DecodeErrs)
 	}
 	fmt.Fprintln(bw)
-	return bw.Flush()
+	if err := bw.Flush(); err != nil {
+		return fmt.Errorf("flush output: %w", err)
+	}
+	return nil
 }

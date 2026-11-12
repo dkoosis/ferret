@@ -259,7 +259,7 @@ func CallShapeTokens(blk *transcript.Block) []string {
 	var input struct {
 		Command string `json:"command"`
 	}
-	_ = json.Unmarshal(blk.Input, &input)
+	_ = json.Unmarshal(blk.Input, &input) //nolint:errcheck // best-effort; a malformed tool input leaves the command empty
 	segs, _ := shellnorm.Split(input.Command)
 	if len(segs) == 0 {
 		return []string{"sh"}

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 
@@ -24,7 +25,7 @@ func Write(path string, rows []Row) error {
 	enc := json.NewEncoder(&buf)
 	for i := range rows {
 		if err := enc.Encode(&rows[i]); err != nil {
-			return err
+			return fmt.Errorf("encode row: %w", err)
 		}
 	}
 	return durable.WriteTempRename(path, buf.Bytes())
@@ -36,7 +37,7 @@ func Write(path string, rows []Row) error {
 func Read(path string, fn func(*Row) error) error {
 	f, err := os.Open(path)
 	if err != nil {
-		return err
+		return fmt.Errorf("open file: %w", err)
 	}
 	defer f.Close()
 
@@ -56,7 +57,7 @@ func Read(path string, fn func(*Row) error) error {
 		}
 	}
 	if err := sc.Err(); err != nil && !errors.Is(err, io.EOF) {
-		return err
+		return fmt.Errorf("scan ledger: %w", err)
 	}
 	return nil
 }

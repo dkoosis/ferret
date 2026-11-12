@@ -8,6 +8,7 @@ package durable
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -23,12 +24,15 @@ import (
 func SyncDir(dir string) error {
 	d, err := os.Open(dir)
 	if err != nil {
-		return err
+		return fmt.Errorf("open file: %w", err)
 	}
 	if err := d.Sync(); err != nil {
 		return errors.Join(err, d.Close())
 	}
-	return d.Close()
+	if err := d.Close(); err != nil {
+		return fmt.Errorf("close directory: %w", err)
+	}
+	return nil
 }
 
 // WriteTempRename publishes data to path via a per-process unique temp file
@@ -42,11 +46,11 @@ func SyncDir(dir string) error {
 // SyncDir(filepath.Dir(path)).
 func WriteTempRename(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+		return fmt.Errorf("create directory: %w", err)
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
 	if err != nil {
-		return err
+		return fmt.Errorf("create temp file: %w", err)
 	}
 	tmpName := tmp.Name()
 	if _, werr := tmp.Write(data); werr != nil {

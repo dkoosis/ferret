@@ -164,7 +164,7 @@ func decodeFirstObject(resp string, v any) error {
 		if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
 			return fmt.Errorf("%w: %w", ErrTruncatedResponse, err)
 		}
-		return err
+		return fmt.Errorf("decode model JSON: %w", err)
 	}
 	return nil
 }

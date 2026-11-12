@@ -84,7 +84,7 @@ func TestNgramsBadDateIsUsageError(t *testing.T) {
 			t.Errorf("since=%q until=%q: err = %v (%T), want *usageError", tc.since, tc.until, err, err)
 			continue
 		}
-		if tc.since != "2026-10-21" && !strings.Contains(err.Error(), "YYYY-MM-DD") {
+		if err != nil && tc.since != "2026-10-21" && !strings.Contains(err.Error(), "YYYY-MM-DD") {
 			t.Errorf("since=%q until=%q: err %q does not name YYYY-MM-DD", tc.since, tc.until, err)
 		}
 	}
@@ -157,7 +157,7 @@ func TestTokensWindowNamesDateWindow(t *testing.T) {
 	CLI.Tokens.Data, CLI.Tokens.Format, CLI.Tokens.Lens = writeDatedCorpus(t), fmtText, "cmd"
 	CLI.Tokens.Session, CLI.Tokens.Since = "s1", "2026-10-19"
 	err := cmdTokens()
-	if !errors.Is(err, errNoStreamMatch) || !strings.Contains(err.Error(), "in the date window") {
+	if !errors.Is(err, errNoStreamMatch) || err == nil || !strings.Contains(err.Error(), "in the date window") {
 		t.Errorf("err = %v, want errNoStreamMatch naming the date window", err)
 	}
 }

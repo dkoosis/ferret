@@ -149,7 +149,10 @@ func landmarkSession(p sessionRun, dataDir string) error {
 func writeLandmarkSessionJSON(w io.Writer, sp analyst.SessionProgress) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(sp)
+	if err := enc.Encode(sp); err != nil {
+		return fmt.Errorf("encode output: %w", err)
+	}
+	return nil
 }
 
 // writeLandmarkSessionText emits the dense per-task rendering: one block per task
@@ -199,7 +202,10 @@ func writeLandmarkSessionText(w io.Writer, sp analyst.SessionProgress) error {
 	}
 
 	fmt.Fprintf(bw, "--- tasks=%d recognized=%d\n", sp.Total, sp.Recognized)
-	return bw.Flush()
+	if err := bw.Flush(); err != nil {
+		return fmt.Errorf("flush output: %w", err)
+	}
+	return nil
 }
 
 // readLandmarkSpec reads the spec from a file path, or from stdin when the path is
@@ -294,5 +300,8 @@ func writeLandmarkText(w io.Writer, spec landmarkSpec, res score.Progress) error
 			"⚠ missing necessary milestone: a high-weight (uniqueness ≥ %.1f) milestone was never "+
 				"reached — goal likely not reached\n", landmarkHighWeightCap)
 	}
-	return bw.Flush()
+	if err := bw.Flush(); err != nil {
+		return fmt.Errorf("flush output: %w", err)
+	}
+	return nil
 }

@@ -121,7 +121,7 @@ func MineFlagMisfires(events []event.Event) []FlagRow {
 // into calls: consecutive segments sharing a Seq are one Bash call.
 func shellCallStreams(events []event.Event) [][][]int {
 	idx := map[streamKey]int{}
-	var streams [][][]int
+	streams := [][][]int{}
 	lastSeq := map[streamKey]int{}
 	for i := range events {
 		ev := &events[i]
@@ -133,11 +133,11 @@ func shellCallStreams(events []event.Event) [][][]int {
 		if !ok {
 			si = len(streams)
 			idx[k] = si
-			streams = append(streams, nil)
+			streams = append(streams, [][]int{})
 		}
 		calls := streams[si]
 		if len(calls) == 0 || lastSeq[k] != ev.Seq {
-			calls = append(calls, nil)
+			calls = append(calls, []int{})
 		}
 		calls[len(calls)-1] = append(calls[len(calls)-1], i)
 		streams[si] = calls
@@ -530,7 +530,7 @@ func flagValue(words []string, name string) string {
 // shellWords splits a command into words, honoring single and double quotes
 // (quotes removed). Cheap and tolerant: Detail may be cut mid-quote.
 func shellWords(s string) []string {
-	var words []string
+	words := []string{}
 	var cur strings.Builder
 	inWord := false
 	var quote rune

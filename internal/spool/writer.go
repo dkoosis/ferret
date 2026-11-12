@@ -69,7 +69,7 @@ func LoadIDs(dir string) (map[string]struct{}, error) {
 	ids := map[string]struct{}{}
 	matches, err := filepath.Glob(filepath.Join(dir, fileGlob))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("glob files: %w", err)
 	}
 	sort.Strings(matches)
 	for _, m := range matches {
@@ -90,7 +90,7 @@ func collectIDs(path string, ids map[string]struct{}) error {
 		return nil
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("open file: %w", err)
 	}
 	defer f.Close()
 
@@ -156,7 +156,7 @@ func (w *Writer) Append(c candidate.Candidate) (bool, error) {
 		return false, fmt.Errorf("spool: bad emitted_at %q: %w", c.EmittedAt, err)
 	}
 	if err := os.MkdirAll(w.dir, 0o755); err != nil {
-		return false, err
+		return false, fmt.Errorf("create directory: %w", err)
 	}
 	// Serialize concurrent appends so two emit runs can't interleave into one
 	// torn row (fixes-isz pattern). durable.Lock is blocking + crash-safe.

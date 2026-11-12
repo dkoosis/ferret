@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -200,10 +201,10 @@ func TestRunEmit_DryRunWritesNothing(t *testing.T) {
 	if len(cands) == 0 || res.Written == 0 {
 		t.Fatalf("dry-run should derive would-write candidates, got derived=%d written=%d", len(cands), res.Written)
 	}
-	if _, err := os.Stat(spool.Dir(data)); !os.IsNotExist(err) {
+	if _, err := os.Stat(spool.Dir(data)); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("dry-run created a spool dir (err=%v)", err)
 	}
-	if _, err := os.Stat(emitCursorPath(data)); !os.IsNotExist(err) {
+	if _, err := os.Stat(emitCursorPath(data)); !errors.Is(err, os.ErrNotExist) {
 		t.Error("dry-run wrote a cursor")
 	}
 }
