@@ -15,9 +15,8 @@ include .sandbox/lib/Makefile.cross.mk
 .PHONY: help check audit vet lint test race build standard vuln dupe nilcheck deadcode omitempty fuzz install deploy clean corpus
 
 # Tool pins. Each gate runs its tool through `go run` or npx at the version
-# below, so a green gate means the tool ran. repo-standard and omitemptyscalar
-# resolve once github.com/dkoosis/repo-standard is tagged v0.4.1.
-REPO_STANDARD_VER := v0.4.1
+# below, so a green gate means the tool ran. repo-standard is not pinned: the
+# standard gate runs its current main.
 OMITEMPTYSCALAR_VER := v0.4.1
 GOVULNCHECK_VER := v1.9.0
 NILAWAY_VER := v0.0.0-20260918162853-acb8859b9031
@@ -73,11 +72,10 @@ test: ## Run tests with coverage
 race: ## Run tests with race detector (fresh run)
 	go test -race -count=1 -cover ./...
 
-# Fleet gate: repo-standard (the fleet SDLC checker) at a pinned version;
-# bumping the pin is a deliberate PR. It runs last so it grades the tree the
-# rest of the gate passed.
+# Fleet gate: repo-standard (the fleet SDLC checker) at its current main, no
+# version pin. It runs last so it grades the tree the rest of the gate passed.
 standard: ## Run repo-standard (fleet SDLC checker) against this repo
-	go run github.com/dkoosis/repo-standard/cmd/repo-standard@$(REPO_STANDARD_VER)
+	GOPRIVATE=github.com/dkoosis/repo-standard go run github.com/dkoosis/repo-standard/cmd/repo-standard@main
 
 build: ## Compile everything
 	go build ./...
