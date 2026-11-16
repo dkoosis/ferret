@@ -638,7 +638,7 @@ func main() {
 // command-line validation sentinels are usage errors, everything else is a
 // failed run.
 func exitCodeFor(err error) int {
-	if _, ok := errors.AsType[*usageError](err); ok { //nolint:errcheck // AsType returns (value, bool), not an error: the blank is the matched value
+	if _, ok := errors.AsType[*usageError](err); ok {
 		return exitUsage
 	}
 	return exitFailure
