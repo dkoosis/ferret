@@ -16,9 +16,9 @@ include .sandbox/lib/Makefile.cross.mk
 
 # Tool pins. Each gate runs its tool through `go run` or npx at the version
 # below, so a green gate means the tool ran. repo-standard and omitemptyscalar
-# resolve once github.com/dkoosis/repo-standard is tagged v0.4.0.
-REPO_STANDARD_VER := v0.4.0
-OMITEMPTYSCALAR_VER := v0.4.0
+# resolve once github.com/dkoosis/repo-standard is tagged v0.4.1.
+REPO_STANDARD_VER := v0.4.1
+OMITEMPTYSCALAR_VER := v0.4.1
 GOVULNCHECK_VER := v1.9.0
 NILAWAY_VER := v0.0.0-20260918162853-acb8859b9031
 DEADCODE_VER := v0.52.0
